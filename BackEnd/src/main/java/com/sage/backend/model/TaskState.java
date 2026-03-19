@@ -9,6 +9,23 @@ public class TaskState {
     private Integer stateVersion;
     private String userQuery;
     private String pass1ResultJson;
+    private String passbResultJson;
+    private String slotBindingsSummaryJson;
+    private String argsDraftSummaryJson;
+    private String validationSummaryJson;
+    private String inputChainStatus;
+    private String jobId;
+    private String pass2ResultJson;
+    private String resultObjectSummaryJson;
+    private String resultBundleSummaryJson;
+    private String finalExplanationSummaryJson;
+    private String lastFailureSummaryJson;
+    private String waitingContextJson;
+    private String waitingReasonType;
+    private String resumePayloadJson;
+    private Integer resumeAttemptCount;
+    private Integer activeAttemptNo;
+    private OffsetDateTime waitingSince;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
 
@@ -60,6 +77,142 @@ public class TaskState {
         this.pass1ResultJson = pass1ResultJson;
     }
 
+    public String getPassbResultJson() {
+        return passbResultJson;
+    }
+
+    public void setPassbResultJson(String passbResultJson) {
+        this.passbResultJson = passbResultJson;
+    }
+
+    public String getSlotBindingsSummaryJson() {
+        return slotBindingsSummaryJson;
+    }
+
+    public void setSlotBindingsSummaryJson(String slotBindingsSummaryJson) {
+        this.slotBindingsSummaryJson = slotBindingsSummaryJson;
+    }
+
+    public String getArgsDraftSummaryJson() {
+        return argsDraftSummaryJson;
+    }
+
+    public void setArgsDraftSummaryJson(String argsDraftSummaryJson) {
+        this.argsDraftSummaryJson = argsDraftSummaryJson;
+    }
+
+    public String getValidationSummaryJson() {
+        return validationSummaryJson;
+    }
+
+    public void setValidationSummaryJson(String validationSummaryJson) {
+        this.validationSummaryJson = validationSummaryJson;
+    }
+
+    public String getInputChainStatus() {
+        return inputChainStatus;
+    }
+
+    public void setInputChainStatus(String inputChainStatus) {
+        this.inputChainStatus = inputChainStatus;
+    }
+
+    public String getJobId() {
+        return jobId;
+    }
+
+    public void setJobId(String jobId) {
+        this.jobId = jobId;
+    }
+
+    public String getPass2ResultJson() {
+        return pass2ResultJson;
+    }
+
+    public void setPass2ResultJson(String pass2ResultJson) {
+        this.pass2ResultJson = pass2ResultJson;
+    }
+
+    public String getResultObjectSummaryJson() {
+        return resultObjectSummaryJson;
+    }
+
+    public void setResultObjectSummaryJson(String resultObjectSummaryJson) {
+        this.resultObjectSummaryJson = resultObjectSummaryJson;
+    }
+
+    public String getResultBundleSummaryJson() {
+        return resultBundleSummaryJson;
+    }
+
+    public void setResultBundleSummaryJson(String resultBundleSummaryJson) {
+        this.resultBundleSummaryJson = resultBundleSummaryJson;
+    }
+
+    public String getFinalExplanationSummaryJson() {
+        return finalExplanationSummaryJson;
+    }
+
+    public void setFinalExplanationSummaryJson(String finalExplanationSummaryJson) {
+        this.finalExplanationSummaryJson = finalExplanationSummaryJson;
+    }
+
+    public String getLastFailureSummaryJson() {
+        return lastFailureSummaryJson;
+    }
+
+    public void setLastFailureSummaryJson(String lastFailureSummaryJson) {
+        this.lastFailureSummaryJson = lastFailureSummaryJson;
+    }
+
+    public String getWaitingContextJson() {
+        return waitingContextJson;
+    }
+
+    public void setWaitingContextJson(String waitingContextJson) {
+        this.waitingContextJson = waitingContextJson;
+    }
+
+    public String getWaitingReasonType() {
+        return waitingReasonType;
+    }
+
+    public void setWaitingReasonType(String waitingReasonType) {
+        this.waitingReasonType = waitingReasonType;
+    }
+
+    public String getResumePayloadJson() {
+        return resumePayloadJson;
+    }
+
+    public void setResumePayloadJson(String resumePayloadJson) {
+        this.resumePayloadJson = resumePayloadJson;
+    }
+
+    public Integer getResumeAttemptCount() {
+        return resumeAttemptCount;
+    }
+
+    public void setResumeAttemptCount(Integer resumeAttemptCount) {
+        this.resumeAttemptCount = resumeAttemptCount;
+    }
+
+    public Integer getActiveAttemptNo() {
+        return activeAttemptNo;
+    }
+
+    public void setActiveAttemptNo(Integer activeAttemptNo) {
+        this.activeAttemptNo = activeAttemptNo;
+    }
+
+    public OffsetDateTime getWaitingSince() {
+        return waitingSince;
+    }
+
+    public void setWaitingSince(OffsetDateTime waitingSince) {
+        this.waitingSince = waitingSince;
+    }
+
     public OffsetDateTime getCreatedAt() {
         return createdAt;
     }
@@ -76,4 +229,3 @@ public class TaskState {
         this.updatedAt = updatedAt;
     }
 }
-

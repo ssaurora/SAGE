@@ -1,31 +1,25 @@
-# SAGE Week1 主链路 MVP
+# SAGE Week5 MVP (Phase1 Repair Loop)
 
-本仓库按 Week1“立骨架”目标实现最小闭环：
+Week5 goal: deliver the minimal repair loop:
 
-`登录 -> 创建任务 -> 任务落库 -> 状态推进 -> 事件记录 -> Pass1 结构化输出 -> 前端可见`
+`detect gap -> WAITING_USER -> upload/override -> /resume -> re-enter execution chain`
 
-## 目录结构
+## Tech boundaries
 
-- `FrontEnd`：Next.js App Router + TypeScript
-- `BackEnd`：Spring Boot + MyBatis + Flyway + PostgreSQL + JWT
-- `Service/planning-pass1`：FastAPI Pass1 服务（固定 `water_yield_v1`）
+- `FrontEnd`: Next.js App Router + TypeScript
+- `BackEnd`: Spring Boot + MyBatis + Flyway + PostgreSQL + JWT
+- `Service/planning-pass1`: FastAPI + Docker runtime manager
 
-## 默认端口
+## Ports
 
-- FrontEnd: `3000`
+- FrontEnd: `3000` (or `3100`)
 - BackEnd: `8080`
-- Pass1 Service: `8001`
+- Service: `8001`
 - PostgreSQL: `5432`
 
-## 1. 启动 PostgreSQL
+## Local startup
 
-创建数据库：
-
-```sql
-CREATE DATABASE sage;
-```
-
-## 2. 启动 Pass1 服务（必须先启动）
+### 1) Service
 
 ```bash
 cd Service/planning-pass1
@@ -33,35 +27,26 @@ conda run -n sage-cognitive python -m pip install -r requirements.txt
 conda run -n sage-cognitive uvicorn app.main:app --host 0.0.0.0 --port 8001
 ```
 
-### Pass1 测试
+Run tests:
 
 ```bash
 cd Service/planning-pass1
 conda run -n sage-cognitive pytest
 ```
 
-## 3. 启动 BackEnd
-
-先复制并修改环境变量：
-
-```bash
-cd BackEnd
-copy .env.example .env
-```
-
-然后启动：
+### 2) BackEnd
 
 ```bash
 cd BackEnd
 mvn spring-boot:run
 ```
 
-Flyway 会自动建表并写入演示用户：
+Flyway creates demo user:
 
 - username: `demo`
 - password: `demo123`
 
-## 4. 启动 FrontEnd
+### 3) FrontEnd
 
 ```bash
 cd FrontEnd
@@ -69,39 +54,77 @@ npm install
 npm run dev
 ```
 
-访问：`http://localhost:3000/login`
+Open `http://localhost:3000/login`.
 
-## 5. Docker 独立启动 Pass1
+## Week5 official APIs
 
-```bash
-cd Service/planning-pass1
-docker build -t sage-pass1:week1 .
-docker run --rm -p 8001:8001 sage-pass1:week1
-```
-
-## 关键 API
-
-### 认证
+### Auth
 
 - `POST /auth/login`
 - `GET /auth/me`
 
-### 任务
+### Task
 
 - `POST /tasks`
 - `GET /tasks/{taskId}`
 - `GET /tasks/{taskId}/events`
+- `GET /tasks/{taskId}/stream`
+- `GET /tasks/{taskId}/result`
+- `POST /tasks/{taskId}/cancel`
+- `POST /tasks/{taskId}/attachments` (multipart)
+- `POST /tasks/{taskId}/resume`
 
-### 规划
+### Service
 
-- `POST /planning/pass1`（由 BackEnd 调用 Service）
+- `POST /planning/pass1`
+- `POST /cognition/passb`
+- `POST /validate/primitive`
+- `POST /planning/pass2`
+- `POST /jobs`
+- `GET /jobs/{jobId}`
+- `POST /jobs/{jobId}/cancel`
 
-## Week1 联合验收检查清单
+## Deprecated debug aliases (not for acceptance)
 
-- [x] 用户可登录系统
-- [x] 前端可创建任务
-- [x] 后端生成并落库 `task_id`
-- [x] 状态与事件可展示
-- [x] Pass1 返回 `selected_template` / `logical_input_roles` / `slot_schema_view` / `graph_skeleton`
-- [x] Python 镜像可独立启动
-- [x] 正式链路不依赖口头模板约定
+- `GET /result?task_id=...`
+- `POST /cancel?task_id=...`
+
+## Environment
+
+Backend new env vars:
+
+- `SAGE_UPLOAD_ROOT` (default `BackEnd/runtime/uploads`)
+- `SAGE_REPAIR_LLM_ENABLED` (default `true`)
+- `SAGE_REPAIR_LLM_API_KEY` (optional; empty uses fallback template)
+- `SAGE_REPAIR_LLM_MODEL` (default `gpt-4o-mini`)
+- `SAGE_REPAIR_LLM_TIMEOUT_MS` (default `3000`)
+
+## Service Docker
+
+```bash
+cd Service/planning-pass1
+docker build -t sage-pass1:week5 .
+docker run --rm -p 8001:8001 sage-pass1:week5
+```
+
+## One-click Week5 E2E
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\week5-e2e.ps1
+```
+
+Keep infra running for manual checks:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\week5-e2e.ps1 -KeepRunning
+```
+
+The Week5 script verifies:
+
+1. task enters `WAITING_USER`
+2. `waiting_context` exists and blocks resume initially
+3. attachment upload triggers `waiting_context` refresh
+4. `/resume` works with idempotency key
+5. task re-enters execution and reaches terminal state
+6. repair events exist (`WAITING_USER_ENTERED`, `ATTACHMENT_UPLOADED`, `RESUME_REQUESTED`, `RESUME_ACCEPTED`)
+

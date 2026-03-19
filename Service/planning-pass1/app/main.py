@@ -1,31 +1,35 @@
 from __future__ import annotations
 
-import os
-from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
-from app.planner import build_pass1_response
-from app.schemas import PlanningPass1Request, PlanningPass1Response
+from app.planner import (
+    build_pass1_response,
+    build_pass2_response,
+    build_passb_response,
+    build_primitive_validation_response,
+)
+from app.runtime import JobRuntimeManager
+from app.schemas import (
+    CancelJobRequest,
+    CancelJobResponse,
+    CognitionPassBRequest,
+    CognitionPassBResponse,
+    CreateJobRequest,
+    CreateJobResponse,
+    JobStatusResponse,
+    PlanningPass1Request,
+    PlanningPass1Response,
+    PlanningPass2Request,
+    PlanningPass2Response,
+    PrimitiveValidationRequest,
+    PrimitiveValidationResponse,
+)
+from app.workspace import ensure_workspace_directories
 
 
-DEFAULT_WORKSPACE_ROOT = Path("/workspace")
-WORKSPACE_SUBDIRS = ("input", "output", "logs")
-
-
-def resolve_workspace_root() -> Path:
-    workspace_root = os.getenv("WORKSPACE_ROOT")
-    if workspace_root:
-        return Path(workspace_root)
-    return DEFAULT_WORKSPACE_ROOT
-
-
-def ensure_workspace_directories() -> None:
-    root = resolve_workspace_root()
-    root.mkdir(parents=True, exist_ok=True)
-    for subdir in WORKSPACE_SUBDIRS:
-        (root / subdir).mkdir(parents=True, exist_ok=True)
+runtime_manager = JobRuntimeManager()
 
 
 @asynccontextmanager
@@ -34,7 +38,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="SAGE Planning Pass1 Service", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="SAGE Planning & Execution Service", version="0.3.0", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -45,3 +49,43 @@ def health() -> dict[str, str]:
 @app.post("/planning/pass1", response_model=PlanningPass1Response)
 def planning_pass1(payload: PlanningPass1Request) -> PlanningPass1Response:
     return build_pass1_response(payload)
+
+
+@app.post("/cognition/passb", response_model=CognitionPassBResponse)
+def cognition_passb(payload: CognitionPassBRequest) -> CognitionPassBResponse:
+    return build_passb_response(payload)
+
+
+@app.post("/validate/primitive", response_model=PrimitiveValidationResponse)
+def validate_primitive(payload: PrimitiveValidationRequest) -> PrimitiveValidationResponse:
+    return build_primitive_validation_response(payload)
+
+
+@app.post("/planning/pass2", response_model=PlanningPass2Response)
+def planning_pass2(payload: PlanningPass2Request) -> PlanningPass2Response:
+    return build_pass2_response(payload)
+
+
+@app.post("/jobs", response_model=CreateJobResponse)
+def create_job(payload: CreateJobRequest) -> CreateJobResponse:
+    return runtime_manager.create_job(payload)
+
+
+@app.get("/jobs/{job_id}", response_model=JobStatusResponse)
+def get_job(job_id: str) -> JobStatusResponse:
+    try:
+        return runtime_manager.get_job(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="job not found") from exc
+
+
+@app.post("/jobs/{job_id}/cancel", response_model=CancelJobResponse)
+def cancel_job(job_id: str, payload: CancelJobRequest) -> CancelJobResponse:
+    try:
+        response = runtime_manager.cancel_job(job_id, payload.reason)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="job not found") from exc
+
+    if not response.accepted:
+        raise HTTPException(status_code=409, detail="job already terminal")
+    return response

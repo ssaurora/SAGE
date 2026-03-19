@@ -6,6 +6,9 @@ public class CreateTaskResponse {
     @JsonProperty("task_id")
     private String taskId;
 
+    @JsonProperty("job_id")
+    private String jobId;
+
     private String state;
 
     @JsonProperty("state_version")
@@ -27,6 +30,14 @@ public class CreateTaskResponse {
         this.state = state;
     }
 
+    public String getJobId() {
+        return jobId;
+    }
+
+    public void setJobId(String jobId) {
+        this.jobId = jobId;
+    }
+
     public Integer getStateVersion() {
         return stateVersion;
     }
@@ -35,4 +46,3 @@ public class CreateTaskResponse {
         this.stateVersion = stateVersion;
     }
 }
-

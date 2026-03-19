@@ -1,3 +1,5 @@
+import { fetchEventSource } from "@microsoft/fetch-event-source";
+
 import { getAccessToken } from "@/lib/auth";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080";
@@ -8,7 +10,10 @@ type ApiOptions = RequestInit & {
 
 async function apiFetch<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const headers = new Headers(options.headers ?? {});
-  headers.set("Content-Type", "application/json");
+  const isFormData = options.body instanceof FormData;
+  if (!isFormData && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
 
   if (options.withAuth) {
     const token = getAccessToken();
@@ -61,6 +66,7 @@ export function getMe(): Promise<MeResponse> {
 
 export type CreateTaskResponse = {
   task_id: string;
+  job_id?: string | null;
   state: string;
   state_version: number;
 };
@@ -81,6 +87,64 @@ export type TaskDetailResponse = {
     selected_template: string;
     logical_input_roles_count: number;
     slot_schema_view_version: string;
+  };
+  slot_bindings_summary?: {
+    bound_slots_count: number;
+    bound_role_names: string[];
+  };
+  args_draft_summary?: {
+    param_count: number;
+    param_keys: string[];
+  };
+  validation_summary?: {
+    is_valid: boolean;
+    missing_roles: string[];
+    missing_params: string[];
+    error_code: string;
+    invalid_bindings?: string[];
+  };
+  input_chain_status?: "COMPLETE" | "INCOMPLETE" | string;
+  job?: {
+    job_id: string;
+    job_state: string;
+    last_heartbeat_at?: string;
+  };
+  pass2_summary?: Record<string, unknown>;
+  result_object_summary?: {
+    result_id?: string;
+    summary?: string;
+    artifact_count?: number;
+    created_at?: string;
+  };
+  result_bundle_summary?: {
+    result_id?: string;
+    summary?: string;
+    main_output_count?: number;
+    created_at?: string;
+  };
+  final_explanation_summary?: {
+    title?: string;
+    highlight_count?: number;
+    generated_at?: string;
+  };
+  last_failure_summary?: {
+    failure_code?: string;
+    failure_message?: string;
+    created_at?: string;
+  };
+  waiting_context?: {
+    waiting_reason_type?: string;
+    missing_slots?: { slot_name: string; expected_type: string; required: boolean }[];
+    invalid_bindings?: string[];
+    required_user_actions?: { action_type: string; key: string; label: string; required: boolean }[];
+    resume_hint?: string;
+    can_resume?: boolean;
+  };
+  repair_proposal?: {
+    user_facing_reason?: string;
+    resume_hint?: string;
+    action_explanations?: { key: string; message: string }[];
+    notes?: string[];
   };
 };
 
@@ -108,3 +172,171 @@ export function getTaskEvents(taskId: string): Promise<TaskEventsResponse> {
   });
 }
 
+export type TaskStreamResponse = {
+  task: TaskDetailResponse;
+  events: TaskEventsResponse;
+};
+
+export type TaskResultResponse = {
+  task_id: string;
+  job_id?: string;
+  task_state: string;
+  job_state?: string;
+  result_bundle?: {
+    result_id?: string;
+    task_id?: string;
+    job_id?: string;
+    summary?: string;
+    metrics?: Record<string, unknown>;
+    main_outputs?: string[];
+    artifacts?: string[];
+    created_at?: string;
+  };
+  final_explanation?: {
+    title?: string;
+    highlights?: string[];
+    narrative?: string;
+    generated_at?: string;
+  };
+  failure_summary?: {
+    failure_code?: string;
+    failure_message?: string;
+    created_at?: string;
+  };
+  docker_runtime_evidence?: {
+    container_name?: string;
+    image?: string;
+    workspace_output_path?: string;
+    result_file_exists?: boolean;
+  };
+};
+
+export function getTaskResult(taskId: string): Promise<TaskResultResponse> {
+  return apiFetch<TaskResultResponse>(`/tasks/${taskId}/result`, {
+    method: "GET",
+    withAuth: true,
+  });
+}
+
+export type CancelTaskResponse = {
+  task_id: string;
+  job_id?: string;
+  state: string;
+  job_state?: string;
+  accepted: boolean;
+};
+
+export function cancelTask(taskId: string): Promise<CancelTaskResponse> {
+  return apiFetch<CancelTaskResponse>(`/tasks/${taskId}/cancel`, {
+    method: "POST",
+    withAuth: true,
+    body: JSON.stringify({}),
+  });
+}
+
+export type UploadAttachmentResponse = {
+  attachment_id: string;
+  task_id: string;
+  logical_slot?: string;
+  stored_path: string;
+  size_bytes: number;
+  created_at: string;
+  assignment_status: "ASSIGNED" | "UNASSIGNED" | string;
+};
+
+export async function uploadAttachment(taskId: string, file: File, logicalSlot?: string): Promise<UploadAttachmentResponse> {
+  const token = getAccessToken();
+  if (!token) {
+    throw new Error("未登录，请先登录");
+  }
+  const formData = new FormData();
+  formData.append("file", file);
+  if (logicalSlot && logicalSlot.trim()) {
+    formData.append("logical_slot", logicalSlot.trim());
+  }
+
+  const response = await fetch(`${API_BASE_URL}/tasks/${taskId}/attachments`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `上传失败: ${response.status}`);
+  }
+  return (await response.json()) as UploadAttachmentResponse;
+}
+
+export type ResumeTaskResponse = {
+  task_id: string;
+  state: string;
+  state_version: number;
+  resume_accepted: boolean;
+  resume_attempt: number;
+};
+
+export function resumeTask(
+  taskId: string,
+  payload: {
+    resume_request_id: string;
+    attachment_ids?: string[];
+    slot_overrides?: Record<string, unknown>;
+    args_overrides?: Record<string, unknown>;
+    user_note?: string;
+  },
+): Promise<ResumeTaskResponse> {
+  return apiFetch<ResumeTaskResponse>(`/tasks/${taskId}/resume`, {
+    method: "POST",
+    withAuth: true,
+    body: JSON.stringify(payload),
+  });
+}
+
+export function subscribeTaskStream(
+  taskId: string,
+  handlers: {
+    onUpdate: (payload: TaskStreamResponse) => void;
+    onError: (error: Error) => void;
+  },
+): () => void {
+  const token = getAccessToken();
+  if (!token) {
+    throw new Error("未登录，请先登录");
+  }
+
+  const abortController = new AbortController();
+  void fetchEventSource(`${API_BASE_URL}/tasks/${taskId}/stream`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "text/event-stream",
+    },
+    signal: abortController.signal,
+    openWhenHidden: true,
+    onmessage(event) {
+      if (event.event !== "task_update") {
+        return;
+      }
+      try {
+        handlers.onUpdate(JSON.parse(event.data) as TaskStreamResponse);
+      } catch (error) {
+        handlers.onError(error instanceof Error ? error : new Error("SSE data parse failed"));
+      }
+    },
+    onerror(error) {
+      handlers.onError(error instanceof Error ? error : new Error("SSE connection failed"));
+      throw error;
+    },
+  }).catch((error) => {
+    if (!abortController.signal.aborted) {
+      handlers.onError(error instanceof Error ? error : new Error("SSE subscribe failed"));
+    }
+  });
+
+  return () => {
+    abortController.abort();
+  };
+}

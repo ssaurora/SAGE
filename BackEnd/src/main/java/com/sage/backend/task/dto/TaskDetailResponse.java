@@ -14,6 +14,41 @@ public class TaskDetailResponse {
     @JsonProperty("pass1_summary")
     private Pass1Summary pass1Summary;
 
+    @JsonProperty("slot_bindings_summary")
+    private Object slotBindingsSummary;
+
+    @JsonProperty("args_draft_summary")
+    private Object argsDraftSummary;
+
+    @JsonProperty("validation_summary")
+    private Object validationSummary;
+
+    @JsonProperty("input_chain_status")
+    private String inputChainStatus;
+
+    private JobSummary job;
+
+    @JsonProperty("pass2_summary")
+    private Object pass2Summary;
+
+    @JsonProperty("result_object_summary")
+    private Object resultObjectSummary;
+
+    @JsonProperty("result_bundle_summary")
+    private Object resultBundleSummary;
+
+    @JsonProperty("final_explanation_summary")
+    private Object finalExplanationSummary;
+
+    @JsonProperty("last_failure_summary")
+    private Object lastFailureSummary;
+
+    @JsonProperty("waiting_context")
+    private Object waitingContext;
+
+    @JsonProperty("repair_proposal")
+    private Object repairProposal;
+
     public String getTaskId() {
         return taskId;
     }
@@ -44,6 +79,137 @@ public class TaskDetailResponse {
 
     public void setPass1Summary(Pass1Summary pass1Summary) {
         this.pass1Summary = pass1Summary;
+    }
+
+    public Object getSlotBindingsSummary() {
+        return slotBindingsSummary;
+    }
+
+    public void setSlotBindingsSummary(Object slotBindingsSummary) {
+        this.slotBindingsSummary = slotBindingsSummary;
+    }
+
+    public Object getArgsDraftSummary() {
+        return argsDraftSummary;
+    }
+
+    public void setArgsDraftSummary(Object argsDraftSummary) {
+        this.argsDraftSummary = argsDraftSummary;
+    }
+
+    public Object getValidationSummary() {
+        return validationSummary;
+    }
+
+    public void setValidationSummary(Object validationSummary) {
+        this.validationSummary = validationSummary;
+    }
+
+    public String getInputChainStatus() {
+        return inputChainStatus;
+    }
+
+    public void setInputChainStatus(String inputChainStatus) {
+        this.inputChainStatus = inputChainStatus;
+    }
+
+    public JobSummary getJob() {
+        return job;
+    }
+
+    public void setJob(JobSummary job) {
+        this.job = job;
+    }
+
+    public Object getPass2Summary() {
+        return pass2Summary;
+    }
+
+    public void setPass2Summary(Object pass2Summary) {
+        this.pass2Summary = pass2Summary;
+    }
+
+    public Object getResultObjectSummary() {
+        return resultObjectSummary;
+    }
+
+    public void setResultObjectSummary(Object resultObjectSummary) {
+        this.resultObjectSummary = resultObjectSummary;
+    }
+
+    public Object getResultBundleSummary() {
+        return resultBundleSummary;
+    }
+
+    public void setResultBundleSummary(Object resultBundleSummary) {
+        this.resultBundleSummary = resultBundleSummary;
+    }
+
+    public Object getFinalExplanationSummary() {
+        return finalExplanationSummary;
+    }
+
+    public void setFinalExplanationSummary(Object finalExplanationSummary) {
+        this.finalExplanationSummary = finalExplanationSummary;
+    }
+
+    public Object getLastFailureSummary() {
+        return lastFailureSummary;
+    }
+
+    public void setLastFailureSummary(Object lastFailureSummary) {
+        this.lastFailureSummary = lastFailureSummary;
+    }
+
+    public Object getWaitingContext() {
+        return waitingContext;
+    }
+
+    public void setWaitingContext(Object waitingContext) {
+        this.waitingContext = waitingContext;
+    }
+
+    public Object getRepairProposal() {
+        return repairProposal;
+    }
+
+    public void setRepairProposal(Object repairProposal) {
+        this.repairProposal = repairProposal;
+    }
+
+    public static class JobSummary {
+        @JsonProperty("job_id")
+        private String jobId;
+
+        @JsonProperty("job_state")
+        private String jobState;
+
+        @JsonProperty("last_heartbeat_at")
+        private String lastHeartbeatAt;
+
+        public String getJobId() {
+            return jobId;
+        }
+
+        public void setJobId(String jobId) {
+            this.jobId = jobId;
+        }
+
+        public String getJobState() {
+            return jobState;
+        }
+
+        public void setJobState(String jobState) {
+            this.jobState = jobState;
+        }
+
+        public String getLastHeartbeatAt() {
+            return lastHeartbeatAt;
+        }
+
+        public void setLastHeartbeatAt(String lastHeartbeatAt) {
+            this.lastHeartbeatAt = lastHeartbeatAt;
+        }
     }
 
     public static class Pass1Summary {
@@ -81,4 +247,3 @@ public class TaskDetailResponse {
         }
     }
 }
-

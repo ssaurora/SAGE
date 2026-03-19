@@ -12,8 +12,8 @@ import java.util.List;
 public interface EventLogMapper {
 
     @Insert("""
-            INSERT INTO event_log(task_id, event_type, from_state, to_state, state_version, event_payload_json)
-            VALUES(#{taskId}, #{eventType}, #{fromState}, #{toState}, #{stateVersion}, #{eventPayloadJson})
+            INSERT INTO event_log(task_id, event_type, from_state, to_state, state_version, event_payload_json, created_at)
+            VALUES(#{taskId}, #{eventType}, #{fromState}, #{toState}, #{stateVersion}, #{eventPayloadJson}, clock_timestamp())
             """)
     int insert(EventLog eventLog);
 
@@ -25,4 +25,3 @@ public interface EventLogMapper {
             """)
     List<EventLog> findByTaskId(@Param("taskId") String taskId);
 }
-
