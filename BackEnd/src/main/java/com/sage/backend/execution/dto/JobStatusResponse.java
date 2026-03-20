@@ -36,6 +36,12 @@ public class JobStatusResponse {
     @JsonProperty("docker_runtime_evidence")
     private JsonNode dockerRuntimeEvidence;
 
+    @JsonProperty("workspace_summary")
+    private JsonNode workspaceSummary;
+
+    @JsonProperty("artifact_catalog")
+    private JsonNode artifactCatalog;
+
     @JsonProperty("error_object")
     private JsonNode errorObject;
 
@@ -102,6 +108,22 @@ public class JobStatusResponse {
 
     public void setErrorObject(JsonNode errorObject) {
         this.errorObject = errorObject;
+    }
+
+    public JsonNode getWorkspaceSummary() {
+        return workspaceSummary;
+    }
+
+    public void setWorkspaceSummary(JsonNode workspaceSummary) {
+        this.workspaceSummary = workspaceSummary;
+    }
+
+    public JsonNode getArtifactCatalog() {
+        return artifactCatalog;
+    }
+
+    public void setArtifactCatalog(JsonNode artifactCatalog) {
+        this.artifactCatalog = artifactCatalog;
     }
 
     public JsonNode getResultBundle() {

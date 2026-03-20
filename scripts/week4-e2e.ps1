@@ -53,6 +53,30 @@ function Assert-True {
     }
 }
 
+function Get-JsonPropValue {
+    param(
+        $Object,
+        [string[]]$Names
+    )
+
+    if ($null -eq $Object) {
+        return $null
+    }
+
+    foreach ($name in $Names) {
+        if ($Object -is [System.Collections.IDictionary] -and $Object.Contains($name)) {
+            return $Object[$name]
+        }
+
+        $property = $Object.PSObject.Properties[$name]
+        if ($null -ne $property) {
+            return $property.Value
+        }
+    }
+
+    return $null
+}
+
 function Remove-ContainerIfExists {
     param([string]$Name)
     $containerId = (docker ps -aq --filter "name=^$Name$")
@@ -76,6 +100,30 @@ function Stop-ProcessListeningOnPort {
             }
         }
     }
+}
+
+function Start-BackendProcess {
+    param(
+        [string]$BackendDir,
+        [string]$StdOutLog,
+        [string]$StdErrLog
+    )
+
+    $mavenCommand = Get-Command mvn.cmd -ErrorAction SilentlyContinue
+    if ($null -eq $mavenCommand) {
+        $mavenCommand = Get-Command mvn -ErrorAction SilentlyContinue
+    }
+
+    if ($null -eq $mavenCommand) {
+        throw "Maven command not found in PATH."
+    }
+
+    return Start-Process -FilePath $mavenCommand.Source `
+        -ArgumentList "spring-boot:run", "-q", "-Dspring-boot.run.fork=false" `
+        -WorkingDirectory $BackendDir `
+        -RedirectStandardOutput $StdOutLog `
+        -RedirectStandardError $StdErrLog `
+        -PassThru
 }
 
 $envVars = @("DB_URL", "DB_USERNAME", "DB_PASSWORD", "PASS1_BASE_URL", "SERVER_PORT", "JWT_SECRET")
@@ -142,12 +190,7 @@ try {
     $env:SERVER_PORT = "${backendPort}"
     $env:JWT_SECRET = "sage-week4-e2e-secret-key-123456789"
 
-    $backendProcess = Start-Process -FilePath "mvn" `
-        -ArgumentList "spring-boot:run", "-q" `
-        -WorkingDirectory $backendDir `
-        -RedirectStandardOutput $backendLogOut `
-        -RedirectStandardError $backendLogErr `
-        -PassThru
+    $backendProcess = Start-BackendProcess -BackendDir $backendDir -StdOutLog $backendLogOut -StdErrLog $backendLogErr
 
     Wait-Until -TimeoutSeconds 150 -ErrorMessage "BackEnd startup timed out" -Probe {
         if ($backendProcess.HasExited) {
@@ -178,11 +221,22 @@ try {
         Start-Sleep -Seconds 2
     }
     Assert-True ($task1Final.state -eq "SUCCEEDED") "task1 should reach SUCCEEDED"
+    Assert-True ($null -ne (Get-JsonPropValue -Object $task1Final -Names @("goal_parse_summary", "goalParseSummary"))) "goal_parse_summary should exist"
+    Assert-True ($null -ne (Get-JsonPropValue -Object $task1Final -Names @("skill_route_summary", "skillRouteSummary"))) "skill_route_summary should exist"
+
+    $task1Manifest = Invoke-RestMethod -Method Get -Uri "http://localhost:${backendPort}/tasks/$task1Id/manifest" -Headers $headers
+    Assert-True (-not [string]::IsNullOrWhiteSpace([string](Get-JsonPropValue -Object $task1Manifest -Names @("manifest_id", "manifestId")))) "manifest_id should exist"
+    Assert-True ([int](Get-JsonPropValue -Object $task1Manifest -Names @("manifest_version", "manifestVersion")) -ge 1) "manifest_version should be >= 1"
+    Assert-True ($null -ne (Get-JsonPropValue -Object $task1Manifest -Names @("goal_parse", "goalParse"))) "manifest goal_parse should exist"
+    Assert-True ($null -ne (Get-JsonPropValue -Object $task1Manifest -Names @("skill_route", "skillRoute"))) "manifest skill_route should exist"
+    Assert-True ($null -ne (Get-JsonPropValue -Object $task1Manifest -Names @("runtime_assertions", "runtimeAssertions"))) "runtime_assertions should exist"
 
     $task1Result = Invoke-RestMethod -Method Get -Uri "http://localhost:${backendPort}/tasks/$task1Id/result" -Headers $headers
     Assert-True ($null -ne $task1Result.result_bundle) "result_bundle should exist for success"
     Assert-True ($null -ne $task1Result.final_explanation) "final_explanation should exist for success"
     Assert-True ($null -ne $task1Result.docker_runtime_evidence) "docker_runtime_evidence should exist"
+    Assert-True ($null -ne $task1Result.result_bundle.metrics.water_yield_index) "water_yield_index should exist"
+    Assert-True ($null -ne $task1Result.result_bundle.metrics.climate_balance) "climate_balance should exist"
     Assert-True (-not [string]::IsNullOrWhiteSpace([string]$task1Result.docker_runtime_evidence.image)) "docker evidence image should exist"
 
     Write-Output "[6/8] Cancel path verification..."
@@ -250,6 +304,8 @@ finally {
     if ($null -ne $backendProcess -and -not $backendProcess.HasExited) {
         Stop-Process -Id $backendProcess.Id -Force
     }
+
+    Stop-ProcessListeningOnPort -Port $backendPort
 
     if (-not $KeepRunning) {
         Remove-ContainerIfExists -Name $serviceContainer

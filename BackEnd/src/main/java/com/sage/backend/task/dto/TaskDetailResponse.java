@@ -14,6 +14,12 @@ public class TaskDetailResponse {
     @JsonProperty("pass1_summary")
     private Pass1Summary pass1Summary;
 
+    @JsonProperty("goal_parse_summary")
+    private Object goalParseSummary;
+
+    @JsonProperty("skill_route_summary")
+    private Object skillRouteSummary;
+
     @JsonProperty("slot_bindings_summary")
     private Object slotBindingsSummary;
 
@@ -49,6 +55,12 @@ public class TaskDetailResponse {
     @JsonProperty("repair_proposal")
     private Object repairProposal;
 
+    @JsonProperty("latest_result_bundle_id")
+    private String latestResultBundleId;
+
+    @JsonProperty("latest_workspace_id")
+    private String latestWorkspaceId;
+
     public String getTaskId() {
         return taskId;
     }
@@ -79,6 +91,22 @@ public class TaskDetailResponse {
 
     public void setPass1Summary(Pass1Summary pass1Summary) {
         this.pass1Summary = pass1Summary;
+    }
+
+    public Object getGoalParseSummary() {
+        return goalParseSummary;
+    }
+
+    public void setGoalParseSummary(Object goalParseSummary) {
+        this.goalParseSummary = goalParseSummary;
+    }
+
+    public Object getSkillRouteSummary() {
+        return skillRouteSummary;
+    }
+
+    public void setSkillRouteSummary(Object skillRouteSummary) {
+        this.skillRouteSummary = skillRouteSummary;
     }
 
     public Object getSlotBindingsSummary() {
@@ -175,6 +203,22 @@ public class TaskDetailResponse {
 
     public void setRepairProposal(Object repairProposal) {
         this.repairProposal = repairProposal;
+    }
+
+    public String getLatestResultBundleId() {
+        return latestResultBundleId;
+    }
+
+    public void setLatestResultBundleId(String latestResultBundleId) {
+        this.latestResultBundleId = latestResultBundleId;
+    }
+
+    public String getLatestWorkspaceId() {
+        return latestWorkspaceId;
+    }
+
+    public void setLatestWorkspaceId(String latestWorkspaceId) {
+        this.latestWorkspaceId = latestWorkspaceId;
     }
 
     public static class JobSummary {

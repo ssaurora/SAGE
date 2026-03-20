@@ -1,0 +1,106 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: ${SAGE_POSTGRES_CONTAINER:-sage-postgres}
+    environment:
+      POSTGRES_DB: ${SAGE_POSTGRES_DB:-sage}
+      POSTGRES_USER: ${SAGE_POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${SAGE_POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${SAGE_POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${SAGE_POSTGRES_USER:-postgres} -d ${SAGE_POSTGRES_DB:-sage}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: ${SAGE_REDIS_CONTAINER:-sage-redis}
+    ports:
+      - "${SAGE_REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  service:
+    build:
+      context: ./Service/planning-pass1
+    image: ${SAGE_SERVICE_IMAGE:-sage-pass1:compose}
+    container_name: ${SAGE_SERVICE_CONTAINER:-sage-service}
+    environment:
+      REDIS_ENABLED: "true"
+      REDIS_URL: redis://redis:6379/0
+      WORKSPACE_ROOT: /workspace
+      SAGE_REPAIR_PROVIDER: ${SAGE_REPAIR_PROVIDER:-deterministic}
+      SAGE_GLM_API_BASE: ${SAGE_GLM_API_BASE:-https://open.bigmodel.cn/api/paas/v4}
+      SAGE_GLM_CHAT_PATH: ${SAGE_GLM_CHAT_PATH:-/chat/completions}
+      SAGE_GLM_MODEL: ${SAGE_GLM_MODEL:-glm-4.7}
+      SAGE_GLM_API_KEY: ${SAGE_GLM_API_KEY:-}
+      SAGE_GLM_AUTH_MODE: ${SAGE_GLM_AUTH_MODE:-jwt}
+      SAGE_GLM_TIMEOUT_MS: ${SAGE_GLM_TIMEOUT_MS:-8000}
+      SAGE_GLM_TEMPERATURE: ${SAGE_GLM_TEMPERATURE:-0.2}
+      SAGE_GLM_MAX_TOKENS: ${SAGE_GLM_MAX_TOKENS:-700}
+    ports:
+      - "${SAGE_SERVICE_PORT:-8001}:8001"
+    volumes:
+      - service-workspace:/workspace
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health').read()"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  backend:
+    build:
+      context: ./BackEnd
+    image: ${SAGE_BACKEND_IMAGE:-sage-backend:compose}
+    container_name: ${SAGE_BACKEND_CONTAINER:-sage-backend}
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/${SAGE_POSTGRES_DB:-sage}
+      DB_USERNAME: ${SAGE_POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${SAGE_POSTGRES_PASSWORD:-postgres}
+      PASS1_BASE_URL: http://service:8001
+      SERVER_PORT: 8080
+      JWT_SECRET: ${SAGE_JWT_SECRET:-sage-compose-local-secret-key-123456789}
+      SAGE_UPLOAD_ROOT: /runtime/uploads
+    ports:
+      - "${SAGE_BACKEND_PORT:-8080}:8080"
+    volumes:
+      - backend-runtime:/runtime
+    depends_on:
+      postgres:
+        condition: service_healthy
+      service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/actuator/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  frontend:
+    build:
+      context: ./FrontEnd
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:${SAGE_BACKEND_PORT:-8080}
+    image: ${SAGE_FRONTEND_IMAGE:-sage-frontend:compose}
+    container_name: ${SAGE_FRONTEND_CONTAINER:-sage-frontend}
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:${SAGE_BACKEND_PORT:-8080}
+      PORT: 3000
+    ports:
+      - "${SAGE_FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  service-workspace:
+  backend-runtime:

@@ -83,11 +83,15 @@ export type TaskDetailResponse = {
   task_id: string;
   state: string;
   state_version: number;
+  latest_result_bundle_id?: string;
+  latest_workspace_id?: string;
   pass1_summary?: {
     selected_template: string;
     logical_input_roles_count: number;
     slot_schema_view_version: string;
   };
+  goal_parse_summary?: Record<string, unknown>;
+  skill_route_summary?: Record<string, unknown>;
   slot_bindings_summary?: {
     bound_slots_count: number;
     bound_role_names: string[];
@@ -172,6 +176,30 @@ export function getTaskEvents(taskId: string): Promise<TaskEventsResponse> {
   });
 }
 
+export type TaskManifestResponse = {
+  manifest_id: string;
+  task_id: string;
+  attempt_no: number;
+  manifest_version: number;
+  goal_parse?: Record<string, unknown>;
+  skill_route?: Record<string, unknown>;
+  logical_input_roles?: unknown;
+  slot_schema_view?: Record<string, unknown>;
+  slot_bindings?: unknown;
+  args_draft?: Record<string, unknown>;
+  validation_summary?: Record<string, unknown>;
+  execution_graph?: Record<string, unknown>;
+  runtime_assertions?: Record<string, unknown>;
+  created_at?: string;
+};
+
+export function getTaskManifest(taskId: string): Promise<TaskManifestResponse> {
+  return apiFetch<TaskManifestResponse>(`/tasks/${taskId}/manifest`, {
+    method: "GET",
+    withAuth: true,
+  });
+}
+
 export type TaskStreamResponse = {
   task: TaskDetailResponse;
   events: TaskEventsResponse;
@@ -190,6 +218,10 @@ export type TaskResultResponse = {
     metrics?: Record<string, unknown>;
     main_outputs?: string[];
     artifacts?: string[];
+    primary_outputs?: ArtifactMeta[];
+    intermediate_outputs?: ArtifactMeta[];
+    audit_artifacts?: ArtifactMeta[];
+    derived_outputs?: ArtifactMeta[];
     created_at?: string;
   };
   final_explanation?: {
@@ -209,10 +241,89 @@ export type TaskResultResponse = {
     workspace_output_path?: string;
     result_file_exists?: boolean;
   };
+  workspace_summary?: WorkspaceSummary;
+  artifact_catalog?: ArtifactCatalog;
+};
+
+export type ArtifactMeta = {
+  artifact_id?: string;
+  artifact_role?: string;
+  logical_name?: string;
+  relative_path?: string;
+  absolute_path?: string;
+  content_type?: string;
+  size_bytes?: number;
+  sha256?: string;
+  created_at?: string;
+};
+
+export type ArtifactCatalog = {
+  primary_outputs?: ArtifactMeta[];
+  intermediate_outputs?: ArtifactMeta[];
+  audit_artifacts?: ArtifactMeta[];
+  derived_outputs?: ArtifactMeta[];
+  logs?: ArtifactMeta[];
+};
+
+export type WorkspaceSummary = {
+  workspace_id?: string;
+  workspace_output_path?: string;
+  archive_path?: string;
+  cleanup_completed?: boolean;
+  archive_completed?: boolean;
 };
 
 export function getTaskResult(taskId: string): Promise<TaskResultResponse> {
   return apiFetch<TaskResultResponse>(`/tasks/${taskId}/result`, {
+    method: "GET",
+    withAuth: true,
+  });
+}
+
+export type TaskRunsResponse = {
+  task_id: string;
+  items: {
+    attempt_no: number;
+    job_id?: string;
+    workspace_id?: string;
+    job_state?: string;
+    workspace_state?: string;
+    result_bundle_id?: string;
+    created_at?: string;
+    finished_at?: string;
+  }[];
+};
+
+export function getTaskRuns(taskId: string): Promise<TaskRunsResponse> {
+  return apiFetch<TaskRunsResponse>(`/tasks/${taskId}/runs`, {
+    method: "GET",
+    withAuth: true,
+  });
+}
+
+export type TaskArtifactsResponse = {
+  task_id: string;
+  items: {
+    attempt_no: number;
+    workspace?: {
+      workspace_id?: string;
+      workspace_state?: string;
+      runtime_profile?: string;
+      container_name?: string;
+      host_workspace_path?: string;
+      archive_path?: string;
+      created_at?: string;
+      started_at?: string;
+      finished_at?: string;
+      cleaned_at?: string;
+      archived_at?: string;
+    };
+    artifacts?: ArtifactCatalog;
+  }[];
+};
+
+export function getTaskArtifacts(taskId: string): Promise<TaskArtifactsResponse> {
+  return apiFetch<TaskArtifactsResponse>(`/tasks/${taskId}/artifacts`, {
     method: "GET",
     withAuth: true,
   });

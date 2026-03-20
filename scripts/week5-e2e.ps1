@@ -145,6 +145,74 @@ function Invoke-NativeCaptureWithRetry {
     return $last
 }
 
+function Invoke-WebJson {
+    param(
+        [string]$Method,
+        [string]$Uri,
+        [string[]]$Headers,
+        [string]$Body = ""
+    )
+
+    $headerMap = @{}
+    foreach ($header in $Headers) {
+        $parts = $header -split ":", 2
+        if ($parts.Length -eq 2) {
+            $headerMap[$parts[0].Trim()] = $parts[1].Trim()
+        }
+    }
+
+    $contentType = $null
+    if ($headerMap.ContainsKey("Content-Type")) {
+        $contentType = $headerMap["Content-Type"]
+        $headerMap.Remove("Content-Type") | Out-Null
+    }
+
+    $invokeArgs = @{
+        Method = $Method
+        Uri = $Uri
+        Headers = $headerMap
+    }
+    if ($null -ne $contentType) {
+        $invokeArgs["ContentType"] = $contentType
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Body)) {
+        $invokeArgs["Body"] = $Body
+    }
+
+    try {
+        $response = Invoke-WebRequest @invokeArgs
+        $statusCode = [int]$response.StatusCode
+        $content = [string]$response.Content
+    }
+    catch {
+        $exception = $_.Exception
+        $response = $exception.Response
+        if ($null -eq $response) {
+            throw
+        }
+
+        $statusCode = [int]$response.StatusCode
+        $reader = New-Object System.IO.StreamReader($response.GetResponseStream())
+        try {
+            $content = $reader.ReadToEnd()
+        }
+        finally {
+            $reader.Dispose()
+        }
+    }
+
+    $json = $null
+    if (-not [string]::IsNullOrWhiteSpace($content)) {
+        try { $json = $content | ConvertFrom-Json } catch {}
+    }
+
+    return [pscustomobject]@{
+        StatusCode = $statusCode
+        Body = $content
+        Json = $json
+    }
+}
+
 function Start-LocalServiceFallback {
     param(
         [string]$ServiceDir,
@@ -176,6 +244,30 @@ function Start-LocalServiceFallback {
     }
 
     throw "Local fallback failed: neither 'conda' nor 'python' command is available in PATH."
+}
+
+function Start-BackendProcess {
+    param(
+        [string]$BackendDir,
+        [string]$StdOutLog,
+        [string]$StdErrLog
+    )
+
+    $mavenCommand = Get-Command mvn.cmd -ErrorAction SilentlyContinue
+    if ($null -eq $mavenCommand) {
+        $mavenCommand = Get-Command mvn -ErrorAction SilentlyContinue
+    }
+
+    if ($null -eq $mavenCommand) {
+        throw "Maven command not found in PATH."
+    }
+
+    return Start-Process -FilePath $mavenCommand.Source `
+        -ArgumentList "spring-boot:run", "-q", "-Dspring-boot.run.fork=false" `
+        -WorkingDirectory $BackendDir `
+        -RedirectStandardOutput $StdOutLog `
+        -RedirectStandardError $StdErrLog `
+        -PassThru
 }
 
 function Get-WaitingContext {
@@ -235,8 +327,7 @@ function Get-CanResumeValue {
 }
 
 $envVars = @(
-    "DB_URL", "DB_USERNAME", "DB_PASSWORD", "PASS1_BASE_URL", "SERVER_PORT", "JWT_SECRET",
-    "SAGE_REPAIR_LLM_ENABLED", "SAGE_REPAIR_LLM_API_KEY"
+    "DB_URL", "DB_USERNAME", "DB_PASSWORD", "PASS1_BASE_URL", "SERVER_PORT", "JWT_SECRET"
 )
 $envBackup = @{}
 foreach ($name in $envVars) {
@@ -347,15 +438,7 @@ try {
     $env:PASS1_BASE_URL = $serviceBaseUrl
     $env:SERVER_PORT = "${backendPort}"
     $env:JWT_SECRET = "sage-week5-e2e-secret-key-123456789"
-    $env:SAGE_REPAIR_LLM_ENABLED = "false"
-    $env:SAGE_REPAIR_LLM_API_KEY = ""
-
-    $backendProcess = Start-Process -FilePath "mvn" `
-        -ArgumentList "spring-boot:run", "-q" `
-        -WorkingDirectory $backendDir `
-        -RedirectStandardOutput $backendLogOut `
-        -RedirectStandardError $backendLogErr `
-        -PassThru
+    $backendProcess = Start-BackendProcess -BackendDir $backendDir -StdOutLog $backendLogOut -StdErrLog $backendLogErr
 
     Wait-Until -TimeoutSeconds 150 -ErrorMessage "BackEnd startup timed out" -Probe {
         if ($backendProcess.HasExited) {
@@ -392,6 +475,18 @@ try {
     }
     $canResumeBeforeUpload = Get-CanResumeValue -WaitingContext $waitingContext
     Assert-True ($canResumeBeforeUpload -eq $false) "can_resume should be false before upload"
+
+    Write-Output "[5.5/9] Resume should be rejected while can_resume is false"
+    $preUploadResumeRequestId = [guid]::NewGuid().ToString()
+    $preUploadResumeBody = @{
+        resume_request_id = $preUploadResumeRequestId
+        user_note = "attempt resume before upload"
+    } | ConvertTo-Json
+    $preUploadResume = Invoke-WebJson -Method Post -Uri "http://localhost:${backendPort}/tasks/$taskId/resume" -Headers @(
+        "Authorization: Bearer $($loginResponse.access_token)",
+        "Content-Type: application/json"
+    ) -Body $preUploadResumeBody
+    Assert-True ($preUploadResume.StatusCode -eq 409) "resume before upload should return 409"
 
     Write-Output "[6/9] Upload required attachment and verify waiting_context refresh"
     Set-Content -Path $uploadTempFile -Value "fake precipitation raster" -Encoding UTF8
@@ -445,6 +540,7 @@ try {
     $eventTypes = @($events.items | ForEach-Object { $_.event_type })
     Assert-True ($eventTypes -contains "WAITING_USER_ENTERED") "event WAITING_USER_ENTERED should exist"
     Assert-True ($eventTypes -contains "ATTACHMENT_UPLOADED") "event ATTACHMENT_UPLOADED should exist"
+    Assert-True ($eventTypes -contains "RESUME_REJECTED") "event RESUME_REJECTED should exist"
     Assert-True ($eventTypes -contains "RESUME_REQUESTED") "event RESUME_REQUESTED should exist"
     Assert-True ($eventTypes -contains "RESUME_ACCEPTED") "event RESUME_ACCEPTED should exist"
 
@@ -475,6 +571,8 @@ finally {
     if ($null -ne $backendProcess -and -not $backendProcess.HasExited) {
         Stop-Process -Id $backendProcess.Id -Force
     }
+
+    Stop-ProcessListeningOnPort -Port $backendPort
 
     if ($null -ne $serviceProcess -and -not $serviceProcess.HasExited) {
         Stop-Process -Id $serviceProcess.Id -Force

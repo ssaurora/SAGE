@@ -7,6 +7,21 @@ public class CreateJobRequest {
     @JsonProperty("task_id")
     private String taskId;
 
+    @JsonProperty("workspace_id")
+    private String workspaceId;
+
+    @JsonProperty("attempt_no")
+    private Integer attemptNo;
+
+    @JsonProperty("capability_key")
+    private String capabilityKey;
+
+    @JsonProperty("provider_key")
+    private String providerKey;
+
+    @JsonProperty("runtime_profile")
+    private String runtimeProfile;
+
     @JsonProperty("materialized_execution_graph")
     private JsonNode materializedExecutionGraph;
 
@@ -36,5 +51,44 @@ public class CreateJobRequest {
     public void setArgsDraft(JsonNode argsDraft) {
         this.argsDraft = argsDraft;
     }
-}
 
+    public String getWorkspaceId() {
+        return workspaceId;
+    }
+
+    public void setWorkspaceId(String workspaceId) {
+        this.workspaceId = workspaceId;
+    }
+
+    public Integer getAttemptNo() {
+        return attemptNo;
+    }
+
+    public void setAttemptNo(Integer attemptNo) {
+        this.attemptNo = attemptNo;
+    }
+
+    public String getCapabilityKey() {
+        return capabilityKey;
+    }
+
+    public void setCapabilityKey(String capabilityKey) {
+        this.capabilityKey = capabilityKey;
+    }
+
+    public String getProviderKey() {
+        return providerKey;
+    }
+
+    public void setProviderKey(String providerKey) {
+        this.providerKey = providerKey;
+    }
+
+    public String getRuntimeProfile() {
+        return runtimeProfile;
+    }
+
+    public void setRuntimeProfile(String runtimeProfile) {
+        this.runtimeProfile = runtimeProfile;
+    }
+}

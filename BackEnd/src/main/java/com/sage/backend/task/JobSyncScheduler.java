@@ -12,9 +12,8 @@ public class JobSyncScheduler {
         this.taskService = taskService;
     }
 
-    @Scheduled(fixedDelayString = "${sage.job-sync.fixed-delay-ms:2000}")
+    @Scheduled(initialDelayString = "${sage.job-sync.initial-delay-ms:5000}", fixedDelayString = "${sage.job-sync.fixed-delay-ms:2000}")
     public void syncJobs() {
         taskService.syncActiveJobs();
     }
 }
-

@@ -33,8 +33,3 @@ sage:
     fixed-delay-ms: ${JOB_SYNC_FIXED_DELAY_MS:2000}
   upload:
     root: ${SAGE_UPLOAD_ROOT:BackEnd/runtime/uploads}
-  repair-llm:
-    enabled: ${SAGE_REPAIR_LLM_ENABLED:true}
-    api-key: ${SAGE_REPAIR_LLM_API_KEY:}
-    model: ${SAGE_REPAIR_LLM_MODEL:gpt-4o-mini}
-    timeout-ms: ${SAGE_REPAIR_LLM_TIMEOUT_MS:3000}

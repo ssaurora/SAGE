@@ -108,6 +108,25 @@ class PlanningPass2Response(BaseModel):
     planning_summary: dict[str, str | int | bool]
 
 
+class RepairProposalRequest(BaseModel):
+    waiting_context: dict[str, object] = Field(default_factory=dict)
+    validation_summary: dict[str, object] = Field(default_factory=dict)
+    failure_summary: dict[str, object] = Field(default_factory=dict)
+    user_note: str = ""
+
+
+class RepairActionExplanation(BaseModel):
+    key: str
+    message: str
+
+
+class RepairProposalResponse(BaseModel):
+    user_facing_reason: str
+    resume_hint: str
+    action_explanations: list[RepairActionExplanation] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
 class JobState(str, Enum):
     ACCEPTED = "ACCEPTED"
     RUNNING = "RUNNING"
@@ -118,8 +137,39 @@ class JobState(str, Enum):
 
 class CreateJobRequest(BaseModel):
     task_id: str = Field(min_length=1)
+    workspace_id: str = Field(min_length=1)
+    attempt_no: int = Field(ge=1)
+    capability_key: str = Field(min_length=1)
+    provider_key: str = Field(min_length=1)
+    runtime_profile: str = Field(min_length=1)
     materialized_execution_graph: MaterializedExecutionGraph
     args_draft: dict[str, str | int | float | bool]
+
+
+class ArtifactMeta(BaseModel):
+    artifact_id: str
+    artifact_role: str
+    logical_name: str
+    relative_path: str
+    content_type: str | None = None
+    size_bytes: int | None = None
+    sha256: str | None = None
+
+
+class ArtifactCatalog(BaseModel):
+    primary_outputs: list[ArtifactMeta] = Field(default_factory=list)
+    intermediate_outputs: list[ArtifactMeta] = Field(default_factory=list)
+    audit_artifacts: list[ArtifactMeta] = Field(default_factory=list)
+    derived_outputs: list[ArtifactMeta] = Field(default_factory=list)
+    logs: list[ArtifactMeta] = Field(default_factory=list)
+
+
+class WorkspaceSummary(BaseModel):
+    workspace_id: str
+    workspace_output_path: str
+    archive_path: str | None = None
+    cleanup_completed: bool
+    archive_completed: bool
 
 
 class ResultBundle(BaseModel):
@@ -130,6 +180,10 @@ class ResultBundle(BaseModel):
     metrics: dict[str, str | int | float | bool]
     main_outputs: list[str]
     artifacts: list[str]
+    primary_outputs: list[str] = Field(default_factory=list)
+    intermediate_outputs: list[str] = Field(default_factory=list)
+    audit_artifacts: list[str] = Field(default_factory=list)
+    derived_outputs: list[str] = Field(default_factory=list)
     created_at: datetime
 
 
@@ -200,4 +254,6 @@ class JobStatusResponse(BaseModel):
     final_explanation: FinalExplanation | None
     failure_summary: FailureSummary | None
     docker_runtime_evidence: DockerRuntimeEvidence | None
+    workspace_summary: WorkspaceSummary | None = None
+    artifact_catalog: ArtifactCatalog | None = None
     error_object: ErrorObject | None

@@ -15,11 +15,13 @@ import com.sage.backend.execution.dto.CancelJobResponse;
 import com.sage.backend.execution.dto.CreateJobRequest;
 import com.sage.backend.execution.dto.CreateJobResponse;
 import com.sage.backend.execution.dto.JobStatusResponse;
+import com.sage.backend.mapper.AnalysisManifestMapper;
 import com.sage.backend.mapper.JobRecordMapper;
 import com.sage.backend.mapper.RepairRecordMapper;
 import com.sage.backend.mapper.TaskAttachmentMapper;
 import com.sage.backend.mapper.TaskAttemptMapper;
 import com.sage.backend.mapper.TaskStateMapper;
+import com.sage.backend.model.AnalysisManifest;
 import com.sage.backend.model.EventLog;
 import com.sage.backend.model.EventType;
 import com.sage.backend.model.InputChainStatus;
@@ -42,8 +44,11 @@ import com.sage.backend.task.dto.CreateTaskResponse;
 import com.sage.backend.task.dto.ResumeTaskRequest;
 import com.sage.backend.task.dto.ResumeTaskResponse;
 import com.sage.backend.task.dto.TaskDetailResponse;
+import com.sage.backend.task.dto.TaskArtifactsResponse;
 import com.sage.backend.task.dto.TaskEventsResponse;
+import com.sage.backend.task.dto.TaskManifestResponse;
 import com.sage.backend.task.dto.TaskResultResponse;
+import com.sage.backend.task.dto.TaskRunsResponse;
 import com.sage.backend.task.dto.TaskStreamResponse;
 import com.sage.backend.task.dto.UploadAttachmentResponse;
 import com.sage.backend.validationgate.ValidationClient;
@@ -59,6 +64,8 @@ import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -70,6 +77,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -88,8 +96,10 @@ import static org.springframework.http.HttpStatus.BAD_REQUEST;
 @Service
 public class TaskService {
     private static final String CANCEL_REASON_USER_REQUESTED = "USER_REQUESTED";
+    private static final Logger LOGGER = LoggerFactory.getLogger(TaskService.class);
 
     private final TaskStateMapper taskStateMapper;
+    private final AnalysisManifestMapper analysisManifestMapper;
     private final JobRecordMapper jobRecordMapper;
     private final TaskAttachmentMapper taskAttachmentMapper;
     private final RepairRecordMapper repairRecordMapper;
@@ -103,12 +113,16 @@ public class TaskService {
     private final JobRuntimeClient jobRuntimeClient;
     private final RepairDispatcherService repairDispatcherService;
     private final RepairProposalService repairProposalService;
+    private final GoalRouteService goalRouteService;
+    private final RegistryService registryService;
+    private final WorkspaceTraceService workspaceTraceService;
     private final ObjectMapper objectMapper;
     private final Path uploadRoot;
     private final ExecutorService streamExecutor = Executors.newCachedThreadPool();
 
     public TaskService(
             TaskStateMapper taskStateMapper,
+            AnalysisManifestMapper analysisManifestMapper,
             JobRecordMapper jobRecordMapper,
             TaskAttachmentMapper taskAttachmentMapper,
             RepairRecordMapper repairRecordMapper,
@@ -122,10 +136,14 @@ public class TaskService {
             JobRuntimeClient jobRuntimeClient,
             RepairDispatcherService repairDispatcherService,
             RepairProposalService repairProposalService,
+            GoalRouteService goalRouteService,
+            RegistryService registryService,
+            WorkspaceTraceService workspaceTraceService,
             ObjectMapper objectMapper,
             @Value("${sage.upload.root:BackEnd/runtime/uploads}") String uploadRoot
     ) {
         this.taskStateMapper = taskStateMapper;
+        this.analysisManifestMapper = analysisManifestMapper;
         this.jobRecordMapper = jobRecordMapper;
         this.taskAttachmentMapper = taskAttachmentMapper;
         this.repairRecordMapper = repairRecordMapper;
@@ -139,6 +157,9 @@ public class TaskService {
         this.jobRuntimeClient = jobRuntimeClient;
         this.repairDispatcherService = repairDispatcherService;
         this.repairProposalService = repairProposalService;
+        this.goalRouteService = goalRouteService;
+        this.registryService = registryService;
+        this.workspaceTraceService = workspaceTraceService;
         this.objectMapper = objectMapper;
         this.uploadRoot = Path.of(uploadRoot).toAbsolutePath().normalize();
     }
@@ -174,6 +195,13 @@ public class TaskService {
             appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.COGNIZING.name(), currentVersion + 1, null);
             currentVersion += 1;
             currentState = TaskStatus.COGNIZING;
+
+            GoalRouteService.GoalRouteDecision goalRouteDecision = goalRouteService.derive(request.getUserQuery());
+            String goalParseJson = writeJson(goalRouteDecision.goalParse());
+            String skillRouteJson = writeJson(goalRouteDecision.skillRoute());
+            taskStateMapper.updateGoalAndRoute(taskId, goalParseJson, skillRouteJson);
+            appendEvent(taskId, EventType.GOAL_PARSED.name(), null, null, currentVersion, goalParseJson);
+            appendEvent(taskId, EventType.SKILL_ROUTED.name(), null, null, currentVersion, skillRouteJson);
 
             appendEvent(taskId, EventType.PLANNING_PASS1_STARTED.name(), null, null, currentVersion, null);
             Pass1Response pass1Response = runPass1(taskId, request.getUserQuery(), currentVersion);
@@ -273,18 +301,40 @@ public class TaskService {
             appendEvent(taskId, EventType.PLANNING_PASS2_COMPLETED.name(), null, null, currentVersion,
                     objectMapper.writeValueAsString(Map.of("node_count", pass2Response.getMaterializedExecutionGraph() != null && pass2Response.getMaterializedExecutionGraph().path("nodes").isArray() ? pass2Response.getMaterializedExecutionGraph().path("nodes").size() : 0)));
 
-            CreateJobResponse createJobResponse = submitJob(taskId, pass2Response.getMaterializedExecutionGraph(), passBNode.path("args_draft"));
+            freezeAnalysisManifest(taskId, request.getUserQuery(), taskState.getActiveAttemptNo() == null ? 1 : taskState.getActiveAttemptNo(),
+                    pass1Node, passBNode, validationNode, pass2Response.getMaterializedExecutionGraph(), pass2Response.getRuntimeAssertions());
+
+            int attemptNo = taskState.getActiveAttemptNo() == null ? 1 : taskState.getActiveAttemptNo();
+            RegistryService.ProviderResolution providerResolution = registryService.resolve(
+                    objectMapper.readTree(goalParseJson),
+                    objectMapper.readTree(skillRouteJson),
+                    pass1Node
+            );
+            String workspaceId = generateWorkspaceId();
+            CreateJobResponse createJobResponse = submitJob(
+                    taskId,
+                    pass2Response.getMaterializedExecutionGraph(),
+                    passBNode.path("args_draft"),
+                    workspaceId,
+                    attemptNo,
+                    providerResolution
+            );
             JobRecord jobRecord = new JobRecord();
             jobRecord.setJobId(createJobResponse.getJobId());
             jobRecord.setTaskId(taskId);
-            jobRecord.setAttemptNo(taskState.getActiveAttemptNo() == null ? 1 : taskState.getActiveAttemptNo());
+            jobRecord.setAttemptNo(attemptNo);
             jobRecord.setJobState(createJobResponse.getJobState());
             jobRecord.setExecutionGraphJson(writeJson(pass2Response.getMaterializedExecutionGraph()));
             jobRecord.setRuntimeAssertionsJson(writeJson(pass2Response.getRuntimeAssertions()));
             jobRecord.setPlanningPass2SummaryJson(writeJson(pass2Response.getPlanningSummary()));
+            jobRecord.setWorkspaceId(workspaceId);
+            jobRecord.setProviderKey(providerResolution.providerKey());
+            jobRecord.setCapabilityKey(providerResolution.capabilityKey());
+            jobRecord.setRuntimeProfile(providerResolution.runtimeProfile());
             jobRecord.setAcceptedAt(createJobResponse.getAcceptedAt());
             jobRecord.setLastHeartbeatAt(createJobResponse.getAcceptedAt());
             ensureInserted(jobRecordMapper.insert(jobRecord));
+            workspaceTraceService.createWorkspaceRecord(workspaceId, taskId, createJobResponse.getJobId(), attemptNo, providerResolution.runtimeProfile());
             taskAttemptMapper.updateSnapshotAndJob(taskId, jobRecord.getAttemptNo(), createJobResponse.getJobId(),
                     writeJson(Map.of("state", TaskStatus.QUEUED.name(), "job_id", createJobResponse.getJobId())), null);
 
@@ -305,6 +355,7 @@ public class TaskService {
             response.setStateVersion(currentVersion);
             return response;
         } catch (Exception exception) {
+            LOGGER.error("Task create pipeline failed for task {}", taskId, exception);
             handlePipelineFailure(taskId, traceId, exception, currentVersion, currentState);
             throw new ResponseStatusException(BAD_GATEWAY, "Task pipeline failed", exception);
         }
@@ -316,6 +367,8 @@ public class TaskService {
         response.setTaskId(taskState.getTaskId());
         response.setState(taskState.getCurrentState());
         response.setStateVersion(taskState.getStateVersion());
+        response.setGoalParseSummary(readJsonObject(taskState.getGoalParseJson()));
+        response.setSkillRouteSummary(readJsonObject(taskState.getSkillRouteJson()));
         response.setPass1Summary(buildPass1Summary(taskState.getPass1ResultJson()));
         response.setSlotBindingsSummary(readJsonObject(taskState.getSlotBindingsSummaryJson()));
         response.setArgsDraftSummary(readJsonObject(taskState.getArgsDraftSummaryJson()));
@@ -327,6 +380,8 @@ public class TaskService {
         response.setFinalExplanationSummary(readJsonObject(taskState.getFinalExplanationSummaryJson()));
         response.setLastFailureSummary(readJsonObject(taskState.getLastFailureSummaryJson()));
         response.setWaitingContext(readJsonObject(taskState.getWaitingContextJson()));
+        response.setLatestResultBundleId(taskState.getLatestResultBundleId());
+        response.setLatestWorkspaceId(taskState.getLatestWorkspaceId());
 
         int attemptNo = taskState.getActiveAttemptNo() == null ? 1 : taskState.getActiveAttemptNo();
         RepairRecord latestRepair = repairRecordMapper.findLatestByTaskIdAndAttemptNo(taskId, attemptNo);
@@ -352,14 +407,127 @@ public class TaskService {
         TaskResultResponse response = new TaskResultResponse();
         response.setTaskId(taskId);
         response.setTaskState(taskState.getCurrentState());
+        response.setFailureSummary(readJsonObject(taskState.getLastFailureSummaryJson()));
         if (jobRecord != null) {
             response.setJobId(jobRecord.getJobId());
             response.setJobState(jobRecord.getJobState());
             response.setResultBundle(readJsonObject(jobRecord.getResultBundleJson()));
             response.setFinalExplanation(readJsonObject(jobRecord.getFinalExplanationJson()));
-            response.setFailureSummary(readJsonObject(jobRecord.getFailureSummaryJson()));
+            Object jobFailureSummary = readJsonObject(jobRecord.getFailureSummaryJson());
+            if (jobFailureSummary != null) {
+                response.setFailureSummary(jobFailureSummary);
+            }
             response.setDockerRuntimeEvidence(readJsonObject(jobRecord.getDockerRuntimeEvidenceJson()));
+            response.setWorkspaceSummary(readJsonObject(jobRecord.getWorkspaceSummaryJson()));
+            response.setArtifactCatalog(readJsonObject(jobRecord.getArtifactCatalogJson()));
         }
+        return response;
+    }
+
+    public TaskRunsResponse getTaskRuns(String taskId, Long userId) {
+        getOwnedTask(taskId, userId);
+        TaskRunsResponse response = new TaskRunsResponse();
+        response.setTaskId(taskId);
+        Map<Integer, com.sage.backend.model.WorkspaceRegistry> workspacesByAttempt = new LinkedHashMap<>();
+        for (com.sage.backend.model.WorkspaceRegistry workspace : workspaceTraceService.findRuns(taskId)) {
+            workspacesByAttempt.put(workspace.getAttemptNo(), workspace);
+        }
+
+        for (TaskAttempt attempt : taskAttemptMapper.findByTaskId(taskId)) {
+            TaskRunsResponse.RunItem item = new TaskRunsResponse.RunItem();
+            item.setAttemptNo(attempt.getAttemptNo());
+            item.setJobId(attempt.getJobId());
+            item.setCreatedAt(toIsoString(attempt.getCreatedAt()));
+            item.setFinishedAt(toIsoString(attempt.getFinishedAt()));
+
+            com.sage.backend.model.WorkspaceRegistry workspace = workspacesByAttempt.get(attempt.getAttemptNo());
+            if (workspace != null) {
+                item.setWorkspaceId(workspace.getWorkspaceId());
+                item.setWorkspaceState(workspace.getWorkspaceState());
+            }
+
+            JobRecord jobRecord = attempt.getJobId() == null ? null : jobRecordMapper.findByJobId(attempt.getJobId());
+            if (jobRecord != null) {
+                item.setJobState(jobRecord.getJobState());
+                JsonNode resultBundle = readJsonNode(jobRecord.getResultBundleJson());
+                if (resultBundle != null) {
+                    item.setResultBundleId(resultBundle.path("result_id").asText(null));
+                }
+            }
+            response.getItems().add(item);
+        }
+        return response;
+    }
+
+    public TaskArtifactsResponse getTaskArtifacts(String taskId, Long userId) {
+        getOwnedTask(taskId, userId);
+        TaskArtifactsResponse response = new TaskArtifactsResponse();
+        response.setTaskId(taskId);
+
+        Map<Integer, com.sage.backend.model.WorkspaceRegistry> workspacesByAttempt = new LinkedHashMap<>();
+        for (com.sage.backend.model.WorkspaceRegistry workspace : workspaceTraceService.findRuns(taskId)) {
+            workspacesByAttempt.put(workspace.getAttemptNo(), workspace);
+        }
+
+        Map<Integer, TaskArtifactsResponse.AttemptArtifacts> attempts = new LinkedHashMap<>();
+        for (Map.Entry<Integer, com.sage.backend.model.WorkspaceRegistry> entry : workspacesByAttempt.entrySet()) {
+            attempts.put(entry.getKey(), buildAttemptArtifacts(entry.getKey(), entry.getValue()));
+        }
+
+        for (com.sage.backend.model.ArtifactIndexRecord artifact : workspaceTraceService.findArtifacts(taskId)) {
+            TaskArtifactsResponse.AttemptArtifacts attempt = attempts.computeIfAbsent(
+                    artifact.getAttemptNo(),
+                    key -> buildAttemptArtifacts(key, workspacesByAttempt.get(key))
+            );
+            @SuppressWarnings("unchecked")
+            Map<String, List<Object>> buckets = (Map<String, List<Object>>) attempt.getArtifacts();
+            List<Object> target = buckets.computeIfAbsent(mapArtifactRoleBucket(artifact.getArtifactRole()), key -> new ArrayList<>());
+            Map<String, Object> artifactView = new LinkedHashMap<>();
+            artifactView.put("artifact_id", artifact.getArtifactId());
+            artifactView.put("artifact_role", artifact.getArtifactRole());
+            artifactView.put("logical_name", artifact.getLogicalName());
+            artifactView.put("relative_path", artifact.getRelativePath());
+            artifactView.put("absolute_path", artifact.getAbsolutePath());
+            artifactView.put("content_type", artifact.getContentType());
+            artifactView.put("size_bytes", artifact.getSizeBytes());
+            artifactView.put("sha256", artifact.getSha256());
+            artifactView.put("created_at", toIsoString(artifact.getCreatedAt()));
+            target.add(artifactView);
+        }
+
+        response.getItems().addAll(attempts.values());
+        return response;
+    }
+
+    public TaskManifestResponse getTaskManifest(String taskId, Long userId) {
+        TaskState taskState = getOwnedTask(taskId, userId);
+        AnalysisManifest manifest = null;
+        if (taskState.getActiveManifestId() != null && !taskState.getActiveManifestId().isBlank()) {
+            manifest = analysisManifestMapper.findByManifestId(taskState.getActiveManifestId());
+        }
+        if (manifest == null) {
+            int attemptNo = taskState.getActiveAttemptNo() == null ? 1 : taskState.getActiveAttemptNo();
+            manifest = analysisManifestMapper.findLatestByTaskIdAndAttemptNo(taskId, attemptNo);
+        }
+        if (manifest == null) {
+            throw new ResponseStatusException(NOT_FOUND, "Analysis manifest not available yet");
+        }
+
+        TaskManifestResponse response = new TaskManifestResponse();
+        response.setManifestId(manifest.getManifestId());
+        response.setTaskId(manifest.getTaskId());
+        response.setAttemptNo(manifest.getAttemptNo());
+        response.setManifestVersion(manifest.getManifestVersion());
+        response.setGoalParse(readJsonObject(manifest.getGoalParseJson()));
+        response.setSkillRoute(readJsonObject(manifest.getSkillRouteJson()));
+        response.setLogicalInputRoles(readJsonObject(manifest.getLogicalInputRolesJson()));
+        response.setSlotSchemaView(readJsonObject(manifest.getSlotSchemaViewJson()));
+        response.setSlotBindings(readJsonObject(manifest.getSlotBindingsJson()));
+        response.setArgsDraft(readJsonObject(manifest.getArgsDraftJson()));
+        response.setValidationSummary(readJsonObject(manifest.getValidationSummaryJson()));
+        response.setExecutionGraph(readJsonObject(manifest.getExecutionGraphJson()));
+        response.setRuntimeAssertions(readJsonObject(manifest.getRuntimeAssertionsJson()));
+        response.setCreatedAt(manifest.getCreatedAt() == null ? null : manifest.getCreatedAt().toString());
         return response;
     }
 
@@ -400,6 +568,7 @@ public class TaskService {
         } catch (ResponseStatusException exception) {
             throw exception;
         } catch (Exception exception) {
+            LOGGER.error("Cancel failed for task {}", taskId, exception);
             throw new ResponseStatusException(BAD_GATEWAY, "Cancel failed", exception);
         }
     }
@@ -457,7 +626,7 @@ public class TaskService {
         }
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = ResponseStatusException.class)
     public ResumeTaskResponse resumeTask(String taskId, Long userId, ResumeTaskRequest request) {
         TaskState taskState = getOwnedTask(taskId, userId);
         String resumeRequestId = request.getResumeRequestId();
@@ -591,7 +760,13 @@ public class TaskService {
     }
 
     public void syncActiveJobs() {
-        for (JobRecord jobRecord : jobRecordMapper.findActiveJobs()) {
+        List<JobRecord> activeJobs;
+        try {
+            activeJobs = jobRecordMapper.findActiveJobs();
+        } catch (Exception ignored) {
+            return;
+        }
+        for (JobRecord jobRecord : activeJobs) {
             try {
                 syncSingleJob(jobRecord);
             } catch (Exception ignored) {
@@ -602,6 +777,10 @@ public class TaskService {
     private void syncSingleJob(JobRecord jobRecord) throws Exception {
         JobStatusResponse status = jobRuntimeClient.getJob(jobRecord.getJobId());
         String newState = safeString(status.getJobState());
+        String previousState = safeString(jobRecord.getJobState());
+        boolean terminal = JobState.SUCCEEDED.name().equals(newState)
+                || JobState.FAILED.name().equals(newState)
+                || JobState.CANCELLED.name().equals(newState);
 
         jobRecordMapper.updateRuntimeSnapshot(
                 jobRecord.getJobId(),
@@ -614,6 +793,8 @@ public class TaskService {
                 writeJsonIfPresent(status.getFinalExplanation()),
                 writeJsonIfPresent(status.getFailureSummary()),
                 writeJsonIfPresent(status.getDockerRuntimeEvidence()),
+                writeJsonIfPresent(status.getWorkspaceSummary()),
+                writeJsonIfPresent(status.getArtifactCatalog()),
                 writeJsonIfPresent(status.getErrorObject()),
                 status.getCancelRequestedAt(),
                 status.getCancelledAt(),
@@ -621,12 +802,18 @@ public class TaskService {
                 OffsetDateTime.now(ZoneOffset.UTC)
         );
 
+        JobRecord refreshedJobRecord = jobRecordMapper.findByJobId(jobRecord.getJobId());
+        if (refreshedJobRecord != null) {
+            jobRecord = refreshedJobRecord;
+        }
+        workspaceTraceService.updateWorkspaceFromStatus(jobRecord, status.getWorkspaceSummary(), status.getDockerRuntimeEvidence(), terminal);
+
         TaskState taskState = taskStateMapper.findByTaskId(jobRecord.getTaskId());
-        if (taskState == null || !Objects.equals(taskState.getJobId(), jobRecord.getJobId()) || Objects.equals(jobRecord.getJobState(), newState)) {
+        if (taskState == null || !Objects.equals(taskState.getJobId(), jobRecord.getJobId()) || Objects.equals(previousState, newState)) {
             return;
         }
 
-        appendEvent(taskState.getTaskId(), EventType.JOB_STATE_CHANGED.name(), safeString(jobRecord.getJobState()), newState, taskState.getStateVersion(), objectMapper.writeValueAsString(Map.of("job_id", jobRecord.getJobId())));
+        appendEvent(taskState.getTaskId(), EventType.JOB_STATE_CHANGED.name(), previousState, newState, taskState.getStateVersion(), objectMapper.writeValueAsString(Map.of("job_id", jobRecord.getJobId())));
 
         if (JobState.SUCCEEDED.name().equals(newState)) {
             processSuccess(taskState, status);
@@ -639,6 +826,7 @@ public class TaskService {
 
         if (JobState.FAILED.name().equals(newState) || JobState.CANCELLED.name().equals(newState)) {
             taskStateMapper.updateOutputSummaries(taskState.getTaskId(), null, null, buildFailureSummaryJson(status), null);
+            workspaceTraceService.persistArtifacts(taskState.getTaskId(), jobRecord, null, status.getArtifactCatalog());
         }
 
         if (JobState.SUCCEEDED.name().equals(newState) || JobState.FAILED.name().equals(newState) || JobState.CANCELLED.name().equals(newState)) {
@@ -673,6 +861,7 @@ public class TaskService {
         String resultBundleSummary = buildResultBundleSummaryJson(status.getResultBundle());
         String finalExplanationSummary = buildFinalExplanationSummaryJson(status.getFinalExplanation());
         String resultObjectSummary = buildResultObjectSummaryJson(status.getResultObject(), status.getResultBundle());
+        workspaceTraceService.persistSuccess(taskState, jobRecordMapper.findByJobId(taskState.getJobId()), status.getResultBundle(), status.getFinalExplanation(), status.getArtifactCatalog());
         taskStateMapper.updateOutputSummaries(taskId, resultBundleSummary, finalExplanationSummary, null, resultObjectSummary);
 
         appendEvent(taskId, EventType.RESULT_BUNDLE_READY.name(), null, null, version, resultBundleSummary);
@@ -789,18 +978,40 @@ public class TaskService {
             appendEvent(taskId, EventType.PLANNING_PASS2_COMPLETED.name(), null, null, currentVersion,
                     writeJson(Map.of("node_count", pass2Response.getMaterializedExecutionGraph() != null && pass2Response.getMaterializedExecutionGraph().path("nodes").isArray() ? pass2Response.getMaterializedExecutionGraph().path("nodes").size() : 0)));
 
-            CreateJobResponse createJobResponse = submitJob(taskId, pass2Response.getMaterializedExecutionGraph(), passBNode.path("args_draft"));
+            freezeAnalysisManifest(taskId, taskState.getUserQuery(), taskState.getActiveAttemptNo() == null ? 1 : taskState.getActiveAttemptNo(),
+                    pass1Node, passBNode, validationNode, pass2Response.getMaterializedExecutionGraph(), pass2Response.getRuntimeAssertions());
+
+            int attemptNo = taskState.getActiveAttemptNo() == null ? 1 : taskState.getActiveAttemptNo();
+            RegistryService.ProviderResolution providerResolution = registryService.resolve(
+                    readJsonNode(taskState.getGoalParseJson()),
+                    readJsonNode(taskState.getSkillRouteJson()),
+                    pass1Node
+            );
+            String workspaceId = generateWorkspaceId();
+            CreateJobResponse createJobResponse = submitJob(
+                    taskId,
+                    pass2Response.getMaterializedExecutionGraph(),
+                    passBNode.path("args_draft"),
+                    workspaceId,
+                    attemptNo,
+                    providerResolution
+            );
             JobRecord jobRecord = new JobRecord();
             jobRecord.setJobId(createJobResponse.getJobId());
             jobRecord.setTaskId(taskId);
-            jobRecord.setAttemptNo(taskState.getActiveAttemptNo() == null ? 1 : taskState.getActiveAttemptNo());
+            jobRecord.setAttemptNo(attemptNo);
             jobRecord.setJobState(createJobResponse.getJobState());
             jobRecord.setExecutionGraphJson(writeJson(pass2Response.getMaterializedExecutionGraph()));
             jobRecord.setRuntimeAssertionsJson(writeJson(pass2Response.getRuntimeAssertions()));
             jobRecord.setPlanningPass2SummaryJson(writeJson(pass2Response.getPlanningSummary()));
+            jobRecord.setWorkspaceId(workspaceId);
+            jobRecord.setProviderKey(providerResolution.providerKey());
+            jobRecord.setCapabilityKey(providerResolution.capabilityKey());
+            jobRecord.setRuntimeProfile(providerResolution.runtimeProfile());
             jobRecord.setAcceptedAt(createJobResponse.getAcceptedAt());
             jobRecord.setLastHeartbeatAt(createJobResponse.getAcceptedAt());
             ensureInserted(jobRecordMapper.insert(jobRecord));
+            workspaceTraceService.createWorkspaceRecord(workspaceId, taskId, createJobResponse.getJobId(), attemptNo, providerResolution.runtimeProfile());
 
             appendEvent(taskId, EventType.JOB_SUBMITTED.name(), null, null, currentVersion, writeJson(Map.of("job_id", createJobResponse.getJobId())));
             appendEvent(taskId, EventType.JOB_STATE_CHANGED.name(), null, JobState.ACCEPTED.name(), currentVersion, writeJson(Map.of("job_id", createJobResponse.getJobId())));
@@ -818,6 +1029,7 @@ public class TaskService {
             response.setResumeAttempt(taskState.getActiveAttemptNo());
             return response;
         } catch (Exception exception) {
+            LOGGER.error("Task resume pipeline failed for task {}", taskId, exception);
             handlePipelineFailure(taskId, UUID.randomUUID().toString(), exception, currentVersion, currentState);
             throw new ResponseStatusException(BAD_GATEWAY, "Resume pipeline failed", exception);
         }
@@ -873,10 +1085,52 @@ public class TaskService {
         }
 
         ObjectNode argsDraft = passBNode.with("args_draft");
+        refreshDerivedAnalysisArgs(argsDraft, slotBindings);
         if (request.getArgsOverrides() != null) {
             for (Map.Entry<String, Object> entry : request.getArgsOverrides().entrySet()) {
                 argsDraft.set(entry.getKey(), objectMapper.valueToTree(entry.getValue()));
             }
+        }
+    }
+
+    private void refreshDerivedAnalysisArgs(ObjectNode argsDraft, ArrayNode slotBindings) {
+        Set<String> boundRoles = new HashSet<>();
+        for (JsonNode node : slotBindings) {
+            String roleName = node.path("role_name").asText("");
+            String slotName = node.path("slot_name").asText("");
+            if (roleName.isBlank() || slotName.isBlank()) {
+                continue;
+            }
+            boundRoles.add(roleName);
+            switch (roleName) {
+                case "precipitation" -> {
+                    argsDraft.put("precipitation_slot", slotName);
+                    argsDraft.put("precipitation_index", 1200.0);
+                }
+                case "eto" -> {
+                    argsDraft.put("eto_slot", slotName);
+                    argsDraft.put("eto_index", 800.0);
+                }
+                case "depth_to_root_restricting_layer" -> {
+                    argsDraft.put("root_depth_slot", slotName);
+                    argsDraft.put("root_depth_factor", 0.95);
+                }
+                case "plant_available_water_content" -> {
+                    argsDraft.put("pawc_slot", slotName);
+                    argsDraft.put("pawc_factor", 0.9);
+                }
+                default -> {
+                }
+            }
+        }
+        if (!argsDraft.has("analysis_template")) {
+            argsDraft.put("analysis_template", "water_yield_v1");
+        }
+        if (!boundRoles.contains("depth_to_root_restricting_layer") && !argsDraft.has("root_depth_factor")) {
+            argsDraft.put("root_depth_factor", 0.8);
+        }
+        if (!boundRoles.contains("plant_available_water_content") && !argsDraft.has("pawc_factor")) {
+            argsDraft.put("pawc_factor", 0.85);
         }
     }
 
@@ -981,12 +1235,68 @@ public class TaskService {
         return pass2Client.runPass2(req);
     }
 
-    private CreateJobResponse submitJob(String taskId, JsonNode executionGraph, JsonNode argsDraft) {
+    private CreateJobResponse submitJob(
+            String taskId,
+            JsonNode executionGraph,
+            JsonNode argsDraft,
+            String workspaceId,
+            int attemptNo,
+            RegistryService.ProviderResolution providerResolution
+    ) {
         CreateJobRequest req = new CreateJobRequest();
         req.setTaskId(taskId);
         req.setMaterializedExecutionGraph(executionGraph);
         req.setArgsDraft(argsDraft);
+        req.setWorkspaceId(workspaceId);
+        req.setAttemptNo(attemptNo);
+        req.setCapabilityKey(providerResolution.capabilityKey());
+        req.setProviderKey(providerResolution.providerKey());
+        req.setRuntimeProfile(providerResolution.runtimeProfile());
         return jobRuntimeClient.createJob(req);
+    }
+
+    private String generateWorkspaceId() {
+        return "ws_" + UUID.randomUUID().toString().replace("-", "");
+    }
+
+    private TaskArtifactsResponse.AttemptArtifacts buildAttemptArtifacts(Integer attemptNo, com.sage.backend.model.WorkspaceRegistry workspace) {
+        TaskArtifactsResponse.AttemptArtifacts item = new TaskArtifactsResponse.AttemptArtifacts();
+        item.setAttemptNo(attemptNo);
+        if (workspace != null) {
+            Map<String, Object> workspaceView = new LinkedHashMap<>();
+            workspaceView.put("workspace_id", workspace.getWorkspaceId());
+            workspaceView.put("workspace_state", workspace.getWorkspaceState());
+            workspaceView.put("runtime_profile", workspace.getRuntimeProfile());
+            workspaceView.put("container_name", workspace.getContainerName());
+            workspaceView.put("host_workspace_path", workspace.getHostWorkspacePath());
+            workspaceView.put("archive_path", workspace.getArchivePath());
+            workspaceView.put("created_at", toIsoString(workspace.getCreatedAt()));
+            workspaceView.put("started_at", toIsoString(workspace.getStartedAt()));
+            workspaceView.put("finished_at", toIsoString(workspace.getFinishedAt()));
+            workspaceView.put("cleaned_at", toIsoString(workspace.getCleanedAt()));
+            workspaceView.put("archived_at", toIsoString(workspace.getArchivedAt()));
+            item.setWorkspace(workspaceView);
+        }
+        Map<String, List<Object>> buckets = new LinkedHashMap<>();
+        buckets.put("primary_outputs", new ArrayList<>());
+        buckets.put("intermediate_outputs", new ArrayList<>());
+        buckets.put("audit_artifacts", new ArrayList<>());
+        buckets.put("derived_outputs", new ArrayList<>());
+        buckets.put("logs", new ArrayList<>());
+        item.setArtifacts(buckets);
+        return item;
+    }
+
+    private String mapArtifactRoleBucket(String artifactRole) {
+        if ("PRIMARY_OUTPUT".equalsIgnoreCase(artifactRole)) return "primary_outputs";
+        if ("INTERMEDIATE_OUTPUT".equalsIgnoreCase(artifactRole)) return "intermediate_outputs";
+        if ("AUDIT_ARTIFACT".equalsIgnoreCase(artifactRole)) return "audit_artifacts";
+        if ("DERIVED_OUTPUT".equalsIgnoreCase(artifactRole)) return "derived_outputs";
+        return "logs";
+    }
+
+    private String toIsoString(OffsetDateTime value) {
+        return value == null ? null : value.toString();
     }
 
     private TaskState getOwnedTask(String taskId, Long userId) {
@@ -1092,6 +1402,56 @@ public class TaskService {
 
     private void appendEvent(String taskId, String eventType, String fromState, String toState, int stateVersion, String payloadJson) {
         eventService.appendEvent(taskId, eventType, fromState, toState, stateVersion, payloadJson);
+    }
+
+    private void freezeAnalysisManifest(
+            String taskId,
+            String userQuery,
+            int attemptNo,
+            JsonNode pass1Node,
+            JsonNode passBNode,
+            JsonNode validationNode,
+            JsonNode executionGraph,
+            JsonNode runtimeAssertions
+    ) {
+        AnalysisManifest manifest = new AnalysisManifest();
+        manifest.setManifestId("manifest_" + UUID.randomUUID().toString().replace("-", ""));
+        manifest.setTaskId(taskId);
+        manifest.setAttemptNo(attemptNo);
+        manifest.setManifestVersion(1);
+        TaskState latestTaskState = taskStateMapper.findByTaskId(taskId);
+        String goalParseJson = latestTaskState == null ? null : latestTaskState.getGoalParseJson();
+        String skillRouteJson = latestTaskState == null ? null : latestTaskState.getSkillRouteJson();
+        if (goalParseJson == null || goalParseJson.isBlank()) {
+            goalParseJson = writeJson(Map.of(
+                    "user_query", safeString(userQuery),
+                    "goal_type", pass1Node.path("selected_template").asText(""),
+                    "source", "derived_fallback"
+            ));
+        }
+        if (skillRouteJson == null || skillRouteJson.isBlank()) {
+            skillRouteJson = writeJson(Map.of(
+                    "selected_template", pass1Node.path("selected_template").asText(""),
+                    "template_version", pass1Node.path("template_version").asText(""),
+                    "route_mode", "single_skill",
+                    "source", "derived_fallback"
+            ));
+        }
+        manifest.setGoalParseJson(goalParseJson);
+        manifest.setSkillRouteJson(skillRouteJson);
+        manifest.setLogicalInputRolesJson(writeJsonIfPresent(pass1Node.path("logical_input_roles")));
+        manifest.setSlotSchemaViewJson(writeJsonIfPresent(pass1Node.path("slot_schema_view")));
+        manifest.setSlotBindingsJson(writeJsonIfPresent(passBNode.path("slot_bindings")));
+        manifest.setArgsDraftJson(writeJsonIfPresent(passBNode.path("args_draft")));
+        manifest.setValidationSummaryJson(writeJsonIfPresent(validationNode));
+        manifest.setExecutionGraphJson(writeJsonIfPresent(executionGraph));
+        manifest.setRuntimeAssertionsJson(writeJsonIfPresent(runtimeAssertions));
+        ensureInserted(analysisManifestMapper.insert(manifest));
+        taskStateMapper.updateActiveManifest(taskId, manifest.getManifestId(), manifest.getManifestVersion());
+        TaskState latest = taskStateMapper.findByTaskId(taskId);
+        appendEvent(taskId, EventType.ANALYSIS_MANIFEST_FROZEN.name(), null, null,
+                latest == null || latest.getStateVersion() == null ? 0 : latest.getStateVersion(),
+                writeJson(Map.of("manifest_id", manifest.getManifestId(), "attempt_no", attemptNo, "manifest_version", manifest.getManifestVersion())));
     }
 
     private TaskDetailResponse.Pass1Summary buildPass1Summary(String pass1ResultJson) {

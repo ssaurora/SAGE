@@ -9,6 +9,8 @@ public class TaskState {
     private Integer stateVersion;
     private String userQuery;
     private String pass1ResultJson;
+    private String goalParseJson;
+    private String skillRouteJson;
     private String passbResultJson;
     private String slotBindingsSummaryJson;
     private String argsDraftSummaryJson;
@@ -25,6 +27,10 @@ public class TaskState {
     private String resumePayloadJson;
     private Integer resumeAttemptCount;
     private Integer activeAttemptNo;
+    private String activeManifestId;
+    private Integer activeManifestVersion;
+    private String latestResultBundleId;
+    private String latestWorkspaceId;
     private OffsetDateTime waitingSince;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
@@ -75,6 +81,22 @@ public class TaskState {
 
     public void setPass1ResultJson(String pass1ResultJson) {
         this.pass1ResultJson = pass1ResultJson;
+    }
+
+    public String getGoalParseJson() {
+        return goalParseJson;
+    }
+
+    public void setGoalParseJson(String goalParseJson) {
+        this.goalParseJson = goalParseJson;
+    }
+
+    public String getSkillRouteJson() {
+        return skillRouteJson;
+    }
+
+    public void setSkillRouteJson(String skillRouteJson) {
+        this.skillRouteJson = skillRouteJson;
     }
 
     public String getPassbResultJson() {
@@ -203,6 +225,38 @@ public class TaskState {
 
     public void setActiveAttemptNo(Integer activeAttemptNo) {
         this.activeAttemptNo = activeAttemptNo;
+    }
+
+    public String getActiveManifestId() {
+        return activeManifestId;
+    }
+
+    public void setActiveManifestId(String activeManifestId) {
+        this.activeManifestId = activeManifestId;
+    }
+
+    public Integer getActiveManifestVersion() {
+        return activeManifestVersion;
+    }
+
+    public void setActiveManifestVersion(Integer activeManifestVersion) {
+        this.activeManifestVersion = activeManifestVersion;
+    }
+
+    public String getLatestResultBundleId() {
+        return latestResultBundleId;
+    }
+
+    public void setLatestResultBundleId(String latestResultBundleId) {
+        this.latestResultBundleId = latestResultBundleId;
+    }
+
+    public String getLatestWorkspaceId() {
+        return latestWorkspaceId;
+    }
+
+    public void setLatestWorkspaceId(String latestWorkspaceId) {
+        this.latestWorkspaceId = latestWorkspaceId;
     }
 
     public OffsetDateTime getWaitingSince() {

@@ -6,9 +6,12 @@ import com.sage.backend.task.dto.CreateTaskResponse;
 import com.sage.backend.task.dto.CancelTaskResponse;
 import com.sage.backend.task.dto.TaskDetailResponse;
 import com.sage.backend.task.dto.TaskEventsResponse;
+import com.sage.backend.task.dto.TaskArtifactsResponse;
 import com.sage.backend.task.dto.ResumeTaskRequest;
 import com.sage.backend.task.dto.ResumeTaskResponse;
 import com.sage.backend.task.dto.TaskResultResponse;
+import com.sage.backend.task.dto.TaskManifestResponse;
+import com.sage.backend.task.dto.TaskRunsResponse;
 import com.sage.backend.task.dto.UploadAttachmentResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -60,6 +63,24 @@ public class TaskController {
     public ResponseEntity<TaskResultResponse> getTaskResult(@PathVariable String taskId, Authentication authentication) {
         CurrentUser currentUser = (CurrentUser) authentication.getPrincipal();
         return ResponseEntity.ok(taskService.getTaskResult(taskId, currentUser.userId()));
+    }
+
+    @GetMapping("/{taskId}/manifest")
+    public ResponseEntity<TaskManifestResponse> getTaskManifest(@PathVariable String taskId, Authentication authentication) {
+        CurrentUser currentUser = (CurrentUser) authentication.getPrincipal();
+        return ResponseEntity.ok(taskService.getTaskManifest(taskId, currentUser.userId()));
+    }
+
+    @GetMapping("/{taskId}/runs")
+    public ResponseEntity<TaskRunsResponse> getTaskRuns(@PathVariable String taskId, Authentication authentication) {
+        CurrentUser currentUser = (CurrentUser) authentication.getPrincipal();
+        return ResponseEntity.ok(taskService.getTaskRuns(taskId, currentUser.userId()));
+    }
+
+    @GetMapping("/{taskId}/artifacts")
+    public ResponseEntity<TaskArtifactsResponse> getTaskArtifacts(@PathVariable String taskId, Authentication authentication) {
+        CurrentUser currentUser = (CurrentUser) authentication.getPrincipal();
+        return ResponseEntity.ok(taskService.getTaskArtifacts(taskId, currentUser.userId()));
     }
 
     @PostMapping("/{taskId}/cancel")

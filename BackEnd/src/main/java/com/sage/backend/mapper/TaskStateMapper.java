@@ -18,6 +18,8 @@ public interface TaskStateMapper {
                 state_version,
                 user_query,
                 pass1_result_json,
+                goal_parse_json,
+                skill_route_json,
                 passb_result_json,
                 slot_bindings_summary_json,
                 args_draft_summary_json,
@@ -34,6 +36,10 @@ public interface TaskStateMapper {
                 resume_payload_json,
                 resume_attempt_count,
                 active_attempt_no,
+                active_manifest_id,
+                active_manifest_version,
+                latest_result_bundle_id,
+                latest_workspace_id,
                 waiting_since
             )
             VALUES(
@@ -43,6 +49,8 @@ public interface TaskStateMapper {
                 #{stateVersion},
                 #{userQuery},
                 #{pass1ResultJson},
+                #{goalParseJson},
+                #{skillRouteJson},
                 #{passbResultJson},
                 #{slotBindingsSummaryJson},
                 #{argsDraftSummaryJson},
@@ -59,6 +67,10 @@ public interface TaskStateMapper {
                 #{resumePayloadJson},
                 #{resumeAttemptCount},
                 #{activeAttemptNo},
+                #{activeManifestId},
+                #{activeManifestVersion},
+                #{latestResultBundleId},
+                #{latestWorkspaceId},
                 #{waitingSince}
             )
             """)
@@ -92,6 +104,19 @@ public interface TaskStateMapper {
             @Param("expectedVersion") int expectedVersion,
             @Param("newState") String newState,
             @Param("pass1ResultJson") String pass1ResultJson
+    );
+
+    @Update("""
+            UPDATE task_state
+            SET goal_parse_json = #{goalParseJson},
+                skill_route_json = #{skillRouteJson},
+                updated_at = NOW()
+            WHERE task_id = #{taskId}
+            """)
+    int updateGoalAndRoute(
+            @Param("taskId") String taskId,
+            @Param("goalParseJson") String goalParseJson,
+            @Param("skillRouteJson") String skillRouteJson
     );
 
     @Update("""
@@ -200,6 +225,19 @@ public interface TaskStateMapper {
 
     @Update("""
             UPDATE task_state
+            SET active_manifest_id = #{manifestId},
+                active_manifest_version = #{manifestVersion},
+                updated_at = NOW()
+            WHERE task_id = #{taskId}
+            """)
+    int updateActiveManifest(
+            @Param("taskId") String taskId,
+            @Param("manifestId") String manifestId,
+            @Param("manifestVersion") int manifestVersion
+    );
+
+    @Update("""
+            UPDATE task_state
             SET result_object_summary_json = #{resultObjectSummaryJson},
                 updated_at = NOW()
             WHERE task_id = #{taskId}
@@ -226,6 +264,19 @@ public interface TaskStateMapper {
             @Param("resultObjectSummaryJson") String resultObjectSummaryJson
     );
 
+    @Update("""
+            UPDATE task_state
+            SET latest_result_bundle_id = COALESCE(#{latestResultBundleId}, latest_result_bundle_id),
+                latest_workspace_id = COALESCE(#{latestWorkspaceId}, latest_workspace_id),
+                updated_at = NOW()
+            WHERE task_id = #{taskId}
+            """)
+    int updateLatestTracePointers(
+            @Param("taskId") String taskId,
+            @Param("latestResultBundleId") String latestResultBundleId,
+            @Param("latestWorkspaceId") String latestWorkspaceId
+    );
+
     @Select("""
             SELECT task_id,
                    user_id,
@@ -233,6 +284,8 @@ public interface TaskStateMapper {
                    state_version,
                    user_query,
                    pass1_result_json,
+                   goal_parse_json,
+                   skill_route_json,
                    passb_result_json,
                    slot_bindings_summary_json,
                    args_draft_summary_json,
@@ -249,6 +302,10 @@ public interface TaskStateMapper {
                    resume_payload_json,
                    resume_attempt_count,
                    active_attempt_no,
+                   active_manifest_id,
+                   active_manifest_version,
+                   latest_result_bundle_id,
+                   latest_workspace_id,
                    waiting_since,
                    created_at,
                    updated_at

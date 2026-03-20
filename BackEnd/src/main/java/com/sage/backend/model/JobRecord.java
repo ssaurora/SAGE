@@ -15,7 +15,13 @@ public class JobRecord {
     private String finalExplanationJson;
     private String failureSummaryJson;
     private String dockerRuntimeEvidenceJson;
+    private String workspaceSummaryJson;
+    private String artifactCatalogJson;
     private String errorJson;
+    private String workspaceId;
+    private String providerKey;
+    private String capabilityKey;
+    private String runtimeProfile;
     private OffsetDateTime cancelRequestedAt;
     private OffsetDateTime cancelledAt;
     private String cancelReason;
@@ -128,6 +134,54 @@ public class JobRecord {
 
     public void setErrorJson(String errorJson) {
         this.errorJson = errorJson;
+    }
+
+    public String getWorkspaceSummaryJson() {
+        return workspaceSummaryJson;
+    }
+
+    public void setWorkspaceSummaryJson(String workspaceSummaryJson) {
+        this.workspaceSummaryJson = workspaceSummaryJson;
+    }
+
+    public String getArtifactCatalogJson() {
+        return artifactCatalogJson;
+    }
+
+    public void setArtifactCatalogJson(String artifactCatalogJson) {
+        this.artifactCatalogJson = artifactCatalogJson;
+    }
+
+    public String getWorkspaceId() {
+        return workspaceId;
+    }
+
+    public void setWorkspaceId(String workspaceId) {
+        this.workspaceId = workspaceId;
+    }
+
+    public String getProviderKey() {
+        return providerKey;
+    }
+
+    public void setProviderKey(String providerKey) {
+        this.providerKey = providerKey;
+    }
+
+    public String getCapabilityKey() {
+        return capabilityKey;
+    }
+
+    public void setCapabilityKey(String capabilityKey) {
+        this.capabilityKey = capabilityKey;
+    }
+
+    public String getRuntimeProfile() {
+        return runtimeProfile;
+    }
+
+    public void setRuntimeProfile(String runtimeProfile) {
+        this.runtimeProfile = runtimeProfile;
     }
 
     public OffsetDateTime getCancelRequestedAt() {

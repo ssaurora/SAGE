@@ -21,6 +21,14 @@ from app.schemas import (
 )
 
 
+ROLE_DEFAULTS: dict[str, dict[str, str | float]] = {
+    "precipitation": {"slot_key": "precipitation_slot", "value_key": "precipitation_index", "value": 1200.0},
+    "eto": {"slot_key": "eto_slot", "value_key": "eto_index", "value": 800.0},
+    "depth_to_root_restricting_layer": {"slot_key": "root_depth_slot", "value_key": "root_depth_factor", "value": 0.95},
+    "plant_available_water_content": {"slot_key": "pawc_slot", "value_key": "pawc_factor", "value": 0.9},
+}
+
+
 def build_pass1_response(_: PlanningPass1Request) -> PlanningPass1Response:
     return PlanningPass1Response(
         selected_template="water_yield_v1",
@@ -87,7 +95,9 @@ def build_passb_response(payload: CognitionPassBRequest) -> CognitionPassBRespon
         "workspace_dir": f"/workspace/output/{safe_task_id}",
         "results_suffix": "week3",
         "n_workers": 1,
+        "analysis_template": payload.pass1_result.selected_template,
     }
+    args_draft.update(_build_domain_args(bindings))
 
     return CognitionPassBResponse(
         slot_bindings=bindings,
@@ -100,6 +110,22 @@ def build_passb_response(payload: CognitionPassBRequest) -> CognitionPassBRespon
             ],
         ),
     )
+
+
+def _build_domain_args(bindings: list[SlotBinding]) -> dict[str, str | int | float | bool]:
+    args: dict[str, str | int | float | bool] = {}
+    for binding in bindings:
+        config = ROLE_DEFAULTS.get(binding.role_name)
+        if config is None:
+            continue
+        args[str(config["slot_key"])] = binding.slot_name
+        args[str(config["value_key"])] = float(config["value"])
+
+    if "root_depth_factor" not in args:
+        args["root_depth_factor"] = 0.8
+    if "pawc_factor" not in args:
+        args["pawc_factor"] = 0.85
+    return args
 
 
 def build_primitive_validation_response(payload: PrimitiveValidationRequest) -> PrimitiveValidationResponse:

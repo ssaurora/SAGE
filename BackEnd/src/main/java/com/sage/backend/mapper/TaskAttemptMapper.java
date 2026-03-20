@@ -7,6 +7,8 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
+import java.util.List;
+
 @Mapper
 public interface TaskAttemptMapper {
 
@@ -45,6 +47,21 @@ public interface TaskAttemptMapper {
             """)
     TaskAttempt findByTaskIdAndAttemptNo(@Param("taskId") String taskId, @Param("attemptNo") int attemptNo);
 
+    @Select("""
+            SELECT id,
+                   task_id,
+                   attempt_no,
+                   trigger,
+                   job_id,
+                   status_snapshot_json,
+                   created_at,
+                   finished_at
+            FROM task_attempt
+            WHERE task_id = #{taskId}
+            ORDER BY attempt_no ASC, created_at ASC
+            """)
+    List<TaskAttempt> findByTaskId(@Param("taskId") String taskId);
+
     @Update("""
             UPDATE task_attempt
             SET job_id = #{jobId},
@@ -61,4 +78,3 @@ public interface TaskAttemptMapper {
             @Param("finishedAt") java.time.OffsetDateTime finishedAt
     );
 }
-

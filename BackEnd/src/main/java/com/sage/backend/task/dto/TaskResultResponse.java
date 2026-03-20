@@ -27,6 +27,12 @@ public class TaskResultResponse {
     @JsonProperty("docker_runtime_evidence")
     private Object dockerRuntimeEvidence;
 
+    @JsonProperty("workspace_summary")
+    private Object workspaceSummary;
+
+    @JsonProperty("artifact_catalog")
+    private Object artifactCatalog;
+
     public String getTaskId() {
         return taskId;
     }
@@ -90,5 +96,20 @@ public class TaskResultResponse {
     public void setDockerRuntimeEvidence(Object dockerRuntimeEvidence) {
         this.dockerRuntimeEvidence = dockerRuntimeEvidence;
     }
-}
 
+    public Object getWorkspaceSummary() {
+        return workspaceSummary;
+    }
+
+    public void setWorkspaceSummary(Object workspaceSummary) {
+        this.workspaceSummary = workspaceSummary;
+    }
+
+    public Object getArtifactCatalog() {
+        return artifactCatalog;
+    }
+
+    public void setArtifactCatalog(Object artifactCatalog) {
+        this.artifactCatalog = artifactCatalog;
+    }
+}

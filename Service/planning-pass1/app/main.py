@@ -10,6 +10,7 @@ from app.planner import (
     build_passb_response,
     build_primitive_validation_response,
 )
+from app.repair import build_repair_proposal_response
 from app.runtime import JobRuntimeManager
 from app.schemas import (
     CancelJobRequest,
@@ -25,6 +26,8 @@ from app.schemas import (
     PlanningPass2Response,
     PrimitiveValidationRequest,
     PrimitiveValidationResponse,
+    RepairProposalRequest,
+    RepairProposalResponse,
 )
 from app.workspace import ensure_workspace_directories
 
@@ -64,6 +67,11 @@ def validate_primitive(payload: PrimitiveValidationRequest) -> PrimitiveValidati
 @app.post("/planning/pass2", response_model=PlanningPass2Response)
 def planning_pass2(payload: PlanningPass2Request) -> PlanningPass2Response:
     return build_pass2_response(payload)
+
+
+@app.post("/repair/proposal", response_model=RepairProposalResponse)
+def repair_proposal(payload: RepairProposalRequest) -> RepairProposalResponse:
+    return build_repair_proposal_response(payload)
 
 
 @app.post("/jobs", response_model=CreateJobResponse)

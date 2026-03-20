@@ -1,4 +1,9 @@
-# SAGE Week5 MVP (Phase1 Repair Loop)
+# SAGE Phase0 + Week5 MVP
+
+Current baseline includes both:
+
+- `Phase0`: explicit `goal_parse -> skill_route -> analysis_manifest -> runtime -> result_bundle -> final_explanation`
+- `Week5`: minimal repair loop `detect gap -> WAITING_USER -> upload/override -> /resume -> re-enter execution chain`
 
 Week5 goal: deliver the minimal repair loop:
 
@@ -69,6 +74,7 @@ Open `http://localhost:3000/login`.
 - `GET /tasks/{taskId}`
 - `GET /tasks/{taskId}/events`
 - `GET /tasks/{taskId}/stream`
+- `GET /tasks/{taskId}/manifest`
 - `GET /tasks/{taskId}/result`
 - `POST /tasks/{taskId}/cancel`
 - `POST /tasks/{taskId}/attachments` (multipart)
@@ -113,6 +119,67 @@ docker run --rm -p 8001:8001 sage-pass1:week5
 powershell -ExecutionPolicy Bypass -File .\scripts\week5-e2e.ps1
 ```
 
+## One-click Docker Compose startup
+
+This repository now supports a single-command local stack using Docker Compose.
+
+### Prerequisites
+
+- Docker Desktop / Docker Engine
+- Maven on host PATH (used once to package backend jar before image build)
+
+### Start everything
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\compose-up.ps1 -Build
+```
+
+This packages the backend jar, then starts:
+
+- `postgres`
+- `redis`
+- `service`
+- `backend`
+- `frontend`
+
+### Default endpoints
+
+- FrontEnd: `http://localhost:3000/login`
+- BackEnd: `http://localhost:8080/actuator/health`
+- Service: `http://localhost:8001/health`
+
+### GLM (LLM) enablement
+
+The repair proposal endpoint is deterministic by default. To enable GLM-4.7:
+
+1. Open `.env.compose` and set:
+
+```
+SAGE_REPAIR_PROVIDER=glm
+SAGE_GLM_API_KEY=<your_api_key>
+```
+
+2. Restart the stack:
+
+```powershell
+docker compose --env-file .env.compose down
+powershell -ExecutionPolicy Bypass -File .\\scripts\\compose-up.ps1 -Build
+```
+
+### Stop everything
+
+```powershell
+docker compose --env-file .env.compose down
+```
+
+### Environment file
+
+The compose stack uses:
+
+- `.env.compose`
+
+You can edit ports, container names, and image tags there.
+
 Keep infra running for manual checks:
 
 ```powershell
@@ -128,3 +195,17 @@ The Week5 script verifies:
 5. task re-enters execution and reaches terminal state
 6. repair events exist (`WAITING_USER_ENTERED`, `ATTACHMENT_UPLOADED`, `RESUME_REQUESTED`, `RESUME_ACCEPTED`)
 
+## One-click Phase0 / Week4 E2E
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\week4-e2e.ps1
+```
+
+The Week4 script verifies:
+
+1. strict Docker execution path is used
+2. task reaches `SUCCEEDED`
+3. `goal_parse_summary` and `skill_route_summary` exist on task detail
+4. `analysis_manifest` is frozen and queryable from `/tasks/{taskId}/manifest`
+5. runtime produces real minimal `water_yield_index` and `climate_balance`
+6. `result_bundle`, `final_explanation`, and runtime evidence exist
