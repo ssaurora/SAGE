@@ -13,6 +13,8 @@ $serviceDir = Join-Path $root "Service/planning-pass1"
 
 $postgresContainer = "sage-week5-postgres"
 $serviceContainer = "sage-week5-service"
+$backendContainer = "sage-week5-backend"
+$backendImage = "sage-backend:week5"
 
 $backendPort = 38080
 $servicePort = 38001
@@ -246,28 +248,60 @@ function Start-LocalServiceFallback {
     throw "Local fallback failed: neither 'conda' nor 'python' command is available in PATH."
 }
 
-function Start-BackendProcess {
+function Start-BackendContainer {
     param(
         [string]$BackendDir,
-        [string]$StdOutLog,
-        [string]$StdErrLog
+        [string]$ImageTag,
+        [string]$ContainerName,
+        [int]$HostPort,
+        [int]$PostgresPort,
+        [int]$ServicePort,
+        [string]$JwtSecret
     )
 
-    $mavenCommand = Get-Command mvn.cmd -ErrorAction SilentlyContinue
-    if ($null -eq $mavenCommand) {
-        $mavenCommand = Get-Command mvn -ErrorAction SilentlyContinue
+    Push-Location $BackendDir
+    try {
+        $packageResult = Invoke-NativeCapture -FilePath "mvn" -Arguments @("-q", "-DskipTests", "package")
+        if ($packageResult.ExitCode -ne 0) {
+            throw "failed to package backend jar: $($packageResult.Output)"
+        }
+
+        $buildResult = Invoke-NativeCapture -FilePath "docker" -Arguments @("build", "-t", $ImageTag, ".")
+        if ($buildResult.ExitCode -ne 0) {
+            throw "failed to build backend image: $($buildResult.Output)"
+        }
+    }
+    finally {
+        Pop-Location
     }
 
-    if ($null -eq $mavenCommand) {
-        throw "Maven command not found in PATH."
+    Remove-ContainerIfExists -Name $ContainerName
+
+    $runResult = Invoke-NativeCapture -FilePath "docker" -Arguments @(
+        "run", "--name", $ContainerName, "--rm", "-d",
+        "-p", "${HostPort}:8080",
+        "-e", "DB_URL=jdbc:postgresql://host.docker.internal:${PostgresPort}/sage",
+        "-e", "DB_USERNAME=postgres",
+        "-e", "DB_PASSWORD=postgres",
+        "-e", "PASS1_BASE_URL=http://host.docker.internal:${ServicePort}",
+        "-e", "SERVER_PORT=8080",
+        "-e", "JWT_SECRET=${JwtSecret}",
+        $ImageTag
+    )
+    if ($runResult.ExitCode -ne 0) {
+        throw "failed to start backend container: $($runResult.Output)"
     }
 
-    return Start-Process -FilePath $mavenCommand.Source `
-        -ArgumentList "spring-boot:run", "-q", "-Dspring-boot.run.fork=false" `
-        -WorkingDirectory $BackendDir `
-        -RedirectStandardOutput $StdOutLog `
-        -RedirectStandardError $StdErrLog `
-        -PassThru
+    return $runResult.Output.Trim()
+}
+
+function Test-ContainerRunning {
+    param([string]$Name)
+    $inspect = Invoke-NativeCapture -FilePath "docker" -Arguments @("inspect", "-f", "{{.State.Running}}", $Name)
+    if ($inspect.ExitCode -ne 0) {
+        return $false
+    }
+    return $inspect.Output.Trim() -eq "true"
 }
 
 function Get-WaitingContext {
@@ -432,17 +466,19 @@ try {
     Write-Output "[3/9] Start BackEnd"
     Stop-ProcessListeningOnPort -Port $backendPort
 
-    $env:DB_URL = "jdbc:postgresql://localhost:${postgresPort}/sage"
-    $env:DB_USERNAME = "postgres"
-    $env:DB_PASSWORD = "postgres"
-    $env:PASS1_BASE_URL = $serviceBaseUrl
-    $env:SERVER_PORT = "${backendPort}"
-    $env:JWT_SECRET = "sage-week5-e2e-secret-key-123456789"
-    $backendProcess = Start-BackendProcess -BackendDir $backendDir -StdOutLog $backendLogOut -StdErrLog $backendLogErr
+    $jwtSecret = "sage-week5-e2e-secret-key-123456789"
+    Start-BackendContainer -BackendDir $backendDir `
+        -ImageTag $backendImage `
+        -ContainerName $backendContainer `
+        -HostPort $backendPort `
+        -PostgresPort $postgresPort `
+        -ServicePort $servicePort `
+        -JwtSecret $jwtSecret | Out-Null
 
     Wait-Until -TimeoutSeconds 150 -ErrorMessage "BackEnd startup timed out" -Probe {
-        if ($backendProcess.HasExited) {
-            throw "BackEnd exited early. stderr: $backendLogErr"
+        if (-not (Test-ContainerRunning -Name $backendContainer)) {
+            $backendLogs = Invoke-NativeCapture -FilePath "docker" -Arguments @("logs", $backendContainer)
+            throw "BackEnd container exited early. logs: $($backendLogs.Output)"
         }
         return Test-HttpOk -Urls @(
             "http://localhost:${backendPort}/actuator/health",
@@ -548,8 +584,10 @@ try {
     Write-Output "task: $taskId => $($finalTask.state)"
 
     if ($KeepRunning) {
-        Write-Output "KeepRunning=true, leaving services alive"
-        $backendProcess = $null
+        Write-Output "KeepRunning=true, leaving containers alive"
+        Write-Output "BackEnd: http://localhost:${backendPort}"
+        Write-Output "Service: $serviceBaseUrl"
+        Write-Output "PostgreSQL: localhost:${postgresPort}"
     }
 }
 catch {
@@ -568,10 +606,6 @@ finally {
         Remove-Item $uploadTempFile -Force -ErrorAction SilentlyContinue
     }
 
-    if ($null -ne $backendProcess -and -not $backendProcess.HasExited) {
-        Stop-Process -Id $backendProcess.Id -Force
-    }
-
     Stop-ProcessListeningOnPort -Port $backendPort
 
     if ($null -ne $serviceProcess -and -not $serviceProcess.HasExited) {
@@ -579,6 +613,7 @@ finally {
     }
 
     if (-not $KeepRunning) {
+        Remove-ContainerIfExists -Name $backendContainer
         Remove-ContainerIfExists -Name $serviceContainer
         Remove-ContainerIfExists -Name $postgresContainer
     }

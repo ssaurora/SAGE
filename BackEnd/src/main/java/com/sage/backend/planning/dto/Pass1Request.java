@@ -12,6 +12,9 @@ public class Pass1Request {
     @JsonProperty("state_version")
     private Integer stateVersion;
 
+    @JsonProperty("capability_key")
+    private String capabilityKey;
+
     public String getTaskId() {
         return taskId;
     }
@@ -35,5 +38,12 @@ public class Pass1Request {
     public void setStateVersion(Integer stateVersion) {
         this.stateVersion = stateVersion;
     }
-}
 
+    public String getCapabilityKey() {
+        return capabilityKey;
+    }
+
+    public void setCapabilityKey(String capabilityKey) {
+        this.capabilityKey = capabilityKey;
+    }
+}

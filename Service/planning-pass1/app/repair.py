@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from app.schemas import RepairActionExplanation, RepairProposalRequest, RepairProposalResponse
+from app.schemas import (
+    RepairActionExplanation,
+    RepairProposalRequest,
+    RepairProposalResponse,
+    RequiredUserAction,
+)
 import base64
 import hashlib
 import hmac
@@ -11,26 +16,44 @@ from typing import Any
 
 import httpx
 
+DEBUG_REPAIR = os.getenv("SAGE_REPAIR_DEBUG", "false").strip().lower() in ("1", "true", "yes", "on")
+DEBUG_MAX_CHARS = int(os.getenv("SAGE_REPAIR_DEBUG_MAX_CHARS", "2000"))
+
+
+def debug_log(message: str) -> None:
+    if DEBUG_REPAIR:
+        print(f"[repair-debug] {message}", flush=True)
+
+
+def truncate_text(text: str) -> str:
+    if len(text) <= DEBUG_MAX_CHARS:
+        return text
+    return f"{text[:DEBUG_MAX_CHARS]}...<truncated>"
+
 
 def build_repair_proposal_response(payload: RepairProposalRequest) -> RepairProposalResponse:
     provider = os.getenv("SAGE_REPAIR_PROVIDER", "deterministic").strip().lower()
     if provider == "glm":
         try:
             return build_glm_repair_proposal(payload)
-        except Exception:
-            return build_deterministic_repair_proposal(payload)
+        except Exception as exc:
+            debug_log(f"GLM provider failed: {type(exc).__name__}: {exc}")
+            debug_note = f"LLM fallback: {type(exc).__name__}: {exc}"
+            return build_deterministic_repair_proposal(payload, debug_note=debug_note)
     return build_deterministic_repair_proposal(payload)
 
 
-def build_deterministic_repair_proposal(payload: RepairProposalRequest) -> RepairProposalResponse:
-    waiting_context = payload.waiting_context or {}
-    validation_summary = payload.validation_summary or {}
-    failure_summary = payload.failure_summary or {}
+def build_deterministic_repair_proposal(
+    payload: RepairProposalRequest, *, debug_note: str | None = None
+) -> RepairProposalResponse:
+    waiting_context = payload.waiting_context
+    validation_summary = payload.validation_summary
+    failure_summary = payload.failure_summary
 
-    missing_slots = waiting_context.get("missing_slots") or []
-    required_actions = waiting_context.get("required_user_actions") or []
-    invalid_bindings = waiting_context.get("invalid_bindings") or []
-    failure_code = failure_summary.get("failure_code") or validation_summary.get("error_code") or ""
+    missing_slots = waiting_context.missing_slots
+    required_actions = waiting_context.required_user_actions
+    invalid_bindings = waiting_context.invalid_bindings
+    failure_code = failure_summary.failure_code or validation_summary.error_code or ""
     user_note = (payload.user_note or "").strip()
 
     if missing_slots:
@@ -42,13 +65,13 @@ def build_deterministic_repair_proposal(payload: RepairProposalRequest) -> Repai
     else:
         user_facing_reason = "Task requires additional user actions before it can continue."
 
-    resume_hint = waiting_context.get("resume_hint") or "Complete required actions and try resume."
+    resume_hint = waiting_context.resume_hint or "Complete required actions and try resume."
 
     action_explanations: list[RepairActionExplanation] = []
     for action in required_actions:
-        key = str(action.get("key") or "")
-        label = str(action.get("label") or key or "required action")
-        action_type = str(action.get("action_type") or "action")
+        key = action.key
+        label = action.label or key or "required action"
+        action_type = action.action_type or "action"
         if action_type == "upload":
             message = f"Upload the required input for {label}."
         elif action_type == "override":
@@ -65,6 +88,8 @@ def build_deterministic_repair_proposal(payload: RepairProposalRequest) -> Repai
         notes.append(f"User note acknowledged: {user_note}")
     if failure_code:
         notes.append(f"Latest structured failure code: {failure_code}")
+    if DEBUG_REPAIR and debug_note:
+        notes.append(f"debug_note: {debug_note}")
 
     return RepairProposalResponse(
         user_facing_reason=user_facing_reason,
@@ -102,12 +127,7 @@ def build_glm_repair_proposal(payload: RepairProposalRequest) -> RepairProposalR
         "Do not include extra keys."
     )
 
-    user_payload = {
-        "waiting_context": payload.waiting_context,
-        "validation_summary": payload.validation_summary,
-        "failure_summary": payload.failure_summary,
-        "user_note": payload.user_note,
-    }
+    user_payload = normalize_repair_payload(payload)
 
     body = {
         "model": model,
@@ -123,9 +143,16 @@ def build_glm_repair_proposal(payload: RepairProposalRequest) -> RepairProposalR
     with httpx.Client(timeout=timeout_ms / 1000) as client:
         response = client.post(url, headers=headers, json=body)
         response.raise_for_status()
-        data = response.json()
+        try:
+            data = response.json()
+        except Exception as exc:
+            debug_log(f"GLM response was not JSON: {type(exc).__name__}: {exc}")
+            debug_log(f"GLM raw response text: {truncate_text(response.text)}")
+            raise
 
+    debug_log(f"GLM response JSON: {truncate_text(json.dumps(data, ensure_ascii=False))}")
     content = extract_llm_content(data)
+    debug_log(f"GLM message content: {truncate_text(content)}")
     parsed = parse_llm_json(content)
 
     action_explanations: list[RepairActionExplanation] = []
@@ -135,11 +162,16 @@ def build_glm_repair_proposal(payload: RepairProposalRequest) -> RepairProposalR
         if key or message:
             action_explanations.append(RepairActionExplanation(key=key, message=message))
 
+    notes = [str(note) for note in (parsed.get("notes") or [])]
+    if DEBUG_REPAIR:
+        notes.append(f"debug_llm_raw: {truncate_text(content)}")
+        notes.append(f"debug_llm_model: {model}")
+
     return RepairProposalResponse(
         user_facing_reason=str(parsed.get("user_facing_reason") or "Task requires additional user actions."),
         resume_hint=str(parsed.get("resume_hint") or "Complete required actions and try resume."),
         action_explanations=action_explanations,
-        notes=[str(note) for note in (parsed.get("notes") or [])],
+        notes=notes,
     )
 
 
@@ -186,12 +218,60 @@ def parse_llm_json(content: str) -> dict[str, Any]:
         raise ValueError("LLM response content missing")
 
     trimmed = content.strip()
-    if trimmed.startswith("```"):
-        trimmed = trimmed.strip("`")
+    if trimmed.startswith("```") and trimmed.endswith("```"):
+        trimmed = trimmed[3:-3].strip()
         if trimmed.lower().startswith("json"):
             trimmed = trimmed[4:].strip()
 
     try:
         return json.loads(trimmed)
     except json.JSONDecodeError:
+        debug_log(f"LLM response was not valid JSON: {truncate_text(trimmed)}")
         raise ValueError("LLM response was not valid JSON")
+
+
+def normalize_repair_payload(payload: RepairProposalRequest) -> dict[str, Any]:
+    waiting_context = payload.waiting_context
+    validation_summary = payload.validation_summary
+    failure_summary = payload.failure_summary
+    return {
+        "waiting_context": {
+            "waiting_reason_type": waiting_context.waiting_reason_type,
+            "missing_slots": [
+                {
+                    "slot_name": slot.slot_name,
+                    "expected_type": slot.expected_type,
+                    "required": slot.required,
+                }
+                for slot in waiting_context.missing_slots
+            ],
+            "invalid_bindings": list(waiting_context.invalid_bindings),
+            "required_user_actions": [
+                serialize_required_action(action) for action in waiting_context.required_user_actions
+            ],
+            "resume_hint": waiting_context.resume_hint,
+            "can_resume": waiting_context.can_resume,
+        },
+        "validation_summary": {
+            "is_valid": validation_summary.is_valid,
+            "missing_roles": list(validation_summary.missing_roles),
+            "missing_params": list(validation_summary.missing_params),
+            "error_code": validation_summary.error_code,
+            "invalid_bindings": list(validation_summary.invalid_bindings),
+        },
+        "failure_summary": {
+            "failure_code": failure_summary.failure_code,
+            "failure_message": failure_summary.failure_message,
+            "created_at": failure_summary.created_at,
+        },
+        "user_note": payload.user_note,
+    }
+
+
+def serialize_required_action(action: RequiredUserAction) -> dict[str, Any]:
+    return {
+        "action_type": action.action_type,
+        "key": action.key,
+        "label": action.label,
+        "required": action.required,
+    }

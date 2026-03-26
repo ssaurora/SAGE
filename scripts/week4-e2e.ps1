@@ -12,6 +12,8 @@ $serviceDir = Join-Path $root "Service/planning-pass1"
 
 $postgresContainer = "sage-week4-postgres"
 $serviceContainer = "sage-week4-service"
+$backendContainer = "sage-week4-backend"
+$backendImage = "sage-backend:week4"
 
 $backendPort = 28080
 $servicePort = 28001
@@ -102,28 +104,73 @@ function Stop-ProcessListeningOnPort {
     }
 }
 
-function Start-BackendProcess {
+function Start-BackendContainer {
     param(
         [string]$BackendDir,
-        [string]$StdOutLog,
-        [string]$StdErrLog
+        [string]$ImageTag,
+        [string]$ContainerName,
+        [int]$HostPort,
+        [int]$PostgresPort,
+        [int]$ServicePort,
+        [string]$JwtSecret
     )
 
-    $mavenCommand = Get-Command mvn.cmd -ErrorAction SilentlyContinue
-    if ($null -eq $mavenCommand) {
-        $mavenCommand = Get-Command mvn -ErrorAction SilentlyContinue
+    Push-Location $BackendDir
+    try {
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        $packageOutput = & mvn -q -DskipTests package 2>&1
+        $packageExit = $LASTEXITCODE
+        $ErrorActionPreference = $previousPreference
+        if ($packageExit -ne 0) {
+            throw "failed to package backend jar: $packageOutput"
+        }
+
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        $buildOutput = docker build -t $ImageTag . 2>&1
+        $buildExit = $LASTEXITCODE
+        $ErrorActionPreference = $previousPreference
+        if ($buildExit -ne 0) {
+            throw "failed to build backend image: $buildOutput"
+        }
+    } finally {
+        Pop-Location
     }
 
-    if ($null -eq $mavenCommand) {
-        throw "Maven command not found in PATH."
-    }
+    Remove-ContainerIfExists -Name $ContainerName
 
-    return Start-Process -FilePath $mavenCommand.Source `
-        -ArgumentList "spring-boot:run", "-q", "-Dspring-boot.run.fork=false" `
-        -WorkingDirectory $BackendDir `
-        -RedirectStandardOutput $StdOutLog `
-        -RedirectStandardError $StdErrLog `
-        -PassThru
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $runOutput = docker run --name $ContainerName --rm -d `
+        -p "${HostPort}:8080" `
+        -e "DB_URL=jdbc:postgresql://host.docker.internal:${PostgresPort}/sage" `
+        -e "DB_USERNAME=postgres" `
+        -e "DB_PASSWORD=postgres" `
+        -e "PASS1_BASE_URL=http://host.docker.internal:${ServicePort}" `
+        -e "SERVER_PORT=8080" `
+        -e "JWT_SECRET=${JwtSecret}" `
+        -e "SAGE_UPLOAD_ROOT=/runtime/uploads" `
+        $ImageTag 2>&1
+    $runExit = $LASTEXITCODE
+    $ErrorActionPreference = $previousPreference
+    if ($runExit -ne 0) {
+        throw "failed to start backend container: $runOutput"
+    }
+    return $runOutput.Trim()
+}
+
+function Test-ContainerRunning {
+    param([string]$Name)
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $inspect = docker inspect -f "{{.State.Running}}" $Name 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        $ErrorActionPreference = $previousPreference
+        return $false
+    }
+    $ErrorActionPreference = $previousPreference
+    return $inspect.Trim() -eq "true"
 }
 
 $envVars = @("DB_URL", "DB_USERNAME", "DB_PASSWORD", "PASS1_BASE_URL", "SERVER_PORT", "JWT_SECRET")
@@ -190,11 +237,17 @@ try {
     $env:SERVER_PORT = "${backendPort}"
     $env:JWT_SECRET = "sage-week4-e2e-secret-key-123456789"
 
-    $backendProcess = Start-BackendProcess -BackendDir $backendDir -StdOutLog $backendLogOut -StdErrLog $backendLogErr
+    Start-BackendContainer -BackendDir $backendDir `
+        -ImageTag $backendImage `
+        -ContainerName $backendContainer `
+        -HostPort $backendPort `
+        -PostgresPort $postgresPort `
+        -ServicePort $servicePort `
+        -JwtSecret $env:JWT_SECRET | Out-Null
 
     Wait-Until -TimeoutSeconds 150 -ErrorMessage "BackEnd startup timed out" -Probe {
-        if ($backendProcess.HasExited) {
-            throw "BackEnd exited early with code $($backendProcess.ExitCode)"
+        if (-not (Test-ContainerRunning -Name $backendContainer)) {
+            throw "BackEnd container exited early"
         }
         $health = Invoke-RestMethod -Method Get -Uri "http://localhost:${backendPort}/actuator/health" -TimeoutSec 2
         return $health.status -eq "UP"
@@ -289,7 +342,7 @@ try {
     Write-Output "task2: $task2Id => $($task2Final.state)"
 
     if ($KeepRunning) {
-        Write-Output "KeepRunning=true, keeping BackEnd process and containers alive."
+        Write-Output "KeepRunning=true, keeping BackEnd container and dependencies alive."
         Write-Output "BackEnd: http://localhost:${backendPort}"
         Write-Output "Service: http://localhost:${servicePort}"
         Write-Output "PostgreSQL: localhost:${postgresPort}"
@@ -301,14 +354,11 @@ finally {
         [Environment]::SetEnvironmentVariable($name, $envBackup[$name], "Process")
     }
 
-    if ($null -ne $backendProcess -and -not $backendProcess.HasExited) {
-        Stop-Process -Id $backendProcess.Id -Force
-    }
-
     Stop-ProcessListeningOnPort -Port $backendPort
 
     if (-not $KeepRunning) {
         Remove-ContainerIfExists -Name $serviceContainer
         Remove-ContainerIfExists -Name $postgresContainer
+        Remove-ContainerIfExists -Name $backendContainer
     }
 }

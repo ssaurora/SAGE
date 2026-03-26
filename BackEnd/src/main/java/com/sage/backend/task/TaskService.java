@@ -204,7 +204,12 @@ public class TaskService {
             appendEvent(taskId, EventType.SKILL_ROUTED.name(), null, null, currentVersion, skillRouteJson);
 
             appendEvent(taskId, EventType.PLANNING_PASS1_STARTED.name(), null, null, currentVersion, null);
-            Pass1Response pass1Response = runPass1(taskId, request.getUserQuery(), currentVersion);
+            Pass1Response pass1Response = runPass1(
+                    taskId,
+                    request.getUserQuery(),
+                    currentVersion,
+                    goalRouteDecision.skillRoute().path("capability_key").asText(null)
+            );
             String pass1Json = objectMapper.writeValueAsString(pass1Response);
             ensureUpdated(taskStateMapper.updateStateAndPass1(taskId, currentVersion, TaskStatus.PLANNING.name(), pass1Json));
             appendEvent(taskId, EventType.PLANNING_PASS1_COMPLETED.name(), null, null, currentVersion + 1, objectMapper.writeValueAsString(Map.of("selected_template", safeString(pass1Response.getSelectedTemplate()))));
@@ -236,7 +241,7 @@ public class TaskService {
             TaskStatus nextStateAfterValidation = TaskStatus.PLANNING;
             if (!Boolean.TRUE.equals(validationResponse.getIsValid())) {
                 List<TaskAttachment> attachments = taskAttachmentMapper.findByTaskId(taskId);
-                repairDecision = repairDispatcherService.decide(validationNode, attachments);
+                repairDecision = repairDispatcherService.decide(validationNode, pass1Node, attachments);
                 if ("FAILED".equalsIgnoreCase(repairDecision.routing()) || "FATAL".equalsIgnoreCase(repairDecision.severity())) {
                     nextStateAfterValidation = TaskStatus.FAILED;
                 } else {
@@ -272,19 +277,16 @@ public class TaskService {
                     return response;
                 }
 
-                String waitingContextJson = writeJson(repairDecision.waitingContext());
-                taskStateMapper.updateWaitingContext(taskId, waitingContextJson, repairDecision.waitingContext().path("waiting_reason_type").asText("REPAIR_REQUIRED"));
-
-                JsonNode repairProposal = repairProposalService.generate(repairDecision.waitingContext(), validationNode, null, null);
+                WaitingStateSnapshot waitingState = rebuildWaitingState(taskId, pass1Node, validationNode, null, null);
                 RepairRecord repairRecord = new RepairRecord();
                 repairRecord.setTaskId(taskId);
                 repairRecord.setAttemptNo(taskState.getActiveAttemptNo() == null ? 1 : taskState.getActiveAttemptNo());
-                repairRecord.setDispatcherOutputJson(writeJson(Map.of("severity", repairDecision.severity(), "routing", repairDecision.routing())));
-                repairRecord.setRepairProposalJson(writeJson(repairProposal));
+                repairRecord.setDispatcherOutputJson(writeJson(Map.of("severity", waitingState.decision().severity(), "routing", waitingState.decision().routing())));
+                repairRecord.setRepairProposalJson(writeJson(waitingState.repairProposal()));
                 repairRecord.setResult("REJECTED");
                 repairRecordMapper.insert(repairRecord);
 
-                appendEvent(taskId, EventType.WAITING_USER_ENTERED.name(), null, null, currentVersion, waitingContextJson);
+                appendEvent(taskId, EventType.WAITING_USER_ENTERED.name(), null, null, currentVersion, waitingState.waitingContextJson());
 
                 auditService.appendAudit(taskId, "TASK_CREATE", "SUCCESS", traceId,
                         objectMapper.writeValueAsString(Map.of("state", currentState.name(), "validation_is_valid", false, "input_chain_status", inputChainStatus, "job_created", false)));
@@ -653,14 +655,22 @@ public class TaskService {
         appendEvent(taskId, EventType.RESUME_REQUESTED.name(), null, null, taskState.getStateVersion(),
                 writeJson(Map.of("resume_request_id", resumeRequestId)));
 
-        JsonNode waitingContext = refreshWaitingContext(taskId);
+        JsonNode pass1Node = readJsonNode(taskState.getPass1ResultJson());
+        WaitingStateSnapshot waitingState = rebuildWaitingState(
+                taskId,
+                pass1Node,
+                readJsonNode(taskState.getValidationSummaryJson()),
+                readJsonNode(taskState.getLastFailureSummaryJson()),
+                request.getUserNote()
+        );
+        JsonNode waitingContext = waitingState.waitingContext();
         if (!waitingContext.path("can_resume").asBoolean(false)) {
             RepairRecord rejected = new RepairRecord();
             rejected.setTaskId(taskId);
             rejected.setAttemptNo(taskState.getActiveAttemptNo() == null ? 1 : taskState.getActiveAttemptNo());
             rejected.setResumeRequestId(resumeRequestId);
             rejected.setDispatcherOutputJson(writeJson(Map.of("severity", "RECOVERABLE", "routing", "WAITING_USER")));
-            rejected.setRepairProposalJson(writeJson(repairProposalService.generate(waitingContext, readJsonNode(taskState.getValidationSummaryJson()), null, request.getUserNote())));
+            rejected.setRepairProposalJson(writeJson(waitingState.repairProposal()));
             rejected.setResumePayloadJson(writeJson(request));
             rejected.setResult("REJECTED");
             repairRecordMapper.insert(rejected);
@@ -885,7 +895,7 @@ public class TaskService {
             appendEvent(taskId, EventType.COGNITION_PASSB_STARTED.name(), null, null, currentVersion, null);
             CognitionPassBResponse passBResponse = runPassB(taskId, safeString(taskState.getUserQuery()), currentVersion, pass1Node);
             ObjectNode passBNode = (ObjectNode) objectMapper.readTree(objectMapper.writeValueAsString(passBResponse));
-            applyResumeInputs(passBNode, request, taskId);
+            applyResumeInputs(pass1Node, passBNode, request, taskId);
             String passBJson = writeJson(passBNode);
             appendEvent(taskId, EventType.COGNITION_PASSB_COMPLETED.name(), null, null, currentVersion,
                     writeJson(Map.of("binding_count", passBNode.path("slot_bindings").isArray() ? passBNode.path("slot_bindings").size() : 0, "resume", true)));
@@ -906,7 +916,7 @@ public class TaskService {
             RepairDecision decision = null;
             TaskStatus stateAfterValidation = TaskStatus.PLANNING;
             if (!Boolean.TRUE.equals(validationResponse.getIsValid())) {
-                decision = repairDispatcherService.decide(validationNode, taskAttachmentMapper.findByTaskId(taskId));
+                decision = repairDispatcherService.decide(validationNode, pass1Node, taskAttachmentMapper.findByTaskId(taskId));
                 if ("FAILED".equalsIgnoreCase(decision.routing()) || "FATAL".equalsIgnoreCase(decision.severity())) {
                     stateAfterValidation = TaskStatus.FAILED;
                 } else {
@@ -951,17 +961,16 @@ public class TaskService {
                     return response;
                 }
 
-                String waitingContextJson = writeJson(decision.waitingContext());
-                taskStateMapper.updateWaitingContext(taskId, waitingContextJson, decision.waitingContext().path("waiting_reason_type").asText("REPAIR_REQUIRED"));
+                WaitingStateSnapshot waitingState = rebuildWaitingState(taskId, pass1Node, validationNode, null, request.getUserNote());
                 RepairRecord repairRecord = new RepairRecord();
                 repairRecord.setTaskId(taskId);
                 repairRecord.setAttemptNo(taskState.getActiveAttemptNo() == null ? 1 : taskState.getActiveAttemptNo());
-                repairRecord.setDispatcherOutputJson(writeJson(Map.of("severity", decision.severity(), "routing", decision.routing())));
-                repairRecord.setRepairProposalJson(writeJson(repairProposalService.generate(decision.waitingContext(), validationNode, null, request.getUserNote())));
+                repairRecord.setDispatcherOutputJson(writeJson(Map.of("severity", waitingState.decision().severity(), "routing", waitingState.decision().routing())));
+                repairRecord.setRepairProposalJson(writeJson(waitingState.repairProposal()));
                 repairRecord.setResumePayloadJson(writeJson(request));
                 repairRecord.setResult("REJECTED");
                 repairRecordMapper.insert(repairRecord);
-                appendEvent(taskId, EventType.WAITING_USER_ENTERED.name(), null, null, currentVersion, waitingContextJson);
+                appendEvent(taskId, EventType.WAITING_USER_ENTERED.name(), null, null, currentVersion, waitingState.waitingContextJson());
 
                 ResumeTaskResponse response = new ResumeTaskResponse();
                 response.setTaskId(taskId);
@@ -1035,7 +1044,7 @@ public class TaskService {
         }
     }
 
-    private void applyResumeInputs(ObjectNode passBNode, ResumeTaskRequest request, String taskId) {
+    private void applyResumeInputs(JsonNode pass1Result, ObjectNode passBNode, ResumeTaskRequest request, String taskId) {
         if (passBNode == null) {
             return;
         }
@@ -1085,7 +1094,7 @@ public class TaskService {
         }
 
         ObjectNode argsDraft = passBNode.with("args_draft");
-        refreshDerivedAnalysisArgs(argsDraft, slotBindings);
+        refreshDerivedAnalysisArgs(pass1Result, argsDraft, slotBindings);
         if (request.getArgsOverrides() != null) {
             for (Map.Entry<String, Object> entry : request.getArgsOverrides().entrySet()) {
                 argsDraft.set(entry.getKey(), objectMapper.valueToTree(entry.getValue()));
@@ -1093,7 +1102,7 @@ public class TaskService {
         }
     }
 
-    private void refreshDerivedAnalysisArgs(ObjectNode argsDraft, ArrayNode slotBindings) {
+    private void refreshDerivedAnalysisArgs(JsonNode pass1Result, ObjectNode argsDraft, ArrayNode slotBindings) {
         Set<String> boundRoles = new HashSet<>();
         for (JsonNode node : slotBindings) {
             String roleName = node.path("role_name").asText("");
@@ -1102,24 +1111,21 @@ public class TaskService {
                 continue;
             }
             boundRoles.add(roleName);
-            switch (roleName) {
-                case "precipitation" -> {
-                    argsDraft.put("precipitation_slot", slotName);
-                    argsDraft.put("precipitation_index", 1200.0);
-                }
-                case "eto" -> {
-                    argsDraft.put("eto_slot", slotName);
-                    argsDraft.put("eto_index", 800.0);
-                }
-                case "depth_to_root_restricting_layer" -> {
-                    argsDraft.put("root_depth_slot", slotName);
-                    argsDraft.put("root_depth_factor", 0.95);
-                }
-                case "plant_available_water_content" -> {
-                    argsDraft.put("pawc_slot", slotName);
-                    argsDraft.put("pawc_factor", 0.9);
-                }
-                default -> {
+            JsonNode roleMappings = pass1Result == null ? null : pass1Result.path("role_arg_mappings");
+            if (roleMappings != null && roleMappings.isArray()) {
+                for (JsonNode mapping : roleMappings) {
+                    if (!roleName.equals(mapping.path("role_name").asText(""))) {
+                        continue;
+                    }
+                    String slotArgKey = mapping.path("slot_arg_key").asText("");
+                    String valueArgKey = mapping.path("value_arg_key").asText("");
+                    if (!slotArgKey.isBlank()) {
+                        argsDraft.put(slotArgKey, slotName);
+                    }
+                    if (!valueArgKey.isBlank()) {
+                        applyRoleValueDefault(argsDraft, roleName, valueArgKey);
+                    }
+                    break;
                 }
             }
         }
@@ -1134,11 +1140,50 @@ public class TaskService {
         }
     }
 
+    private void applyRoleValueDefault(ObjectNode argsDraft, String roleName, String valueArgKey) {
+        switch (roleName) {
+            case "precipitation" -> argsDraft.put(valueArgKey, 1200.0);
+            case "eto" -> argsDraft.put(valueArgKey, 800.0);
+            case "depth_to_root_restricting_layer" -> argsDraft.put(valueArgKey, 0.95);
+            case "plant_available_water_content" -> argsDraft.put(valueArgKey, 0.9);
+            default -> {
+            }
+        }
+    }
+
     private JsonNode refreshWaitingContext(String taskId) {
         TaskState latest = taskStateMapper.findByTaskId(taskId);
         JsonNode validationSummary = readJsonNode(latest.getValidationSummaryJson());
+        JsonNode pass1Result = readJsonNode(latest.getPass1ResultJson());
+        WaitingStateSnapshot waitingState = rebuildWaitingState(
+                taskId,
+                pass1Result,
+                validationSummary,
+                readJsonNode(latest.getLastFailureSummaryJson()),
+                null
+        );
+        try {
+            RepairRecord refreshRecord = new RepairRecord();
+            refreshRecord.setTaskId(taskId);
+            refreshRecord.setAttemptNo(latest.getActiveAttemptNo() == null ? 1 : latest.getActiveAttemptNo());
+            refreshRecord.setDispatcherOutputJson(writeJson(Map.of("severity", waitingState.decision().severity(), "routing", waitingState.decision().routing())));
+            refreshRecord.setRepairProposalJson(writeJson(waitingState.repairProposal()));
+            refreshRecord.setResult("REJECTED");
+            repairRecordMapper.insert(refreshRecord);
+        } catch (Exception ignored) {
+        }
+        return waitingState.waitingContext();
+    }
+
+    private WaitingStateSnapshot rebuildWaitingState(
+            String taskId,
+            JsonNode pass1Result,
+            JsonNode validationSummary,
+            JsonNode failureSummary,
+            String userNote
+    ) {
         List<TaskAttachment> attachments = taskAttachmentMapper.findByTaskId(taskId);
-        RepairDecision decision = repairDispatcherService.decide(validationSummary, attachments);
+        RepairDecision decision = repairDispatcherService.decide(validationSummary, pass1Result, attachments);
         String waitingContextJson;
         try {
             waitingContextJson = writeJson(decision.waitingContext());
@@ -1146,17 +1191,8 @@ public class TaskService {
             throw new ResponseStatusException(BAD_GATEWAY, "Failed to build waiting context", exception);
         }
         taskStateMapper.updateWaitingContext(taskId, waitingContextJson, decision.waitingContext().path("waiting_reason_type").asText("REPAIR_REQUIRED"));
-        try {
-            RepairRecord refreshRecord = new RepairRecord();
-            refreshRecord.setTaskId(taskId);
-            refreshRecord.setAttemptNo(latest.getActiveAttemptNo() == null ? 1 : latest.getActiveAttemptNo());
-            refreshRecord.setDispatcherOutputJson(writeJson(Map.of("severity", decision.severity(), "routing", decision.routing())));
-            refreshRecord.setRepairProposalJson(writeJson(repairProposalService.generate(decision.waitingContext(), validationSummary, readJsonNode(latest.getLastFailureSummaryJson()), null)));
-            refreshRecord.setResult("REJECTED");
-            repairRecordMapper.insert(refreshRecord);
-        } catch (Exception ignored) {
-        }
-        return decision.waitingContext();
+        JsonNode repairProposal = repairProposalService.generate(decision.waitingContext(), validationSummary, failureSummary, userNote);
+        return new WaitingStateSnapshot(decision, waitingContextJson, repairProposal);
     }
 
     private JsonNode readJsonNode(String sourceJson) {
@@ -1199,11 +1235,12 @@ public class TaskService {
         }
     }
 
-    private Pass1Response runPass1(String taskId, String userQuery, int stateVersion) {
+    private Pass1Response runPass1(String taskId, String userQuery, int stateVersion, String capabilityKey) {
         Pass1Request req = new Pass1Request();
         req.setTaskId(taskId);
         req.setUserQuery(userQuery);
         req.setStateVersion(stateVersion);
+        req.setCapabilityKey(capabilityKey);
         return pass1Client.runPass1(req);
     }
 
@@ -1528,4 +1565,14 @@ public class TaskService {
     private <T> List<T> safeList(List<T> values) { return values == null ? Collections.emptyList() : values; }
 
     private String safeString(String value) { return value == null ? "" : value; }
+
+    private record WaitingStateSnapshot(
+            RepairDecision decision,
+            String waitingContextJson,
+            JsonNode repairProposal
+    ) {
+        private JsonNode waitingContext() {
+            return decision.waitingContext();
+        }
+    }
 }

@@ -390,6 +390,10 @@ These rules define the canonical local container workflow. Follow them unless ex
 - Always ensure a `public/` directory exists before copying to the runtime stage.
 - Keep `.dockerignore` for frontend (`node_modules`, `.next`) to reduce build context size.
 
+### Service Image
+
+- Use `python:3.12-slim` as the base image for the service container.
+
 ### Healthchecks
 
 - Healthchecks must only use tools present in the base image.

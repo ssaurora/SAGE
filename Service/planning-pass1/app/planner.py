@@ -5,7 +5,6 @@ from app.schemas import (
     CognitionPassBResponse,
     DecisionSummary,
     GraphSkeleton,
-    LogicalInputRole,
     MaterializedExecutionGraph,
     MaterializedExecutionNode,
     PlanningPass1Request,
@@ -19,33 +18,31 @@ from app.schemas import (
     SlotSchemaItem,
     SlotSchemaView,
 )
+from app.schemas import SkillDefinition
+from app.skill_catalog import get_skill_definition
 
 
-ROLE_DEFAULTS: dict[str, dict[str, str | float]] = {
-    "precipitation": {"slot_key": "precipitation_slot", "value_key": "precipitation_index", "value": 1200.0},
-    "eto": {"slot_key": "eto_slot", "value_key": "eto_index", "value": 800.0},
-    "depth_to_root_restricting_layer": {"slot_key": "root_depth_slot", "value_key": "root_depth_factor", "value": 0.95},
-    "plant_available_water_content": {"slot_key": "pawc_slot", "value_key": "pawc_factor", "value": 0.9},
+ROLE_VALUE_DEFAULTS: dict[str, float] = {
+    "precipitation": 1200.0,
+    "eto": 800.0,
+    "depth_to_root_restricting_layer": 0.95,
+    "plant_available_water_content": 0.9,
 }
 
 
-def build_pass1_response(_: PlanningPass1Request) -> PlanningPass1Response:
+def build_pass1_response(payload: PlanningPass1Request) -> PlanningPass1Response:
+    skill = get_skill_definition(payload.capability_key)
     return PlanningPass1Response(
-        selected_template="water_yield_v1",
-        template_version="1.0.0",
-        logical_input_roles=[
-            LogicalInputRole(role_name="precipitation", required=True),
-            LogicalInputRole(role_name="eto", required=True),
-            LogicalInputRole(role_name="depth_to_root_restricting_layer", required=False),
-            LogicalInputRole(role_name="plant_available_water_content", required=False),
-        ],
+        capability_key=skill.capability.capability_key,
+        capability_facts=skill.capability,
+        selected_template=skill.selected_template,
+        template_version=skill.skill_version,
+        logical_input_roles=[*skill.required_roles, *skill.optional_roles],
+        role_arg_mappings=skill.role_arg_mappings,
         slot_schema_view=SlotSchemaView(
             slots=[
-                SlotSchemaItem(slot_name="watersheds", type="vector"),
-                SlotSchemaItem(slot_name="lulc", type="raster"),
-                SlotSchemaItem(slot_name="biophysical_table", type="table"),
-                SlotSchemaItem(slot_name="precipitation", type="raster"),
-                SlotSchemaItem(slot_name="eto", type="raster"),
+                SlotSchemaItem(slot_name=slot.slot_name, type=slot.type, bound_role=slot.bound_role)
+                for slot in skill.slot_specs
             ]
         ),
         graph_skeleton=GraphSkeleton(
@@ -67,6 +64,7 @@ def build_pass1_response(_: PlanningPass1Request) -> PlanningPass1Response:
 
 
 def build_passb_response(payload: CognitionPassBRequest) -> CognitionPassBResponse:
+    skill = get_skill_definition(payload.pass1_result.capability_key)
     slot_names = {slot.slot_name for slot in payload.pass1_result.slot_schema_view.slots}
 
     fallback_slot = "watersheds" if "watersheds" in slot_names else next(iter(slot_names), "workspace")
@@ -97,7 +95,7 @@ def build_passb_response(payload: CognitionPassBRequest) -> CognitionPassBRespon
         "n_workers": 1,
         "analysis_template": payload.pass1_result.selected_template,
     }
-    args_draft.update(_build_domain_args(bindings))
+    args_draft.update(_build_domain_args(skill, bindings))
 
     return CognitionPassBResponse(
         slot_bindings=bindings,
@@ -112,15 +110,19 @@ def build_passb_response(payload: CognitionPassBRequest) -> CognitionPassBRespon
     )
 
 
-def _build_domain_args(bindings: list[SlotBinding]) -> dict[str, str | int | float | bool]:
+def _build_domain_args(skill: SkillDefinition, bindings: list[SlotBinding]) -> dict[str, str | int | float | bool]:
+    mapping_by_role = {mapping.role_name: mapping for mapping in skill.role_arg_mappings}
     args: dict[str, str | int | float | bool] = {}
     for binding in bindings:
-        config = ROLE_DEFAULTS.get(binding.role_name)
-        if config is None:
+        mapping = mapping_by_role.get(binding.role_name)
+        if mapping is None:
             continue
-        args[str(config["slot_key"])] = binding.slot_name
-        args[str(config["value_key"])] = float(config["value"])
+        args[mapping.slot_arg_key] = binding.slot_name
+        value_default = ROLE_VALUE_DEFAULTS.get(binding.role_name)
+        if mapping.value_arg_key and value_default is not None:
+            args[mapping.value_arg_key] = value_default
 
+    args.update(skill.stable_defaults)
     if "root_depth_factor" not in args:
         args["root_depth_factor"] = 0.8
     if "pawc_factor" not in args:

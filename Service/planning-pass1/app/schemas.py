@@ -10,6 +10,7 @@ class PlanningPass1Request(BaseModel):
     task_id: str = Field(min_length=1)
     user_query: str = Field(min_length=1)
     state_version: int = Field(ge=0)
+    capability_key: str | None = None
 
 
 class LogicalInputRole(BaseModel):
@@ -17,9 +18,64 @@ class LogicalInputRole(BaseModel):
     required: bool
 
 
+class CapabilityValidationHint(BaseModel):
+    role_name: str
+    expected_slot_type: str | None = None
+
+
+class CapabilityRepairHint(BaseModel):
+    role_name: str
+    action_type: str
+    action_key: str
+    action_label: str
+
+
+class CapabilityOutputItem(BaseModel):
+    artifact_role: str
+    logical_name: str
+
+
+class CapabilityOutputContract(BaseModel):
+    outputs: list[CapabilityOutputItem] = Field(default_factory=list)
+
+
+class CapabilityDefinitionLite(BaseModel):
+    capability_key: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    validation_hints: list[CapabilityValidationHint] = Field(default_factory=list)
+    repair_hints: list[CapabilityRepairHint] = Field(default_factory=list)
+    output_contract: CapabilityOutputContract = Field(default_factory=CapabilityOutputContract)
+    runtime_profile_hint: str = Field(min_length=1)
+
+
+class SkillSlotSpec(BaseModel):
+    slot_name: str
+    type: str
+    bound_role: str | None = None
+
+
+class SkillRoleArgMapping(BaseModel):
+    role_name: str
+    slot_arg_key: str
+    value_arg_key: str | None = None
+
+
+class SkillDefinition(BaseModel):
+    skill_id: str = Field(min_length=1)
+    skill_version: str = Field(min_length=1)
+    selected_template: str = Field(min_length=1)
+    capability: CapabilityDefinitionLite
+    required_roles: list[LogicalInputRole] = Field(default_factory=list)
+    optional_roles: list[LogicalInputRole] = Field(default_factory=list)
+    slot_specs: list[SkillSlotSpec] = Field(default_factory=list)
+    role_arg_mappings: list[SkillRoleArgMapping] = Field(default_factory=list)
+    stable_defaults: dict[str, str | int | float | bool] = Field(default_factory=dict)
+
+
 class SlotSchemaItem(BaseModel):
     slot_name: str
     type: str
+    bound_role: str | None = None
 
 
 class SlotSchemaView(BaseModel):
@@ -32,9 +88,12 @@ class GraphSkeleton(BaseModel):
 
 
 class PlanningPass1Response(BaseModel):
+    capability_key: str = Field(min_length=1)
+    capability_facts: CapabilityDefinitionLite
     selected_template: str
     template_version: str
     logical_input_roles: list[LogicalInputRole]
+    role_arg_mappings: list[SkillRoleArgMapping] = Field(default_factory=list)
     slot_schema_view: SlotSchemaView
     graph_skeleton: GraphSkeleton
 
@@ -108,10 +167,46 @@ class PlanningPass2Response(BaseModel):
     planning_summary: dict[str, str | int | bool]
 
 
+class MissingSlotView(BaseModel):
+    slot_name: str
+    expected_type: str | None = None
+    required: bool = True
+
+
+class RequiredUserAction(BaseModel):
+    action_type: str
+    key: str
+    label: str
+    required: bool = True
+
+
+class WaitingContextView(BaseModel):
+    waiting_reason_type: str = ""
+    missing_slots: list[MissingSlotView] = Field(default_factory=list)
+    invalid_bindings: list[str] = Field(default_factory=list)
+    required_user_actions: list[RequiredUserAction] = Field(default_factory=list)
+    resume_hint: str = ""
+    can_resume: bool = False
+
+
+class ValidationSummaryView(BaseModel):
+    is_valid: bool | None = None
+    missing_roles: list[str] = Field(default_factory=list)
+    missing_params: list[str] = Field(default_factory=list)
+    error_code: str = ""
+    invalid_bindings: list[str] = Field(default_factory=list)
+
+
+class FailureSummaryView(BaseModel):
+    failure_code: str = ""
+    failure_message: str = ""
+    created_at: str | None = None
+
+
 class RepairProposalRequest(BaseModel):
-    waiting_context: dict[str, object] = Field(default_factory=dict)
-    validation_summary: dict[str, object] = Field(default_factory=dict)
-    failure_summary: dict[str, object] = Field(default_factory=dict)
+    waiting_context: WaitingContextView = Field(default_factory=WaitingContextView)
+    validation_summary: ValidationSummaryView = Field(default_factory=ValidationSummaryView)
+    failure_summary: FailureSummaryView = Field(default_factory=FailureSummaryView)
     user_note: str = ""
 
 

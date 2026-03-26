@@ -21,7 +21,9 @@ public class RegistryService {
 
     public ProviderResolution resolve(JsonNode goalParse, JsonNode skillRoute, JsonNode pass1Result) {
         String capabilityKey = "water_yield";
-        if (skillRoute != null && skillRoute.path("capability_key").isTextual()) {
+        if (pass1Result != null && pass1Result.path("capability_key").isTextual()) {
+            capabilityKey = pass1Result.path("capability_key").asText("water_yield");
+        } else if (skillRoute != null && skillRoute.path("capability_key").isTextual()) {
             capabilityKey = skillRoute.path("capability_key").asText("water_yield");
         } else if (skillRoute != null && skillRoute.path("primary_skill").isTextual()) {
             capabilityKey = skillRoute.path("primary_skill").asText("water_yield");

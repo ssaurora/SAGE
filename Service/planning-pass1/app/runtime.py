@@ -17,6 +17,7 @@ from app.redis_runtime import RedisRuntimeCoordinator
 from app.schemas import (
     ArtifactCatalog,
     ArtifactMeta,
+    CapabilityOutputItem,
     CancelJobResponse,
     CreateJobRequest,
     CreateJobResponse,
@@ -30,6 +31,7 @@ from app.schemas import (
     ResultObject,
     WorkspaceSummary,
 )
+from app.skill_catalog import get_skill_definition
 from app.workspace import (
     WorkspaceContext,
     archive_workspace,
@@ -228,6 +230,7 @@ class JobRuntimeManager:
         if not runtime_output_file.exists():
             raise RuntimeError("runtime_result.json was not produced")
 
+        skill = get_skill_definition(request.capability_key)
         payload = json.loads(runtime_output_file.read_text(encoding="utf-8"))
         result_id = str(payload["result_id"])
         summary = str(payload["summary"])
@@ -245,17 +248,53 @@ class JobRuntimeManager:
         derived_file = context.work_dir / "watershed_summary.json"
         derived_file.write_text(json.dumps(derived_summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
+        contract_primary_outputs = self._write_contract_primary_outputs(
+            context=context,
+            output_items=skill.capability.output_contract.outputs,
+            result_id=result_id,
+            summary=summary,
+            metrics=metrics,
+            task_id=request.task_id,
+            job_id=job_id,
+        )
+        self._write_contract_audit_artifacts(
+            context=context,
+            output_items=skill.capability.output_contract.outputs,
+            request=request,
+            job_id=job_id,
+            metrics=metrics,
+        )
+
         result_bundle = ResultBundle(
             result_id=result_id,
             task_id=request.task_id,
             job_id=job_id,
             summary=summary,
             metrics=metrics,
-            main_outputs=["water_yield_index", "climate_balance", "watershed_summary"],
-            artifacts=["result_bundle.json", "metrics.json", "runtime_result.json", "watershed_summary.json"],
-            primary_outputs=["result_bundle.json", "runtime_result.json"],
+            main_outputs=contract_primary_outputs + ["watershed_summary"],
+            artifacts=[
+                "result_bundle.json",
+                "runtime_result.json",
+                "metrics.json",
+                "watershed_summary.json",
+                *[f"{logical_name}.json" for logical_name in contract_primary_outputs],
+                *[
+                    f"{item.logical_name}.json"
+                    for item in skill.capability.output_contract.outputs
+                    if item.artifact_role == "AUDIT_ARTIFACT"
+                ],
+                "runtime_request.json",
+            ],
+            primary_outputs=["result_bundle.json", "runtime_result.json", *[f"{logical_name}.json" for logical_name in contract_primary_outputs]],
             intermediate_outputs=["metrics.json"],
-            audit_artifacts=["runtime_request.json"],
+            audit_artifacts=[
+                *[
+                    f"{item.logical_name}.json"
+                    for item in skill.capability.output_contract.outputs
+                    if item.artifact_role == "AUDIT_ARTIFACT"
+                ],
+                "runtime_request.json",
+            ],
             derived_outputs=["watershed_summary.json"],
             created_at=datetime.now(UTC),
         )
@@ -290,7 +329,7 @@ class JobRuntimeManager:
 
         archive_summary = archive_workspace(context)
         cleanup_summary = cleanup_workspace(context)
-        artifact_catalog = self._build_artifact_catalog(context)
+        artifact_catalog = self._build_artifact_catalog(context, skill.capability.output_contract.outputs)
         workspace_summary = WorkspaceSummary(
             workspace_id=context.workspace_id,
             workspace_output_path=str(context.work_dir),
@@ -388,19 +427,104 @@ result = {
             runtime_job.runtime_pid_group = process_group
             runtime_job.log_handle = log_handle
 
-    def _build_artifact_catalog(self, context: WorkspaceContext) -> ArtifactCatalog:
+    def _write_contract_primary_outputs(
+        self,
+        context: WorkspaceContext,
+        output_items: list[CapabilityOutputItem],
+        result_id: str,
+        summary: str,
+        metrics: dict[str, str | int | float | bool],
+        task_id: str,
+        job_id: str,
+    ) -> list[str]:
+        primary_logical_names: list[str] = []
+        for item in output_items:
+            if item.artifact_role != "PRIMARY_OUTPUT":
+                continue
+            output_file = context.work_dir / f"{item.logical_name}.json"
+            output_payload = {
+                "logical_name": item.logical_name,
+                "result_id": result_id,
+                "task_id": task_id,
+                "job_id": job_id,
+                "summary": summary,
+                "metrics": metrics,
+            }
+            output_file.write_text(json.dumps(output_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            primary_logical_names.append(item.logical_name)
+        return primary_logical_names
+
+    def _write_contract_audit_artifacts(
+        self,
+        context: WorkspaceContext,
+        output_items: list[CapabilityOutputItem],
+        request: CreateJobRequest,
+        job_id: str,
+        metrics: dict[str, str | int | float | bool],
+    ) -> None:
+        for item in output_items:
+            if item.artifact_role != "AUDIT_ARTIFACT":
+                continue
+            output_file = context.audit_dir / f"{item.logical_name}.json"
+            output_payload = {
+                "logical_name": item.logical_name,
+                "task_id": request.task_id,
+                "job_id": job_id,
+                "workspace_id": request.workspace_id,
+                "attempt_no": request.attempt_no,
+                "capability_key": request.capability_key,
+                "provider_key": request.provider_key,
+                "runtime_profile": request.runtime_profile,
+                "metrics_snapshot": metrics,
+            }
+            output_file.write_text(json.dumps(output_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _build_artifact_catalog(self, context: WorkspaceContext, output_items: list[CapabilityOutputItem]) -> ArtifactCatalog:
+        contract_names = self._build_contract_name_map(output_items)
         return ArtifactCatalog(
-            primary_outputs=self._collect_artifacts(context, context.archive_dir, "PRIMARY_OUTPUT", {"result_bundle.json", "runtime_result.json"}),
+            primary_outputs=self._collect_artifacts(
+                context,
+                context.archive_dir,
+                "PRIMARY_OUTPUT",
+                {"result_bundle.json", "runtime_result.json", *contract_names["PRIMARY_OUTPUT"].keys()},
+                contract_names["PRIMARY_OUTPUT"],
+            ),
             intermediate_outputs=self._collect_artifacts(context, context.archive_dir, "INTERMEDIATE_OUTPUT", {"metrics.json"}),
-            audit_artifacts=self._collect_artifacts(context, context.audit_dir, "AUDIT_ARTIFACT", set()),
+            audit_artifacts=self._collect_artifacts(
+                context,
+                context.audit_dir,
+                "AUDIT_ARTIFACT",
+                set(contract_names["AUDIT_ARTIFACT"].keys()) | {"runtime_request.json"},
+                contract_names["AUDIT_ARTIFACT"],
+            ),
             derived_outputs=self._collect_artifacts(context, context.archive_dir, "DERIVED_OUTPUT", {"watershed_summary.json"}),
             logs=self._collect_artifacts(context, context.logs_dir, "LOG", set()),
         )
 
-    def _collect_artifacts(self, context: WorkspaceContext, base_dir: Path, artifact_role: str, names: set[str]) -> list[ArtifactMeta]:
+    def _build_contract_name_map(self, output_items: list[CapabilityOutputItem]) -> dict[str, dict[str, str]]:
+        by_role: dict[str, dict[str, str]] = {
+            "PRIMARY_OUTPUT": {},
+            "AUDIT_ARTIFACT": {},
+            "INTERMEDIATE_OUTPUT": {},
+            "DERIVED_OUTPUT": {},
+        }
+        for item in output_items:
+            by_role.setdefault(item.artifact_role, {})
+            by_role[item.artifact_role][f"{item.logical_name}.json"] = item.logical_name
+        return by_role
+
+    def _collect_artifacts(
+        self,
+        context: WorkspaceContext,
+        base_dir: Path,
+        artifact_role: str,
+        names: set[str],
+        logical_name_overrides: dict[str, str] | None = None,
+    ) -> list[ArtifactMeta]:
         items: list[ArtifactMeta] = []
         if not base_dir.exists():
             return items
+        logical_name_overrides = logical_name_overrides or {}
         for path in sorted(base_dir.rglob("*")):
             if not path.is_file():
                 continue
@@ -411,7 +535,7 @@ result = {
                 ArtifactMeta(
                     artifact_id=artifact_id,
                     artifact_role=artifact_role,
-                    logical_name=path.name,
+                    logical_name=logical_name_overrides.get(path.name, path.name),
                     relative_path=str(path.relative_to(context.root_dir)).replace("\\", "/"),
                     content_type=_guess_content_type(path),
                     size_bytes=path.stat().st_size,
@@ -587,11 +711,13 @@ result = {
         with self._lock:
             runtime_job = self._jobs[job_id]
             context = runtime_job.workspace_context
+            capability_key = runtime_job.capability_key
         if context is None:
             return None, None
         archive_summary = archive_workspace(context)
         cleanup_summary = cleanup_workspace(context)
-        artifact_catalog = self._build_artifact_catalog(context)
+        skill = get_skill_definition(capability_key)
+        artifact_catalog = self._build_artifact_catalog(context, skill.capability.output_contract.outputs)
         workspace_summary = WorkspaceSummary(
             workspace_id=context.workspace_id,
             workspace_output_path=str(context.work_dir),
