@@ -30,17 +30,16 @@ public class AuthService {
             throw new ResponseStatusException(UNAUTHORIZED, "Invalid username or password");
         }
 
-        String token = jwtTokenProvider.createToken(user.getId(), user.getUsername());
+        String token = jwtTokenProvider.createToken(user.getId(), user.getUsername(), user.getRole());
 
         LoginResponse response = new LoginResponse();
         response.setAccessToken(token);
         response.setTokenType("Bearer");
-        response.setUser(new LoginResponse.UserView(String.valueOf(user.getId()), user.getUsername()));
+        response.setUser(new LoginResponse.UserView(String.valueOf(user.getId()), user.getUsername(), user.getRole()));
         return response;
     }
 
     public LoginResponse.UserView me(CurrentUser currentUser) {
-        return new LoginResponse.UserView(String.valueOf(currentUser.userId()), currentUser.username());
+        return new LoginResponse.UserView(String.valueOf(currentUser.userId()), currentUser.username(), currentUser.role());
     }
 }
-

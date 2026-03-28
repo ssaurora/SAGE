@@ -58,6 +58,7 @@ class SkillRoleArgMapping(BaseModel):
     role_name: str
     slot_arg_key: str
     value_arg_key: str | None = None
+    default_value: str | int | float | bool | None = None
 
 
 class SkillDefinition(BaseModel):
@@ -94,6 +95,7 @@ class PlanningPass1Response(BaseModel):
     template_version: str
     logical_input_roles: list[LogicalInputRole]
     role_arg_mappings: list[SkillRoleArgMapping] = Field(default_factory=list)
+    stable_defaults: dict[str, str | int | float | bool] = Field(default_factory=dict)
     slot_schema_view: SlotSchemaView
     graph_skeleton: GraphSkeleton
 
@@ -156,15 +158,25 @@ class MaterializedExecutionGraph(BaseModel):
 
 
 class RuntimeAssertion(BaseModel):
+    assertion_id: str
     name: str
     required: bool
     message: str
+    assertion_type: str
+    node_id: str | None = None
+    target_key: str | None = None
+    expected_value: str | None = None
+    repairable: bool = False
+    details: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
 
 
 class PlanningPass2Response(BaseModel):
     materialized_execution_graph: MaterializedExecutionGraph
     runtime_assertions: list[RuntimeAssertion]
+    graph_digest: str
     planning_summary: dict[str, str | int | bool]
+    canonicalization_summary: dict[str, str | int | bool]
+    rewrite_summary: dict[str, str | int | bool]
 
 
 class MissingSlotView(BaseModel):
@@ -237,7 +249,10 @@ class CreateJobRequest(BaseModel):
     capability_key: str = Field(min_length=1)
     provider_key: str = Field(min_length=1)
     runtime_profile: str = Field(min_length=1)
+    case_id: str | None = None
     materialized_execution_graph: MaterializedExecutionGraph
+    runtime_assertions: list[RuntimeAssertion] = Field(default_factory=list)
+    slot_bindings: list[SlotBinding] = Field(default_factory=list)
     args_draft: dict[str, str | int | float | bool]
 
 
@@ -267,12 +282,19 @@ class WorkspaceSummary(BaseModel):
     archive_completed: bool
 
 
+class OutputReference(BaseModel):
+    output_id: str
+    path: str
+
+
 class ResultBundle(BaseModel):
     result_id: str
     task_id: str
     job_id: str
     summary: str
     metrics: dict[str, str | int | float | bool]
+    output_registry: dict[str, str] = Field(default_factory=dict)
+    primary_output_refs: list[OutputReference] = Field(default_factory=list)
     main_outputs: list[str]
     artifacts: list[str]
     primary_outputs: list[str] = Field(default_factory=list)
@@ -293,6 +315,19 @@ class FailureSummary(BaseModel):
     failure_code: str
     failure_message: str
     created_at: datetime
+    assertion_id: str | None = None
+    node_id: str | None = None
+    repairable: bool | None = None
+    details: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+
+
+class ProviderInputBinding(BaseModel):
+    role_name: str
+    slot_name: str | None = None
+    source: str | None = None
+    arg_key: str | None = None
+    provider_input_path: str | None = None
+    source_ref: str | None = None
 
 
 class DockerRuntimeEvidence(BaseModel):
@@ -300,6 +335,13 @@ class DockerRuntimeEvidence(BaseModel):
     image: str
     workspace_output_path: str
     result_file_exists: bool
+    provider_key: str | None = None
+    runtime_profile: str | None = None
+    case_id: str | None = None
+    contract_mode: str | None = None
+    runtime_mode: str | None = None
+    input_bindings: list[ProviderInputBinding] = Field(default_factory=list)
+    promotion_status: str | None = None
 
 
 class ResultObject(BaseModel):

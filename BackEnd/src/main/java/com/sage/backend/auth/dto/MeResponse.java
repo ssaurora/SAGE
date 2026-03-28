@@ -7,13 +7,15 @@ public class MeResponse {
     private String userId;
 
     private String username;
+    private String role;
 
     public MeResponse() {
     }
 
-    public MeResponse(String userId, String username) {
+    public MeResponse(String userId, String username, String role) {
         this.userId = userId;
         this.username = username;
+        this.role = role;
     }
 
     public String getUserId() {
@@ -31,5 +33,12 @@ public class MeResponse {
     public void setUsername(String username) {
         this.username = username;
     }
-}
 
+    public String getRole() {
+        return role;
+    }
+
+    public void setRole(String role) {
+        this.role = role;
+    }
+}

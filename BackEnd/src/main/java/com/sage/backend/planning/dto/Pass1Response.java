@@ -3,6 +3,7 @@ package com.sage.backend.planning.dto;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
+import java.util.Map;
 
 public class Pass1Response {
     @JsonProperty("capability_key")
@@ -22,6 +23,9 @@ public class Pass1Response {
 
     @JsonProperty("role_arg_mappings")
     private List<RoleArgMapping> roleArgMappings;
+
+    @JsonProperty("stable_defaults")
+    private Map<String, Object> stableDefaults;
 
     @JsonProperty("slot_schema_view")
     private SlotSchemaView slotSchemaView;
@@ -75,6 +79,14 @@ public class Pass1Response {
 
     public void setRoleArgMappings(List<RoleArgMapping> roleArgMappings) {
         this.roleArgMappings = roleArgMappings;
+    }
+
+    public Map<String, Object> getStableDefaults() {
+        return stableDefaults;
+    }
+
+    public void setStableDefaults(Map<String, Object> stableDefaults) {
+        this.stableDefaults = stableDefaults;
     }
 
     public SlotSchemaView getSlotSchemaView() {
@@ -137,6 +149,9 @@ public class Pass1Response {
         @JsonProperty("value_arg_key")
         private String valueArgKey;
 
+        @JsonProperty("default_value")
+        private Object defaultValue;
+
         public String getRoleName() {
             return roleName;
         }
@@ -159,6 +174,14 @@ public class Pass1Response {
 
         public void setValueArgKey(String valueArgKey) {
             this.valueArgKey = valueArgKey;
+        }
+
+        public Object getDefaultValue() {
+            return defaultValue;
+        }
+
+        public void setDefaultValue(Object defaultValue) {
+            this.defaultValue = defaultValue;
         }
     }
 

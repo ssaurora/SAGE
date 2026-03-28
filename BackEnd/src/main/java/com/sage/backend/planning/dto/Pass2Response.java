@@ -10,8 +10,17 @@ public class Pass2Response {
     @JsonProperty("runtime_assertions")
     private JsonNode runtimeAssertions;
 
+    @JsonProperty("graph_digest")
+    private String graphDigest;
+
     @JsonProperty("planning_summary")
     private JsonNode planningSummary;
+
+    @JsonProperty("canonicalization_summary")
+    private JsonNode canonicalizationSummary;
+
+    @JsonProperty("rewrite_summary")
+    private JsonNode rewriteSummary;
 
     public JsonNode getMaterializedExecutionGraph() {
         return materializedExecutionGraph;
@@ -36,5 +45,28 @@ public class Pass2Response {
     public void setPlanningSummary(JsonNode planningSummary) {
         this.planningSummary = planningSummary;
     }
-}
 
+    public String getGraphDigest() {
+        return graphDigest;
+    }
+
+    public void setGraphDigest(String graphDigest) {
+        this.graphDigest = graphDigest;
+    }
+
+    public JsonNode getCanonicalizationSummary() {
+        return canonicalizationSummary;
+    }
+
+    public void setCanonicalizationSummary(JsonNode canonicalizationSummary) {
+        this.canonicalizationSummary = canonicalizationSummary;
+    }
+
+    public JsonNode getRewriteSummary() {
+        return rewriteSummary;
+    }
+
+    public void setRewriteSummary(JsonNode rewriteSummary) {
+        this.rewriteSummary = rewriteSummary;
+    }
+}

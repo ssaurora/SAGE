@@ -45,6 +45,7 @@ export type LoginResponse = {
   user: {
     user_id: string;
     username: string;
+    role?: string;
   };
 };
 
@@ -58,6 +59,26 @@ export function login(username: string, password: string): Promise<LoginResponse
 export type MeResponse = {
   user_id: string;
   username: string;
+  role?: string;
+};
+
+export type ResumeTransaction = {
+  resume_request_id?: string;
+  status?: string;
+  base_checkpoint_version?: number;
+  candidate_checkpoint_version?: number;
+  candidate_inventory_version?: number;
+  candidate_manifest_id?: string;
+  candidate_attempt_no?: number;
+  candidate_job_id?: string;
+  failure_reason?: string;
+  updated_at?: string;
+};
+
+export type CorruptionState = {
+  is_corrupted?: boolean;
+  reason?: string;
+  corrupted_since?: string;
 };
 
 export function getMe(): Promise<MeResponse> {
@@ -79,19 +100,71 @@ export function createTask(userQuery: string): Promise<CreateTaskResponse> {
   });
 }
 
+export type CapabilityValidationHintDto = {
+  role_name?: string;
+  expected_slot_type?: string | null;
+};
+
+export type CapabilityRepairHintDto = {
+  role_name?: string;
+  action_type?: string;
+  action_key?: string;
+  action_label?: string;
+};
+
+export type CapabilityOutputItemDto = {
+  artifact_role?: string;
+  logical_name?: string;
+};
+
 export type TaskDetailResponse = {
   task_id: string;
   state: string;
   state_version: number;
+  planning_revision?: number;
+  checkpoint_version?: number;
+  resume_transaction?: ResumeTransaction;
+  corruption_state?: CorruptionState;
+  promotion_status?: string;
+  graph_digest?: string;
+  planning_summary?: Record<string, unknown>;
   latest_result_bundle_id?: string;
   latest_workspace_id?: string;
   pass1_summary?: {
+    capability_key?: string;
     selected_template: string;
     logical_input_roles_count: number;
+    required_roles_count?: number;
+    optional_roles_count?: number;
+    role_arg_mapping_count?: number;
     slot_schema_view_version: string;
+    stable_defaults?: {
+      analysis_template?: string;
+      root_depth_factor?: number;
+      pawc_factor?: number;
+    };
   };
-  goal_parse_summary?: Record<string, unknown>;
-  skill_route_summary?: Record<string, unknown>;
+  goal_parse_summary?: {
+    goal_type?: string;
+    user_query?: string;
+    analysis_kind?: string;
+    intent_mode?: string;
+    entities?: string[];
+    source?: string;
+  };
+  skill_route_summary?: {
+    route_mode?: string;
+    primary_skill?: string;
+    capability_key?: string;
+    route_source?: string;
+    confidence?: number;
+    selected_template?: string;
+    template_version?: string;
+    execution_mode?: string;
+    provider_preference?: string;
+    runtime_profile_preference?: string;
+    source?: string;
+  };
   slot_bindings_summary?: {
     bound_slots_count: number;
     bound_role_names: string[];
@@ -112,18 +185,41 @@ export type TaskDetailResponse = {
     job_id: string;
     job_state: string;
     last_heartbeat_at?: string;
+    provider_key?: string;
+    capability_key?: string;
+    runtime_profile?: string;
+    case_id?: string;
   };
-  pass2_summary?: Record<string, unknown>;
+  pass2_summary?: {
+    planner?: string;
+    node_count?: number;
+    edge_count?: number;
+    validation_is_valid?: boolean;
+    validation_error_code?: string;
+    capability_key?: string;
+    template?: string;
+    runtime_assertion_count?: number;
+    graph_digest?: string;
+    canonicalization_summary?: Record<string, unknown>;
+    rewrite_summary?: Record<string, unknown>;
+  };
   result_object_summary?: {
     result_id?: string;
     summary?: string;
     artifact_count?: number;
     created_at?: string;
+    assertion_id?: string;
+    node_id?: string;
+    repairable?: boolean;
+    details?: Record<string, unknown>;
   };
   result_bundle_summary?: {
     result_id?: string;
     summary?: string;
     main_output_count?: number;
+    main_outputs?: string[];
+    primary_outputs?: string[];
+    audit_artifacts?: string[];
     created_at?: string;
   };
   final_explanation_summary?: {
@@ -135,6 +231,10 @@ export type TaskDetailResponse = {
     failure_code?: string;
     failure_message?: string;
     created_at?: string;
+    assertion_id?: string;
+    node_id?: string;
+    repairable?: boolean;
+    details?: Record<string, unknown>;
   };
   waiting_context?: {
     waiting_reason_type?: string;
@@ -181,15 +281,102 @@ export type TaskManifestResponse = {
   task_id: string;
   attempt_no: number;
   manifest_version: number;
-  goal_parse?: Record<string, unknown>;
-  skill_route?: Record<string, unknown>;
-  logical_input_roles?: unknown;
-  slot_schema_view?: Record<string, unknown>;
-  slot_bindings?: unknown;
+  freeze_status?: string;
+  planning_revision?: number;
+  checkpoint_version?: number;
+  graph_digest?: string;
+  planning_summary?: Record<string, unknown>;
+  canonicalization_summary?: Record<string, unknown>;
+  rewrite_summary?: Record<string, unknown>;
+  resume_transaction?: ResumeTransaction;
+  corruption_state?: CorruptionState;
+  promotion_status?: string;
+  goal_parse?: {
+    goal_type?: string;
+    user_query?: string;
+    analysis_kind?: string;
+    intent_mode?: string;
+    entities?: string[];
+    source?: string;
+  };
+  skill_route?: {
+    route_mode?: string;
+    primary_skill?: string;
+    capability_key?: string;
+    route_source?: string;
+    confidence?: number;
+    selected_template?: string;
+    template_version?: string;
+    execution_mode?: string;
+    provider_preference?: string;
+    runtime_profile_preference?: string;
+    source?: string;
+  };
+  capability_key?: string;
+  capability_facts?: {
+    capability_key?: string;
+    display_name?: string;
+    validation_hints?: CapabilityValidationHintDto[];
+    repair_hints?: CapabilityRepairHintDto[];
+    output_contract?: {
+      outputs?: CapabilityOutputItemDto[];
+    };
+    runtime_profile_hint?: string;
+  };
+  logical_input_roles?: {
+    role_name?: string;
+    required?: boolean;
+  }[];
+  role_arg_mappings?: {
+    role_name?: string;
+    slot_arg_key?: string;
+    value_arg_key?: string | null;
+    default_value?: string | number | boolean | null;
+  }[];
+  stable_defaults?: {
+    analysis_template?: string;
+    root_depth_factor?: number;
+    pawc_factor?: number;
+  };
+  slot_schema_view?: {
+    slots?: {
+      slot_name?: string;
+      type?: string;
+      bound_role?: string | null;
+    }[];
+  };
+  slot_bindings?: {
+    role_name?: string;
+    slot_name?: string;
+    source?: string;
+  }[];
   args_draft?: Record<string, unknown>;
-  validation_summary?: Record<string, unknown>;
-  execution_graph?: Record<string, unknown>;
-  runtime_assertions?: Record<string, unknown>;
+  validation_summary?: {
+    is_valid?: boolean;
+    missing_roles?: string[];
+    missing_params?: string[];
+    error_code?: string;
+    invalid_bindings?: string[];
+  };
+  execution_graph?: {
+    nodes?: {
+      node_id?: string;
+      kind?: string;
+    }[];
+    edges?: string[][];
+  };
+  runtime_assertions?: {
+    assertion_id?: string;
+    name?: string;
+    required?: boolean;
+    message?: string;
+    assertion_type?: string;
+    node_id?: string;
+    target_key?: string;
+    expected_value?: string;
+    repairable?: boolean;
+    details?: Record<string, unknown>;
+  }[];
   created_at?: string;
 };
 
@@ -210,18 +397,36 @@ export type TaskResultResponse = {
   job_id?: string;
   task_state: string;
   job_state?: string;
+  provider_key?: string;
+  runtime_profile?: string;
+  case_id?: string;
+  resume_transaction?: ResumeTransaction;
+  corruption_state?: CorruptionState;
+  freeze_status?: string;
+  planning_revision?: number;
+  checkpoint_version?: number;
+  graph_digest?: string;
+  planning_summary?: Record<string, unknown>;
+  canonicalization_summary?: Record<string, unknown>;
+  rewrite_summary?: Record<string, unknown>;
+  promotion_status?: string;
   result_bundle?: {
     result_id?: string;
     task_id?: string;
     job_id?: string;
     summary?: string;
     metrics?: Record<string, unknown>;
+    output_registry?: Record<string, unknown>;
+    primary_output_refs?: {
+      output_id?: string;
+      path?: string;
+    }[];
     main_outputs?: string[];
     artifacts?: string[];
-    primary_outputs?: ArtifactMeta[];
-    intermediate_outputs?: ArtifactMeta[];
-    audit_artifacts?: ArtifactMeta[];
-    derived_outputs?: ArtifactMeta[];
+    primary_outputs?: string[];
+    intermediate_outputs?: string[];
+    audit_artifacts?: string[];
+    derived_outputs?: string[];
     created_at?: string;
   };
   final_explanation?: {
@@ -234,12 +439,30 @@ export type TaskResultResponse = {
     failure_code?: string;
     failure_message?: string;
     created_at?: string;
+    assertion_id?: string;
+    node_id?: string;
+    repairable?: boolean;
+    details?: Record<string, unknown>;
   };
   docker_runtime_evidence?: {
     container_name?: string;
     image?: string;
     workspace_output_path?: string;
     result_file_exists?: boolean;
+    provider_key?: string;
+    runtime_profile?: string;
+    case_id?: string;
+    contract_mode?: string;
+    runtime_mode?: string;
+    input_bindings?: {
+      role_name?: string;
+      slot_name?: string;
+      source?: string;
+      arg_key?: string;
+      provider_input_path?: string;
+      source_ref?: string;
+    }[];
+    promotion_status?: string;
   };
   workspace_summary?: WorkspaceSummary;
   artifact_catalog?: ArtifactCatalog;
@@ -389,6 +612,14 @@ export type ResumeTaskResponse = {
   resume_attempt: number;
 };
 
+export type ForceRevertCheckpointResponse = {
+  task_id: string;
+  state: string;
+  state_version: number;
+  checkpoint_version?: number;
+  manifest_id?: string;
+};
+
 export function resumeTask(
   taskId: string,
   payload: {
@@ -400,6 +631,17 @@ export function resumeTask(
   },
 ): Promise<ResumeTaskResponse> {
   return apiFetch<ResumeTaskResponse>(`/tasks/${taskId}/resume`, {
+    method: "POST",
+    withAuth: true,
+    body: JSON.stringify(payload),
+  });
+}
+
+export function forceRevertCheckpoint(
+  taskId: string,
+  payload: { request_id: string; target_checkpoint_version: number },
+): Promise<ForceRevertCheckpointResponse> {
+  return apiFetch<ForceRevertCheckpointResponse>(`/tasks/${taskId}/force-revert-checkpoint`, {
     method: "POST",
     withAuth: true,
     body: JSON.stringify(payload),

@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 
 import { ArtifactMeta, getTaskResult, TaskResultResponse } from "@/lib/api";
 import { getAccessToken } from "@/lib/auth";
+import DebugJsonPanel from "@/components/DebugJsonPanel";
 
 function formatValue(value: unknown): string {
   if (value === null || value === undefined) {
@@ -54,6 +55,20 @@ function ArtifactList({ artifacts }: { artifacts?: string[] }) {
   );
 }
 
+function ArtifactNameList({ items }: { items?: string[] }) {
+  if (!items || items.length === 0) {
+    return <p className="muted">No artifacts recorded.</p>;
+  }
+
+  return (
+    <ul className="simple-list">
+      {items.map((artifact, index) => (
+        <li key={`${artifact}-${index}`}>{artifact}</li>
+      ))}
+    </ul>
+  );
+}
+
 function ArtifactMetaList({ items }: { items?: ArtifactMeta[] }) {
   if (!items || items.length === 0) {
     return <p className="muted">No artifacts recorded.</p>;
@@ -67,6 +82,237 @@ function ArtifactMetaList({ items }: { items?: ArtifactMeta[] }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+function OutputReferenceList({
+  items,
+}: {
+  items?: NonNullable<TaskResultResponse["result_bundle"]>["primary_output_refs"];
+}) {
+  if (!items || items.length === 0) {
+    return <p className="muted">No primary output refs recorded.</p>;
+  }
+
+  return (
+    <ul className="simple-list">
+      {items.map((item, index) => (
+        <li key={`${item.output_id ?? "output"}-${index}`}>
+          {item.output_id ?? "-"} | {item.path ?? "-"}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function InputBindingList({
+  items,
+}: {
+  items?: NonNullable<TaskResultResponse["docker_runtime_evidence"]>["input_bindings"];
+}) {
+  if (!items || items.length === 0) {
+    return <p className="muted">No provider input bindings recorded.</p>;
+  }
+
+  return (
+    <ul className="simple-list">
+      {items.map((binding, index) => (
+        <li key={`${binding.role_name ?? "binding"}-${index}`}>
+          {binding.role_name ?? "-"} | slot={binding.slot_name ?? "-"} | arg={binding.arg_key ?? "-"} | source={binding.source ?? "-"} | path={binding.provider_input_path ?? "-"}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function ExecutionSummaryPanel({
+  resultBundle,
+  failureSummary,
+}: {
+  resultBundle?: TaskResultResponse["result_bundle"];
+  failureSummary?: TaskResultResponse["failure_summary"];
+}) {
+  return (
+    <div className="kv-grid">
+      <div className="kv-item">
+        <span className="kv-key">result_id</span>
+        <span className="kv-value">{resultBundle?.result_id ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">summary</span>
+        <span className="kv-value">{resultBundle?.summary ?? failureSummary?.failure_message ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">created_at</span>
+        <span className="kv-value">{resultBundle?.created_at ?? failureSummary?.created_at ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">main_outputs</span>
+        <span className="kv-value">{resultBundle?.main_outputs?.join(", ") ?? "-"}</span>
+      </div>
+    </div>
+  );
+}
+
+function FinalExplanationPanel({
+  explanation,
+}: {
+  explanation?: TaskResultResponse["final_explanation"];
+}) {
+  if (!explanation) {
+    return <p className="muted">No final explanation available.</p>;
+  }
+
+  return (
+    <>
+      <div className="kv-grid">
+        <div className="kv-item">
+          <span className="kv-key">title</span>
+          <span className="kv-value">{explanation.title ?? "-"}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">generated_at</span>
+          <span className="kv-value">{explanation.generated_at ?? "-"}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">highlight_count</span>
+          <span className="kv-value">{formatValue(explanation.highlights?.length)}</span>
+        </div>
+      </div>
+      <h3>Narrative</h3>
+      <p>{explanation.narrative ?? "-"}</p>
+      <h3>Highlights</h3>
+      <ul className="simple-list">
+        {(explanation.highlights ?? []).map((item, index) => (
+          <li key={`${item}-${index}`}>{item}</li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
+function WorkspaceSummaryPanel({
+  summary,
+}: {
+  summary?: TaskResultResponse["workspace_summary"];
+}) {
+  if (!summary) {
+    return <p className="muted">No workspace summary available.</p>;
+  }
+
+  return (
+    <div className="kv-grid">
+      <div className="kv-item">
+        <span className="kv-key">workspace_id</span>
+        <span className="kv-value">{summary.workspace_id ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">workspace_output_path</span>
+        <span className="kv-value">{summary.workspace_output_path ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">archive_path</span>
+        <span className="kv-value">{summary.archive_path ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">cleanup_completed</span>
+        <span className="kv-value">{formatValue(summary.cleanup_completed)}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">archive_completed</span>
+        <span className="kv-value">{formatValue(summary.archive_completed)}</span>
+      </div>
+    </div>
+  );
+}
+
+function RuntimeEvidencePanel({
+  evidence,
+}: {
+  evidence?: TaskResultResponse["docker_runtime_evidence"];
+}) {
+  if (!evidence) {
+    return <p className="muted">No runtime evidence available.</p>;
+  }
+
+  return (
+    <div className="kv-grid">
+      <div className="kv-item">
+        <span className="kv-key">container_name</span>
+        <span className="kv-value">{evidence.container_name ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">image</span>
+        <span className="kv-value">{evidence.image ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">workspace_output_path</span>
+        <span className="kv-value">{evidence.workspace_output_path ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">result_file_exists</span>
+        <span className="kv-value">{formatValue(evidence.result_file_exists)}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">provider_key</span>
+        <span className="kv-value">{evidence.provider_key ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">runtime_profile</span>
+        <span className="kv-value">{evidence.runtime_profile ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">case_id</span>
+        <span className="kv-value">{evidence.case_id ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">contract_mode</span>
+        <span className="kv-value">{evidence.contract_mode ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">runtime_mode</span>
+        <span className="kv-value">{evidence.runtime_mode ?? "-"}</span>
+      </div>
+    </div>
+  );
+}
+
+function FailureSummaryPanel({
+  summary,
+}: {
+  summary?: TaskResultResponse["failure_summary"];
+}) {
+  if (!summary) {
+    return <p className="muted">No failure summary available.</p>;
+  }
+
+  return (
+    <div className="kv-grid">
+      <div className="kv-item">
+        <span className="kv-key">failure_code</span>
+        <span className="kv-value">{summary.failure_code ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">failure_message</span>
+        <span className="kv-value">{summary.failure_message ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">created_at</span>
+        <span className="kv-value">{summary.created_at ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">assertion_id</span>
+        <span className="kv-value">{summary.assertion_id ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">node_id</span>
+        <span className="kv-value">{summary.node_id ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">repairable</span>
+        <span className="kv-value">{formatValue(summary.repairable)}</span>
+      </div>
+    </div>
   );
 }
 
@@ -135,6 +381,9 @@ export default function TaskResultPage() {
             <h1>Task Result</h1>
             <p className="muted">task_id: {taskId}</p>
             <p className="muted">job_id: {result?.job_id ?? "-"}</p>
+            <p className="muted">provider_key: {result?.provider_key ?? runtimeEvidence?.provider_key ?? "-"}</p>
+            <p className="muted">runtime_profile: {result?.runtime_profile ?? runtimeEvidence?.runtime_profile ?? "-"}</p>
+            <p className="muted">case_id: {result?.case_id ?? runtimeEvidence?.case_id ?? "-"}</p>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <span className="status">task {result?.task_state ?? "-"}</span>
@@ -160,24 +409,7 @@ export default function TaskResultPage() {
 
       <div className="card">
         <h2>Execution Summary</h2>
-        <div className="kv-grid">
-          <div className="kv-item">
-            <span className="kv-key">result_id</span>
-            <span className="kv-value">{resultBundle?.result_id ?? "-"}</span>
-          </div>
-          <div className="kv-item">
-            <span className="kv-key">summary</span>
-            <span className="kv-value">{resultBundle?.summary ?? failureSummary?.failure_message ?? "-"}</span>
-          </div>
-          <div className="kv-item">
-            <span className="kv-key">created_at</span>
-            <span className="kv-value">{resultBundle?.created_at ?? failureSummary?.created_at ?? "-"}</span>
-          </div>
-          <div className="kv-item">
-            <span className="kv-key">main_outputs</span>
-            <span className="kv-value">{resultBundle?.main_outputs?.join(", ") ?? "-"}</span>
-          </div>
-        </div>
+        <ExecutionSummaryPanel resultBundle={resultBundle} failureSummary={failureSummary} />
       </div>
 
       <div className="card">
@@ -187,126 +419,75 @@ export default function TaskResultPage() {
 
       <div className="card">
         <h2>Explanation</h2>
-        {finalExplanation ? (
-          <>
-            <p><strong>{finalExplanation.title ?? "Result Explanation"}</strong></p>
-            <p>{finalExplanation.narrative ?? "-"}</p>
-            <h3>Highlights</h3>
-            <ul className="simple-list">
-              {(finalExplanation.highlights ?? []).map((item, index) => (
-                <li key={`${item}-${index}`}>{item}</li>
-              ))}
-            </ul>
-            <p className="muted">generated_at: {finalExplanation.generated_at ?? "-"}</p>
-          </>
-        ) : (
-          <p className="muted">No final explanation available.</p>
-        )}
+        <FinalExplanationPanel explanation={finalExplanation} />
       </div>
 
       <div className="card">
         <h2>Artifacts</h2>
         <ArtifactList artifacts={resultBundle?.artifacts} />
+        <h3>Primary Output Refs</h3>
+        <OutputReferenceList items={resultBundle?.primary_output_refs} />
       </div>
 
       <div className="card">
         <h2>Grouped Outputs</h2>
         <h3>Primary Outputs</h3>
-        <ArtifactMetaList items={artifactCatalog?.primary_outputs ?? resultBundle?.primary_outputs} />
+        {artifactCatalog?.primary_outputs?.length ? (
+          <ArtifactMetaList items={artifactCatalog.primary_outputs} />
+        ) : (
+          <ArtifactNameList items={resultBundle?.primary_outputs} />
+        )}
         <h3>Intermediate Outputs</h3>
-        <ArtifactMetaList items={artifactCatalog?.intermediate_outputs ?? resultBundle?.intermediate_outputs} />
+        {artifactCatalog?.intermediate_outputs?.length ? (
+          <ArtifactMetaList items={artifactCatalog.intermediate_outputs} />
+        ) : (
+          <ArtifactNameList items={resultBundle?.intermediate_outputs} />
+        )}
         <h3>Audit Artifacts</h3>
-        <ArtifactMetaList items={artifactCatalog?.audit_artifacts ?? resultBundle?.audit_artifacts} />
+        {artifactCatalog?.audit_artifacts?.length ? (
+          <ArtifactMetaList items={artifactCatalog.audit_artifacts} />
+        ) : (
+          <ArtifactNameList items={resultBundle?.audit_artifacts} />
+        )}
         <h3>Derived Outputs</h3>
-        <ArtifactMetaList items={artifactCatalog?.derived_outputs ?? resultBundle?.derived_outputs} />
+        {artifactCatalog?.derived_outputs?.length ? (
+          <ArtifactMetaList items={artifactCatalog.derived_outputs} />
+        ) : (
+          <ArtifactNameList items={resultBundle?.derived_outputs} />
+        )}
         <h3>Logs</h3>
         <ArtifactMetaList items={artifactCatalog?.logs} />
       </div>
 
       <div className="card">
         <h2>Workspace Summary</h2>
-        {workspaceSummary ? (
-          <div className="kv-grid">
-            <div className="kv-item">
-              <span className="kv-key">workspace_id</span>
-              <span className="kv-value">{workspaceSummary.workspace_id ?? "-"}</span>
-            </div>
-            <div className="kv-item">
-              <span className="kv-key">workspace_output_path</span>
-              <span className="kv-value">{workspaceSummary.workspace_output_path ?? "-"}</span>
-            </div>
-            <div className="kv-item">
-              <span className="kv-key">archive_path</span>
-              <span className="kv-value">{workspaceSummary.archive_path ?? "-"}</span>
-            </div>
-            <div className="kv-item">
-              <span className="kv-key">cleanup_completed</span>
-              <span className="kv-value">{formatValue(workspaceSummary.cleanup_completed)}</span>
-            </div>
-            <div className="kv-item">
-              <span className="kv-key">archive_completed</span>
-              <span className="kv-value">{formatValue(workspaceSummary.archive_completed)}</span>
-            </div>
-          </div>
-        ) : (
-          <p className="muted">No workspace summary available.</p>
-        )}
+        <WorkspaceSummaryPanel summary={workspaceSummary} />
       </div>
 
       <div className="card">
         <h2>Runtime Evidence</h2>
-        {runtimeEvidence ? (
-          <div className="kv-grid">
-            <div className="kv-item">
-              <span className="kv-key">container_name</span>
-              <span className="kv-value">{runtimeEvidence.container_name ?? "-"}</span>
-            </div>
-            <div className="kv-item">
-              <span className="kv-key">image</span>
-              <span className="kv-value">{runtimeEvidence.image ?? "-"}</span>
-            </div>
-            <div className="kv-item">
-              <span className="kv-key">workspace_output_path</span>
-              <span className="kv-value">{runtimeEvidence.workspace_output_path ?? "-"}</span>
-            </div>
-            <div className="kv-item">
-              <span className="kv-key">result_file_exists</span>
-              <span className="kv-value">{formatValue(runtimeEvidence.result_file_exists)}</span>
-            </div>
-          </div>
-        ) : (
-          <p className="muted">No runtime evidence available.</p>
-        )}
+        <RuntimeEvidencePanel evidence={runtimeEvidence} />
+        <h3>Provider Input Bindings</h3>
+        <InputBindingList items={runtimeEvidence?.input_bindings} />
+      </div>
+
+      <div className="card">
+        <h2>Planning Compiler</h2>
+        <DebugJsonPanel title="Planning Summary" payload={result?.planning_summary ?? null} defaultExpanded={false} />
+        <DebugJsonPanel title="Canonicalization Summary" payload={result?.canonicalization_summary ?? null} defaultExpanded={false} />
+        <DebugJsonPanel title="Rewrite Summary" payload={result?.rewrite_summary ?? null} defaultExpanded={false} />
+        <DebugJsonPanel title="Output Registry" payload={resultBundle?.output_registry ?? null} defaultExpanded={false} />
       </div>
 
       {isFailure ? (
         <div className="card">
           <h2>Failure</h2>
-          {failureSummary ? (
-            <div className="kv-grid">
-              <div className="kv-item">
-                <span className="kv-key">failure_code</span>
-                <span className="kv-value">{failureSummary.failure_code ?? "-"}</span>
-              </div>
-              <div className="kv-item">
-                <span className="kv-key">failure_message</span>
-                <span className="kv-value">{failureSummary.failure_message ?? "-"}</span>
-              </div>
-              <div className="kv-item">
-                <span className="kv-key">created_at</span>
-                <span className="kv-value">{failureSummary.created_at ?? "-"}</span>
-              </div>
-            </div>
-          ) : (
-            <p className="muted">No failure summary available.</p>
-          )}
+          <FailureSummaryPanel summary={failureSummary} />
+          <DebugJsonPanel title="Failure Details" payload={failureSummary?.details ?? null} defaultExpanded={false} />
         </div>
       ) : null}
 
-      <div className="card">
-        <h2>Raw JSON</h2>
-        <pre>{JSON.stringify(result ?? null, null, 2)}</pre>
-      </div>
+      <DebugJsonPanel title="Debug JSON" payload={result ?? null} />
     </main>
   );
 }

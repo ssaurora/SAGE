@@ -34,12 +34,18 @@ public interface TaskStateMapper {
                 waiting_context_json,
                 waiting_reason_type,
                 resume_payload_json,
+                resume_txn_json,
                 resume_attempt_count,
                 active_attempt_no,
                 active_manifest_id,
                 active_manifest_version,
+                planning_revision,
+                checkpoint_version,
+                inventory_version,
+                corruption_reason,
                 latest_result_bundle_id,
                 latest_workspace_id,
+                corrupted_since,
                 waiting_since
             )
             VALUES(
@@ -65,12 +71,18 @@ public interface TaskStateMapper {
                 #{waitingContextJson},
                 #{waitingReasonType},
                 #{resumePayloadJson},
+                #{resumeTxnJson},
                 #{resumeAttemptCount},
                 #{activeAttemptNo},
                 #{activeManifestId},
                 #{activeManifestVersion},
+                #{planningRevision},
+                #{checkpointVersion},
+                #{inventoryVersion},
+                #{corruptionReason},
                 #{latestResultBundleId},
                 #{latestWorkspaceId},
+                #{corruptedSince},
                 #{waitingSince}
             )
             """)
@@ -148,6 +160,25 @@ public interface TaskStateMapper {
 
     @Update("""
             UPDATE task_state
+            SET passb_result_json = #{passbResultJson},
+                slot_bindings_summary_json = #{slotBindingsSummaryJson},
+                args_draft_summary_json = #{argsDraftSummaryJson},
+                validation_summary_json = #{validationSummaryJson},
+                input_chain_status = #{inputChainStatus},
+                updated_at = NOW()
+            WHERE task_id = #{taskId}
+            """)
+    int updateInputChainSnapshot(
+            @Param("taskId") String taskId,
+            @Param("passbResultJson") String passbResultJson,
+            @Param("slotBindingsSummaryJson") String slotBindingsSummaryJson,
+            @Param("argsDraftSummaryJson") String argsDraftSummaryJson,
+            @Param("validationSummaryJson") String validationSummaryJson,
+            @Param("inputChainStatus") String inputChainStatus
+    );
+
+    @Update("""
+            UPDATE task_state
             SET current_state = #{newState},
                 state_version = state_version + 1,
                 pass2_result_json = #{pass2ResultJson},
@@ -202,9 +233,29 @@ public interface TaskStateMapper {
 
     @Update("""
             UPDATE task_state
+            SET resume_txn_json = #{resumeTxnJson},
+                updated_at = NOW()
+            WHERE task_id = #{taskId}
+            """)
+    int updateResumeTransaction(
+            @Param("taskId") String taskId,
+            @Param("resumeTxnJson") String resumeTxnJson
+    );
+
+    @Update("""
+            UPDATE task_state
+            SET inventory_version = inventory_version + 1,
+                updated_at = NOW()
+            WHERE task_id = #{taskId}
+            """)
+    int incrementInventoryVersion(@Param("taskId") String taskId);
+
+    @Update("""
+            UPDATE task_state
             SET current_state = #{newState},
                 state_version = state_version + 1,
                 resume_payload_json = #{resumePayloadJson},
+                resume_txn_json = #{resumeTxnJson},
                 resume_attempt_count = #{resumeAttemptCount},
                 active_attempt_no = #{activeAttemptNo},
                 waiting_context_json = NULL,
@@ -219,8 +270,116 @@ public interface TaskStateMapper {
             @Param("expectedVersion") int expectedVersion,
             @Param("newState") String newState,
             @Param("resumePayloadJson") String resumePayloadJson,
+            @Param("resumeTxnJson") String resumeTxnJson,
             @Param("resumeAttemptCount") int resumeAttemptCount,
             @Param("activeAttemptNo") int activeAttemptNo
+    );
+
+    @Update("""
+            UPDATE task_state
+            SET current_state = #{newState},
+                state_version = state_version + 1,
+                pass2_result_json = #{pass2ResultJson},
+                job_id = #{jobId},
+                active_manifest_id = #{manifestId},
+                active_manifest_version = #{manifestVersion},
+                planning_revision = #{planningRevision},
+                checkpoint_version = #{checkpointVersion},
+                inventory_version = #{inventoryVersion},
+                resume_txn_json = #{resumeTxnJson},
+                corruption_reason = NULL,
+                corrupted_since = NULL,
+                waiting_context_json = NULL,
+                waiting_reason_type = NULL,
+                waiting_since = NULL,
+                updated_at = NOW()
+            WHERE task_id = #{taskId}
+              AND state_version = #{expectedVersion}
+            """)
+    int commitQueuedWithGovernance(
+            @Param("taskId") String taskId,
+            @Param("expectedVersion") int expectedVersion,
+            @Param("newState") String newState,
+            @Param("pass2ResultJson") String pass2ResultJson,
+            @Param("jobId") String jobId,
+            @Param("manifestId") String manifestId,
+            @Param("manifestVersion") int manifestVersion,
+            @Param("planningRevision") int planningRevision,
+            @Param("checkpointVersion") int checkpointVersion,
+            @Param("inventoryVersion") int inventoryVersion,
+            @Param("resumeTxnJson") String resumeTxnJson
+    );
+
+    @Update("""
+            UPDATE task_state
+            SET current_state = #{newState},
+                state_version = state_version + 1,
+                waiting_context_json = #{waitingContextJson},
+                waiting_reason_type = #{waitingReasonType},
+                waiting_since = COALESCE(#{waitingSince}, NOW()),
+                resume_txn_json = #{resumeTxnJson},
+                updated_at = NOW()
+            WHERE task_id = #{taskId}
+              AND state_version = #{expectedVersion}
+            """)
+    int rollbackResumeToWaiting(
+            @Param("taskId") String taskId,
+            @Param("expectedVersion") int expectedVersion,
+            @Param("newState") String newState,
+            @Param("waitingContextJson") String waitingContextJson,
+            @Param("waitingReasonType") String waitingReasonType,
+            @Param("waitingSince") java.time.OffsetDateTime waitingSince,
+            @Param("resumeTxnJson") String resumeTxnJson
+    );
+
+    @Update("""
+            UPDATE task_state
+            SET current_state = #{newState},
+                state_version = state_version + 1,
+                corruption_reason = #{corruptionReason},
+                corrupted_since = #{corruptedSince},
+                resume_txn_json = #{resumeTxnJson},
+                updated_at = NOW()
+            WHERE task_id = #{taskId}
+              AND state_version = #{expectedVersion}
+            """)
+    int markCorrupted(
+            @Param("taskId") String taskId,
+            @Param("expectedVersion") int expectedVersion,
+            @Param("newState") String newState,
+            @Param("corruptionReason") String corruptionReason,
+            @Param("corruptedSince") java.time.OffsetDateTime corruptedSince,
+            @Param("resumeTxnJson") String resumeTxnJson
+    );
+
+    @Update("""
+            UPDATE task_state
+            SET current_state = #{newState},
+                state_version = state_version + 1,
+                active_manifest_id = #{manifestId},
+                active_manifest_version = #{manifestVersion},
+                active_attempt_no = #{attemptNo},
+                planning_revision = #{planningRevision},
+                checkpoint_version = #{checkpointVersion},
+                job_id = NULL,
+                pass2_result_json = NULL,
+                corruption_reason = NULL,
+                corrupted_since = NULL,
+                resume_txn_json = #{resumeTxnJson},
+                updated_at = NOW()
+            WHERE task_id = #{taskId}
+              AND state_version = #{expectedVersion}
+            """)
+    int forceRevertCheckpoint(
+            @Param("taskId") String taskId,
+            @Param("expectedVersion") int expectedVersion,
+            @Param("newState") String newState,
+            @Param("manifestId") String manifestId,
+            @Param("manifestVersion") int manifestVersion,
+            @Param("attemptNo") int attemptNo,
+            @Param("planningRevision") int planningRevision,
+            @Param("checkpointVersion") int checkpointVersion,
+            @Param("resumeTxnJson") String resumeTxnJson
     );
 
     @Update("""
@@ -300,12 +459,18 @@ public interface TaskStateMapper {
                    waiting_context_json,
                    waiting_reason_type,
                    resume_payload_json,
+                   resume_txn_json,
                    resume_attempt_count,
                    active_attempt_no,
                    active_manifest_id,
                    active_manifest_version,
+                   planning_revision,
+                   checkpoint_version,
+                   inventory_version,
+                   corruption_reason,
                    latest_result_bundle_id,
                    latest_workspace_id,
+                   corrupted_since,
                    waiting_since,
                    created_at,
                    updated_at

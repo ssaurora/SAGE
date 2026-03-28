@@ -32,7 +32,6 @@ public class AuthController {
     public ResponseEntity<MeResponse> me(Authentication authentication) {
         CurrentUser currentUser = (CurrentUser) authentication.getPrincipal();
         LoginResponse.UserView user = authService.me(currentUser);
-        return ResponseEntity.ok(new MeResponse(user.getUserId(), user.getUsername()));
+        return ResponseEntity.ok(new MeResponse(user.getUserId(), user.getUsername(), user.getRole()));
     }
 }
-

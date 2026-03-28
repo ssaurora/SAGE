@@ -4,6 +4,8 @@ import com.sage.backend.security.CurrentUser;
 import com.sage.backend.task.dto.CreateTaskRequest;
 import com.sage.backend.task.dto.CreateTaskResponse;
 import com.sage.backend.task.dto.CancelTaskResponse;
+import com.sage.backend.task.dto.ForceRevertCheckpointRequest;
+import com.sage.backend.task.dto.ForceRevertCheckpointResponse;
 import com.sage.backend.task.dto.TaskDetailResponse;
 import com.sage.backend.task.dto.TaskEventsResponse;
 import com.sage.backend.task.dto.TaskArtifactsResponse;
@@ -109,6 +111,16 @@ public class TaskController {
     ) {
         CurrentUser currentUser = (CurrentUser) authentication.getPrincipal();
         return ResponseEntity.ok(taskService.resumeTask(taskId, currentUser.userId(), request));
+    }
+
+    @PostMapping("/{taskId}/force-revert-checkpoint")
+    public ResponseEntity<ForceRevertCheckpointResponse> forceRevertCheckpoint(
+            @PathVariable String taskId,
+            @RequestBody ForceRevertCheckpointRequest request,
+            Authentication authentication
+    ) {
+        CurrentUser currentUser = (CurrentUser) authentication.getPrincipal();
+        return ResponseEntity.ok(taskService.forceRevertCheckpoint(taskId, currentUser, request));
     }
 
     @GetMapping(value = "/{taskId}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)

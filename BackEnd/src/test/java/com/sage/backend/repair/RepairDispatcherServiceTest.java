@@ -3,6 +3,7 @@ package com.sage.backend.repair;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sage.backend.model.TaskAttachment;
+import com.sage.backend.validationgate.dto.PrimitiveValidationResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -18,19 +19,16 @@ class RepairDispatcherServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new RepairDispatcherService(objectMapper);
+        service = new RepairDispatcherService();
     }
 
     @Test
     void decideBuildsWaitingContextFromCombinedFacts() throws Exception {
-        JsonNode validationSummary = objectMapper.readTree("""
-                {
-                  "missing_roles": ["precipitation"],
-                  "missing_params": [],
-                  "invalid_bindings": [],
-                  "error_code": "MISSING_ROLE"
-                }
-                """);
+        PrimitiveValidationResponse validationSummary = new PrimitiveValidationResponse();
+        validationSummary.setMissingRoles(List.of("precipitation"));
+        validationSummary.setMissingParams(List.of());
+        validationSummary.setInvalidBindings(List.of());
+        validationSummary.setErrorCode("MISSING_ROLE");
         JsonNode pass1Result = objectMapper.readTree("""
                 {
                   "capability_facts": {
@@ -58,22 +56,19 @@ class RepairDispatcherServiceTest {
 
         assertEquals("WAITING_USER", decision.routing());
         assertEquals("RECOVERABLE", decision.severity());
-        assertFalse(decision.waitingContext().path("can_resume").asBoolean());
-        assertEquals("raster", decision.waitingContext().path("missing_slots").get(0).path("expected_type").asText());
-        assertEquals("upload_precipitation", decision.waitingContext().path("required_user_actions").get(0).path("key").asText());
-        assertEquals("Upload precipitation", decision.waitingContext().path("required_user_actions").get(0).path("label").asText());
+        assertFalse(Boolean.TRUE.equals(decision.waitingContext().getCanResume()));
+        assertEquals("raster", decision.waitingContext().getMissingSlots().get(0).getExpectedType());
+        assertEquals("upload_precipitation", decision.waitingContext().getRequiredUserActions().get(0).getKey());
+        assertEquals("Upload precipitation", decision.waitingContext().getRequiredUserActions().get(0).getLabel());
     }
 
     @Test
     void decideUsesAttachmentsAsAuthorityFactsDuringRecompute() throws Exception {
-        JsonNode validationSummary = objectMapper.readTree("""
-                {
-                  "missing_roles": ["precipitation"],
-                  "missing_params": [],
-                  "invalid_bindings": [],
-                  "error_code": "MISSING_ROLE"
-                }
-                """);
+        PrimitiveValidationResponse validationSummary = new PrimitiveValidationResponse();
+        validationSummary.setMissingRoles(List.of("precipitation"));
+        validationSummary.setMissingParams(List.of());
+        validationSummary.setInvalidBindings(List.of());
+        validationSummary.setErrorCode("MISSING_ROLE");
         JsonNode pass1Result = objectMapper.readTree("""
                 {
                   "capability_facts": {
@@ -102,21 +97,18 @@ class RepairDispatcherServiceTest {
 
         RepairDecision decision = service.decide(validationSummary, pass1Result, List.of(attachment));
 
-        assertTrue(decision.waitingContext().path("can_resume").asBoolean());
-        assertEquals(0, decision.waitingContext().path("required_user_actions").size());
-        assertEquals(0, decision.waitingContext().path("missing_slots").size());
+        assertTrue(Boolean.TRUE.equals(decision.waitingContext().getCanResume()));
+        assertEquals(0, decision.waitingContext().getRequiredUserActions().size());
+        assertEquals(0, decision.waitingContext().getMissingSlots().size());
     }
 
     @Test
     void decideKeepsInvalidBindingFatal() throws Exception {
-        JsonNode validationSummary = objectMapper.readTree("""
-                {
-                  "missing_roles": [],
-                  "missing_params": [],
-                  "invalid_bindings": ["eto"],
-                  "error_code": "INVALID_BINDING"
-                }
-                """);
+        PrimitiveValidationResponse validationSummary = new PrimitiveValidationResponse();
+        validationSummary.setMissingRoles(List.of());
+        validationSummary.setMissingParams(List.of());
+        validationSummary.setInvalidBindings(List.of("eto"));
+        validationSummary.setErrorCode("INVALID_BINDING");
         JsonNode pass1Result = objectMapper.readTree("""
                 {
                   "capability_facts": {
@@ -135,6 +127,6 @@ class RepairDispatcherServiceTest {
 
         assertEquals("FAILED", decision.routing());
         assertEquals("FATAL", decision.severity());
-        assertFalse(decision.waitingContext().path("can_resume").asBoolean());
+        assertFalse(Boolean.TRUE.equals(decision.waitingContext().getCanResume()));
     }
 }

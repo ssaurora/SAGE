@@ -9,6 +9,14 @@ public class AnalysisManifest {
     private Integer manifestVersion;
     private String goalParseJson;
     private String skillRouteJson;
+    private String freezeStatus;
+    private Integer planningRevision;
+    private Integer checkpointVersion;
+    private String graphDigest;
+    private String planningSummaryJson;
+    private String capabilityKey;
+    private String selectedTemplate;
+    private String templateVersion;
     private String logicalInputRolesJson;
     private String slotSchemaViewJson;
     private String slotBindingsJson;
@@ -30,6 +38,22 @@ public class AnalysisManifest {
     public void setGoalParseJson(String goalParseJson) { this.goalParseJson = goalParseJson; }
     public String getSkillRouteJson() { return skillRouteJson; }
     public void setSkillRouteJson(String skillRouteJson) { this.skillRouteJson = skillRouteJson; }
+    public String getFreezeStatus() { return freezeStatus; }
+    public void setFreezeStatus(String freezeStatus) { this.freezeStatus = freezeStatus; }
+    public Integer getPlanningRevision() { return planningRevision; }
+    public void setPlanningRevision(Integer planningRevision) { this.planningRevision = planningRevision; }
+    public Integer getCheckpointVersion() { return checkpointVersion; }
+    public void setCheckpointVersion(Integer checkpointVersion) { this.checkpointVersion = checkpointVersion; }
+    public String getGraphDigest() { return graphDigest; }
+    public void setGraphDigest(String graphDigest) { this.graphDigest = graphDigest; }
+    public String getPlanningSummaryJson() { return planningSummaryJson; }
+    public void setPlanningSummaryJson(String planningSummaryJson) { this.planningSummaryJson = planningSummaryJson; }
+    public String getCapabilityKey() { return capabilityKey; }
+    public void setCapabilityKey(String capabilityKey) { this.capabilityKey = capabilityKey; }
+    public String getSelectedTemplate() { return selectedTemplate; }
+    public void setSelectedTemplate(String selectedTemplate) { this.selectedTemplate = selectedTemplate; }
+    public String getTemplateVersion() { return templateVersion; }
+    public void setTemplateVersion(String templateVersion) { this.templateVersion = templateVersion; }
     public String getLogicalInputRolesJson() { return logicalInputRolesJson; }
     public void setLogicalInputRolesJson(String logicalInputRolesJson) { this.logicalInputRolesJson = logicalInputRolesJson; }
     public String getSlotSchemaViewJson() { return slotSchemaViewJson; }

@@ -25,12 +25,18 @@ public class TaskState {
     private String waitingContextJson;
     private String waitingReasonType;
     private String resumePayloadJson;
+    private String resumeTxnJson;
     private Integer resumeAttemptCount;
     private Integer activeAttemptNo;
     private String activeManifestId;
     private Integer activeManifestVersion;
+    private Integer planningRevision;
+    private Integer checkpointVersion;
+    private Integer inventoryVersion;
+    private String corruptionReason;
     private String latestResultBundleId;
     private String latestWorkspaceId;
+    private OffsetDateTime corruptedSince;
     private OffsetDateTime waitingSince;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
@@ -211,6 +217,14 @@ public class TaskState {
         this.resumePayloadJson = resumePayloadJson;
     }
 
+    public String getResumeTxnJson() {
+        return resumeTxnJson;
+    }
+
+    public void setResumeTxnJson(String resumeTxnJson) {
+        this.resumeTxnJson = resumeTxnJson;
+    }
+
     public Integer getResumeAttemptCount() {
         return resumeAttemptCount;
     }
@@ -243,6 +257,38 @@ public class TaskState {
         this.activeManifestVersion = activeManifestVersion;
     }
 
+    public Integer getPlanningRevision() {
+        return planningRevision;
+    }
+
+    public void setPlanningRevision(Integer planningRevision) {
+        this.planningRevision = planningRevision;
+    }
+
+    public Integer getCheckpointVersion() {
+        return checkpointVersion;
+    }
+
+    public void setCheckpointVersion(Integer checkpointVersion) {
+        this.checkpointVersion = checkpointVersion;
+    }
+
+    public Integer getInventoryVersion() {
+        return inventoryVersion;
+    }
+
+    public void setInventoryVersion(Integer inventoryVersion) {
+        this.inventoryVersion = inventoryVersion;
+    }
+
+    public String getCorruptionReason() {
+        return corruptionReason;
+    }
+
+    public void setCorruptionReason(String corruptionReason) {
+        this.corruptionReason = corruptionReason;
+    }
+
     public String getLatestResultBundleId() {
         return latestResultBundleId;
     }
@@ -257,6 +303,14 @@ public class TaskState {
 
     public void setLatestWorkspaceId(String latestWorkspaceId) {
         this.latestWorkspaceId = latestWorkspaceId;
+    }
+
+    public OffsetDateTime getCorruptedSince() {
+        return corruptedSince;
+    }
+
+    public void setCorruptedSince(OffsetDateTime corruptedSince) {
+        this.corruptedSince = corruptedSince;
     }
 
     public OffsetDateTime getWaitingSince() {

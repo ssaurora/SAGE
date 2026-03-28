@@ -22,8 +22,17 @@ public class CreateJobRequest {
     @JsonProperty("runtime_profile")
     private String runtimeProfile;
 
+    @JsonProperty("case_id")
+    private String caseId;
+
     @JsonProperty("materialized_execution_graph")
     private JsonNode materializedExecutionGraph;
+
+    @JsonProperty("runtime_assertions")
+    private JsonNode runtimeAssertions;
+
+    @JsonProperty("slot_bindings")
+    private JsonNode slotBindings;
 
     @JsonProperty("args_draft")
     private JsonNode argsDraft;
@@ -50,6 +59,14 @@ public class CreateJobRequest {
 
     public void setArgsDraft(JsonNode argsDraft) {
         this.argsDraft = argsDraft;
+    }
+
+    public JsonNode getRuntimeAssertions() {
+        return runtimeAssertions;
+    }
+
+    public void setRuntimeAssertions(JsonNode runtimeAssertions) {
+        this.runtimeAssertions = runtimeAssertions;
     }
 
     public String getWorkspaceId() {
@@ -90,5 +107,21 @@ public class CreateJobRequest {
 
     public void setRuntimeProfile(String runtimeProfile) {
         this.runtimeProfile = runtimeProfile;
+    }
+
+    public String getCaseId() {
+        return caseId;
+    }
+
+    public void setCaseId(String caseId) {
+        this.caseId = caseId;
+    }
+
+    public JsonNode getSlotBindings() {
+        return slotBindings;
+    }
+
+    public void setSlotBindings(JsonNode slotBindings) {
+        this.slotBindings = slotBindings;
     }
 }

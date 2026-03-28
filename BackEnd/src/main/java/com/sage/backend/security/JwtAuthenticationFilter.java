@@ -38,13 +38,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 Claims claims = tokenProvider.parse(token);
                 Long userId = Long.parseLong(claims.getSubject());
                 String username = claims.get("username", String.class);
-                CurrentUser principal = new CurrentUser(userId, username);
+                String role = claims.get("role", String.class);
+                if (role == null || role.isBlank()) {
+                    role = "USER";
+                }
+                CurrentUser principal = new CurrentUser(userId, username, role);
 
                 UsernamePasswordAuthenticationToken authentication =
                         new UsernamePasswordAuthenticationToken(
                                 principal,
                                 null,
-                                List.of(new SimpleGrantedAuthority("ROLE_USER"))
+                                List.of(new SimpleGrantedAuthority("ROLE_" + role.toUpperCase()))
                         );
                 authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(authentication);
@@ -56,4 +60,3 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 }
-

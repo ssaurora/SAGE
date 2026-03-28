@@ -1,8 +1,5 @@
 package com.sage.backend.repair;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sage.backend.repair.dto.RepairProposalRequest;
 import com.sage.backend.repair.dto.RepairProposalResponse;
 import org.slf4j.Logger;
@@ -13,37 +10,37 @@ import org.springframework.stereotype.Service;
 public class RepairProposalService {
     private static final Logger LOGGER = LoggerFactory.getLogger(RepairProposalService.class);
 
-    private final ObjectMapper objectMapper;
     private final RepairProposalClient repairProposalClient;
     private final RepairProposalFallbackService fallbackService;
 
     public RepairProposalService(
-            ObjectMapper objectMapper,
             RepairProposalClient repairProposalClient,
             RepairProposalFallbackService fallbackService
     ) {
-        this.objectMapper = objectMapper;
         this.repairProposalClient = repairProposalClient;
         this.fallbackService = fallbackService;
     }
 
-    public ObjectNode generate(JsonNode waitingContext, JsonNode validationSummary, JsonNode failureSummary, String userNote) {
+    public RepairProposalResponse generate(RepairProposalRequest request) {
         try {
-            RepairProposalRequest request = new RepairProposalRequest();
-            request.setWaitingContext(waitingContext == null ? objectMapper.createObjectNode() : waitingContext);
-            request.setValidationSummary(validationSummary == null ? objectMapper.createObjectNode() : validationSummary);
-            request.setFailureSummary(failureSummary == null ? objectMapper.createObjectNode() : failureSummary);
-            request.setUserNote(userNote == null ? "" : userNote);
-
             RepairProposalResponse response = repairProposalClient.generate(request);
             if (isValidSchema(response)) {
-                return objectMapper.valueToTree(response);
+                return response;
             }
-            return fallbackService.generate(waitingContext, "Cognition output schema invalid");
+            return fallbackService.generate(request, "Cognition output schema invalid");
         } catch (Exception exception) {
             LOGGER.warn("Repair proposal fallback: {}", exception.getMessage());
-            return fallbackService.generate(waitingContext, "Cognition request failed");
+            return fallbackService.generate(request, "Cognition request failed");
         }
+    }
+
+    public RepairProposalResponse generate(
+            RepairProposalRequest.WaitingContext waitingContext,
+            RepairProposalRequest.ValidationSummary validationSummary,
+            RepairProposalRequest.FailureSummary failureSummary,
+            String userNote
+    ) {
+        return generate(RepairFactHelper.buildRequest(waitingContext, validationSummary, failureSummary, userNote));
     }
 
     private boolean isValidSchema(RepairProposalResponse proposal) {

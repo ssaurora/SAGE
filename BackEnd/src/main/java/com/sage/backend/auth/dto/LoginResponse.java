@@ -41,12 +41,15 @@ public class LoginResponse {
 
         private String username;
 
+        private String role;
+
         public UserView() {
         }
 
-        public UserView(String userId, String username) {
+        public UserView(String userId, String username, String role) {
             this.userId = userId;
             this.username = username;
+            this.role = role;
         }
 
         public String getUserId() {
@@ -63,6 +66,14 @@ public class LoginResponse {
 
         public void setUsername(String username) {
             this.username = username;
+        }
+
+        public String getRole() {
+            return role;
+        }
+
+        public void setRole(String role) {
+            this.role = role;
         }
     }
 }

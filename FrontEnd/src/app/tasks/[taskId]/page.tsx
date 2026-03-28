@@ -5,7 +5,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
 import {
+  CapabilityOutputItemDto,
+  CapabilityRepairHintDto,
+  CapabilityValidationHintDto,
   cancelTask,
+  forceRevertCheckpoint,
+  getMe,
   getTask,
   getTaskEvents,
   getTaskManifest,
@@ -19,6 +24,19 @@ import {
   uploadAttachment,
 } from "@/lib/api";
 import { getAccessToken } from "@/lib/auth";
+import DebugJsonPanel from "@/components/DebugJsonPanel";
+
+type WaitingContextDto = NonNullable<TaskDetailResponse["waiting_context"]>;
+type MissingSlotDto = NonNullable<WaitingContextDto["missing_slots"]>[number];
+type RequiredUserActionDto = NonNullable<WaitingContextDto["required_user_actions"]>[number];
+type RepairProposalDto = NonNullable<TaskDetailResponse["repair_proposal"]>;
+type RepairActionExplanationDto = NonNullable<RepairProposalDto["action_explanations"]>[number];
+type GoalParseView =
+  | NonNullable<TaskDetailResponse["goal_parse_summary"]>
+  | NonNullable<TaskManifestResponse["goal_parse"]>;
+type SkillRouteView =
+  | NonNullable<TaskDetailResponse["skill_route_summary"]>
+  | NonNullable<TaskManifestResponse["skill_route"]>;
 
 function formatValue(value: unknown): string {
   if (value === null || value === undefined) {
@@ -39,31 +57,6 @@ function formatValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function KeyValueGrid({
-  value,
-  valueClassName,
-}: {
-  value?: Record<string, unknown> | null;
-  valueClassName?: string;
-}) {
-  if (!value || Object.keys(value).length === 0) {
-    return <p className="muted">No data available.</p>;
-  }
-
-  const valueClass = valueClassName ? `kv-value ${valueClassName}` : "kv-value";
-
-  return (
-    <div className="kv-grid">
-      {Object.entries(value).map(([key, entryValue]) => (
-        <div className="kv-item" key={key}>
-          <span className="kv-key">{key}</span>
-          <span className={valueClass}>{formatValue(entryValue)}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function StringList({ values, emptyText }: { values?: string[]; emptyText: string }) {
   if (!values || values.length === 0) {
     return <p className="muted">{emptyText}</p>;
@@ -75,6 +68,899 @@ function StringList({ values, emptyText }: { values?: string[]; emptyText: strin
         <li key={`${value}-${index}`}>{value}</li>
       ))}
     </ul>
+  );
+}
+
+function GoalParsePanel({
+  summary,
+}: {
+  summary?: GoalParseView;
+}) {
+  if (!summary) {
+    return <p className="muted">No goal parse summary available.</p>;
+  }
+
+  return (
+    <>
+      <div className="kv-grid">
+        <div className="kv-item">
+          <span className="kv-key">goal_type</span>
+          <span className="kv-value">{summary.goal_type ?? "-"}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">analysis_kind</span>
+          <span className="kv-value">{summary.analysis_kind ?? "-"}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">user_query</span>
+          <span className="kv-value">{summary.user_query ?? "-"}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">intent_mode</span>
+          <span className="kv-value">{summary.intent_mode ?? "-"}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">source</span>
+          <span className="kv-value">{summary.source ?? "-"}</span>
+        </div>
+      </div>
+      <h3>Entities</h3>
+      <StringList values={summary.entities} emptyText="No entities." />
+    </>
+  );
+}
+
+function SkillRoutePanel({
+  summary,
+}: {
+  summary?: SkillRouteView;
+}) {
+  if (!summary) {
+    return <p className="muted">No skill route summary available.</p>;
+  }
+
+  return (
+    <div className="kv-grid">
+      <div className="kv-item">
+        <span className="kv-key">route_mode</span>
+        <span className="kv-value">{summary.route_mode ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">primary_skill</span>
+        <span className="kv-value">{summary.primary_skill ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">capability_key</span>
+        <span className="kv-value">{summary.capability_key ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">route_source</span>
+        <span className="kv-value">{summary.route_source ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">confidence</span>
+        <span className="kv-value">{formatValue(summary.confidence)}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">selected_template</span>
+        <span className="kv-value">{summary.selected_template ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">template_version</span>
+        <span className="kv-value">{summary.template_version ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">execution_mode</span>
+        <span className="kv-value">{summary.execution_mode ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">provider_preference</span>
+        <span className="kv-value">{summary.provider_preference ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">runtime_profile_preference</span>
+        <span className="kv-value">{summary.runtime_profile_preference ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">source</span>
+        <span className="kv-value">{summary.source ?? "-"}</span>
+      </div>
+    </div>
+  );
+}
+
+function RoleArgMappingList({
+  mappings,
+}: {
+  mappings?: TaskManifestResponse["role_arg_mappings"];
+}) {
+  if (!mappings || mappings.length === 0) {
+    return <p className="muted">No role arg mappings.</p>;
+  }
+
+  return (
+    <ul className="simple-list">
+      {mappings.map((mapping, index) => (
+        <li key={`${mapping.role_name ?? "role"}-${index}`}>
+          {mapping.role_name ?? "-"} | slot arg {mapping.slot_arg_key ?? "-"} | value arg {mapping.value_arg_key ?? "-"} | default {formatValue(mapping.default_value)}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function StableDefaultsPanel({
+  defaults,
+}: {
+  defaults?:
+    | NonNullable<TaskDetailResponse["pass1_summary"]>["stable_defaults"]
+    | TaskManifestResponse["stable_defaults"];
+}) {
+  if (!defaults) {
+    return <p className="muted">No stable defaults.</p>;
+  }
+
+  return (
+    <div className="kv-grid">
+      <div className="kv-item">
+        <span className="kv-key">analysis_template</span>
+        <span className="kv-value">{defaults.analysis_template ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">root_depth_factor</span>
+        <span className="kv-value">{formatValue(defaults.root_depth_factor)}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">pawc_factor</span>
+        <span className="kv-value">{formatValue(defaults.pawc_factor)}</span>
+      </div>
+    </div>
+  );
+}
+
+function RuntimeAssertionList({
+  assertions,
+}: {
+  assertions?: TaskManifestResponse["runtime_assertions"];
+}) {
+  if (!assertions || assertions.length === 0) {
+    return <p className="muted">No runtime assertions.</p>;
+  }
+
+  return (
+    <ul className="simple-list">
+      {assertions.map((assertion, index) => (
+        <li key={`${assertion.name ?? "assertion"}-${index}`}>
+          {assertion.name ?? "-"} | id={assertion.assertion_id ?? "-"} | type={assertion.assertion_type ?? "-"} | node={assertion.node_id ?? "-"} | required={formatValue(assertion.required)} | repairable={formatValue(assertion.repairable)} | {assertion.message ?? "-"}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function ResumeTransactionPanel({
+  transaction,
+}: {
+  transaction?: TaskDetailResponse["resume_transaction"] | TaskManifestResponse["resume_transaction"];
+}) {
+  if (!transaction) {
+    return <p className="muted">No resume transaction.</p>;
+  }
+
+  return (
+    <div className="kv-grid">
+      <div className="kv-item"><span className="kv-key">resume_request_id</span><span className="kv-value">{transaction.resume_request_id ?? "-"}</span></div>
+      <div className="kv-item"><span className="kv-key">status</span><span className="kv-value">{transaction.status ?? "-"}</span></div>
+      <div className="kv-item"><span className="kv-key">base_checkpoint_version</span><span className="kv-value">{formatValue(transaction.base_checkpoint_version)}</span></div>
+      <div className="kv-item"><span className="kv-key">candidate_checkpoint_version</span><span className="kv-value">{formatValue(transaction.candidate_checkpoint_version)}</span></div>
+      <div className="kv-item"><span className="kv-key">candidate_inventory_version</span><span className="kv-value">{formatValue(transaction.candidate_inventory_version)}</span></div>
+      <div className="kv-item"><span className="kv-key">candidate_manifest_id</span><span className="kv-value">{transaction.candidate_manifest_id ?? "-"}</span></div>
+      <div className="kv-item"><span className="kv-key">candidate_attempt_no</span><span className="kv-value">{formatValue(transaction.candidate_attempt_no)}</span></div>
+      <div className="kv-item"><span className="kv-key">candidate_job_id</span><span className="kv-value">{transaction.candidate_job_id ?? "-"}</span></div>
+      <div className="kv-item"><span className="kv-key">failure_reason</span><span className="kv-value">{transaction.failure_reason ?? "-"}</span></div>
+      <div className="kv-item"><span className="kv-key">updated_at</span><span className="kv-value">{transaction.updated_at ?? "-"}</span></div>
+    </div>
+  );
+}
+
+function CorruptionStatePanel({
+  corruption,
+  promotionStatus,
+}: {
+  corruption?: TaskDetailResponse["corruption_state"] | TaskManifestResponse["corruption_state"];
+  promotionStatus?: string;
+}) {
+  return (
+    <div className="kv-grid">
+      <div className="kv-item"><span className="kv-key">is_corrupted</span><span className="kv-value">{formatValue(corruption?.is_corrupted)}</span></div>
+      <div className="kv-item"><span className="kv-key">reason</span><span className="kv-value">{corruption?.reason ?? "-"}</span></div>
+      <div className="kv-item"><span className="kv-key">corrupted_since</span><span className="kv-value">{corruption?.corrupted_since ?? "-"}</span></div>
+      <div className="kv-item"><span className="kv-key">promotion_status</span><span className="kv-value">{promotionStatus ?? "-"}</span></div>
+    </div>
+  );
+}
+
+function CapabilityContractList({
+  outputs,
+}: {
+  outputs?: CapabilityOutputItemDto[];
+}) {
+  if (!outputs || outputs.length === 0) {
+    return <p className="muted">No capability output contract.</p>;
+  }
+
+  return (
+    <ul className="simple-list">
+      {outputs.map((output, index) => (
+        <li key={`${output.logical_name ?? "output"}-${index}`}>
+          {output.logical_name ?? "-"} | {output.artifact_role ?? "-"}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function CapabilityValidationHintList({
+  hints,
+}: {
+  hints?: CapabilityValidationHintDto[];
+}) {
+  if (!hints || hints.length === 0) {
+    return <p className="muted">No validation hints.</p>;
+  }
+
+  return (
+    <ul className="simple-list">
+      {hints.map((hint, index) => (
+        <li key={`${hint.role_name ?? "role"}-${index}`}>
+          {hint.role_name ?? "-"} | expected_slot_type={hint.expected_slot_type ?? "-"}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function CapabilityRepairHintList({
+  hints,
+}: {
+  hints?: CapabilityRepairHintDto[];
+}) {
+  if (!hints || hints.length === 0) {
+    return <p className="muted">No repair hints.</p>;
+  }
+
+  return (
+    <ul className="simple-list">
+      {hints.map((hint, index) => (
+        <li key={`${hint.action_key ?? "repair"}-${index}`}>
+          {hint.role_name ?? "-"} | {hint.action_label ?? "-"} [{hint.action_key ?? "-"}]
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function ManifestCapabilityFactsPanel({
+  facts,
+}: {
+  facts?: TaskManifestResponse["capability_facts"];
+}) {
+  if (!facts) {
+    return <p className="muted">No capability facts.</p>;
+  }
+
+  return (
+    <div className="kv-grid">
+      <div className="kv-item">
+        <span className="kv-key">capability_key</span>
+        <span className="kv-value">{facts.capability_key ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">display_name</span>
+        <span className="kv-value">{facts.display_name ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">runtime_profile_hint</span>
+        <span className="kv-value">{facts.runtime_profile_hint ?? "-"}</span>
+      </div>
+    </div>
+  );
+}
+
+function LogicalInputRoleList({
+  roles,
+}: {
+  roles?: TaskManifestResponse["logical_input_roles"];
+}) {
+  if (!roles || roles.length === 0) {
+    return <p className="muted">No logical input roles.</p>;
+  }
+
+  return (
+    <ul className="simple-list">
+      {roles.map((role, index) => (
+        <li key={`${role.role_name ?? "role"}-${index}`}>
+          {role.role_name ?? "-"} | required={formatValue(role.required)}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function SlotSchemaViewPanel({
+  slotSchemaView,
+}: {
+  slotSchemaView?: TaskManifestResponse["slot_schema_view"];
+}) {
+  const slots = slotSchemaView?.slots;
+  if (!slots || slots.length === 0) {
+    return <p className="muted">No slot schema view.</p>;
+  }
+
+  return (
+    <ul className="simple-list">
+      {slots.map((slot, index) => (
+        <li key={`${slot.slot_name ?? "slot"}-${index}`}>
+          {slot.slot_name ?? "-"} | type={slot.type ?? "-"} | bound_role={slot.bound_role ?? "-"}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function SlotBindingList({
+  bindings,
+}: {
+  bindings?: TaskManifestResponse["slot_bindings"];
+}) {
+  if (!bindings || bindings.length === 0) {
+    return <p className="muted">No slot bindings.</p>;
+  }
+
+  return (
+    <ul className="simple-list">
+      {bindings.map((binding, index) => (
+        <li key={`${binding.role_name ?? "role"}-${binding.slot_name ?? "slot"}-${index}`}>
+          {binding.role_name ?? "-"} {"->"} {binding.slot_name ?? "-"} | source={binding.source ?? "-"}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function ExecutionGraphPanel({
+  graph,
+}: {
+  graph?: TaskManifestResponse["execution_graph"];
+}) {
+  if (!graph) {
+    return <p className="muted">No execution graph.</p>;
+  }
+
+  return (
+    <>
+      <div className="kv-grid">
+        <div className="kv-item">
+          <span className="kv-key">node_count</span>
+          <span className="kv-value">{formatValue(graph.nodes?.length)}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">edge_count</span>
+          <span className="kv-value">{formatValue(graph.edges?.length)}</span>
+        </div>
+      </div>
+      <h3>Nodes</h3>
+      {graph.nodes && graph.nodes.length > 0 ? (
+        <ul className="simple-list">
+          {graph.nodes.map((node, index) => (
+            <li key={`${node.node_id ?? "node"}-${index}`}>
+              {node.node_id ?? "-"} | kind={node.kind ?? "-"}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="muted">No execution nodes.</p>
+      )}
+      <h3>Edges</h3>
+      {graph.edges && graph.edges.length > 0 ? (
+        <ul className="simple-list">
+          {graph.edges.map((edge, index) => (
+            <li key={`${edge.join("->")}-${index}`}>{edge.join(" -> ")}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className="muted">No execution edges.</p>
+      )}
+    </>
+  );
+}
+
+function ArgsDraftPanel({
+  argsDraft,
+}: {
+  argsDraft?: Record<string, unknown> | null;
+}) {
+  if (!argsDraft || Object.keys(argsDraft).length === 0) {
+    return <p className="muted">No args draft available.</p>;
+  }
+
+  const entries = Object.entries(argsDraft).sort(([left], [right]) => left.localeCompare(right));
+
+  return (
+    <ul className="simple-list">
+      {entries.map(([key, value]) => (
+        <li key={key}>
+          <strong>{key}</strong>
+          {" | "}
+          {formatValue(value)}
+          {" | "}
+          {Array.isArray(value) ? "array" : value === null ? "null" : typeof value}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function Pass1SummaryPanel({ summary }: { summary?: TaskDetailResponse["pass1_summary"] }) {
+  if (!summary) {
+    return <p className="muted">No pass1 summary available.</p>;
+  }
+
+  return (
+    <>
+      <div className="kv-grid">
+        <div className="kv-item">
+          <span className="kv-key">capability_key</span>
+          <span className="kv-value">{summary.capability_key ?? "-"}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">selected_template</span>
+          <span className="kv-value">{summary.selected_template ?? "-"}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">logical_input_roles_count</span>
+          <span className="kv-value">{formatValue(summary.logical_input_roles_count)}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">required_roles_count</span>
+          <span className="kv-value">{formatValue(summary.required_roles_count)}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">optional_roles_count</span>
+          <span className="kv-value">{formatValue(summary.optional_roles_count)}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">role_arg_mapping_count</span>
+          <span className="kv-value">{formatValue(summary.role_arg_mapping_count)}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">slot_schema_view_version</span>
+          <span className="kv-value">{summary.slot_schema_view_version ?? "-"}</span>
+        </div>
+      </div>
+      <h3>Stable Defaults</h3>
+      <StableDefaultsPanel defaults={summary.stable_defaults} />
+    </>
+  );
+}
+
+function SlotBindingsSummaryPanel({
+  summary,
+}: {
+  summary?: TaskDetailResponse["slot_bindings_summary"];
+}) {
+  if (!summary) {
+    return <p className="muted">No binding summary available.</p>;
+  }
+
+  return (
+    <>
+      <div className="kv-grid">
+        <div className="kv-item">
+          <span className="kv-key">bound_slots_count</span>
+          <span className="kv-value">{formatValue(summary.bound_slots_count)}</span>
+        </div>
+      </div>
+      <h3>Bound Roles</h3>
+      <StringList values={summary.bound_role_names} emptyText="No bound roles." />
+    </>
+  );
+}
+
+function ArgsDraftSummaryPanel({
+  summary,
+}: {
+  summary?: TaskDetailResponse["args_draft_summary"];
+}) {
+  if (!summary) {
+    return <p className="muted">No args draft summary available.</p>;
+  }
+
+  return (
+    <>
+      <div className="kv-grid">
+        <div className="kv-item">
+          <span className="kv-key">param_count</span>
+          <span className="kv-value">{formatValue(summary.param_count)}</span>
+        </div>
+      </div>
+      <h3>Param Keys</h3>
+      <StringList values={summary.param_keys} emptyText="No param keys." />
+    </>
+  );
+}
+
+function ValidationSummaryPanel({
+  summary,
+}: {
+  summary?: {
+    is_valid?: boolean;
+    missing_roles?: string[];
+    missing_params?: string[];
+    error_code?: string;
+    invalid_bindings?: string[];
+  };
+}) {
+  if (!summary) {
+    return <p className="muted">No validation summary available.</p>;
+  }
+
+  return (
+    <>
+      <div className="kv-grid">
+        <div className="kv-item">
+          <span className="kv-key">is_valid</span>
+          <span className="kv-value">{formatValue(summary.is_valid)}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">error_code</span>
+          <span className="kv-value">{summary.error_code ?? "-"}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">missing_role_count</span>
+          <span className="kv-value">{formatValue(summary.missing_roles?.length)}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">missing_param_count</span>
+          <span className="kv-value">{formatValue(summary.missing_params?.length)}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">invalid_binding_count</span>
+          <span className="kv-value">{formatValue(summary.invalid_bindings?.length)}</span>
+        </div>
+      </div>
+      <h3>Missing Roles</h3>
+      <StringList values={summary.missing_roles} emptyText="No missing roles." />
+      <h3>Missing Params</h3>
+      <StringList values={summary.missing_params} emptyText="No missing params." />
+      <h3>Invalid Bindings</h3>
+      <StringList values={summary.invalid_bindings} emptyText="No invalid bindings." />
+    </>
+  );
+}
+
+function Pass2SummaryPanel({ summary }: { summary?: TaskDetailResponse["pass2_summary"] }) {
+  if (!summary) {
+    return <p className="muted">No pass2 summary available.</p>;
+  }
+
+  return (
+    <>
+      <div className="kv-grid">
+        <div className="kv-item">
+          <span className="kv-key">planner</span>
+          <span className="kv-value">{summary.planner ?? "-"}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">capability_key</span>
+          <span className="kv-value">{summary.capability_key ?? "-"}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">template</span>
+          <span className="kv-value">{summary.template ?? "-"}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">node_count</span>
+          <span className="kv-value">{formatValue(summary.node_count)}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">edge_count</span>
+          <span className="kv-value">{formatValue(summary.edge_count)}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">validation_is_valid</span>
+          <span className="kv-value">{formatValue(summary.validation_is_valid)}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">validation_error_code</span>
+          <span className="kv-value">{summary.validation_error_code ?? "-"}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">runtime_assertion_count</span>
+          <span className="kv-value">{formatValue(summary.runtime_assertion_count)}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">graph_digest</span>
+          <span className="kv-value">{summary.graph_digest ?? "-"}</span>
+        </div>
+      </div>
+      <h3>Canonicalization Summary</h3>
+      <DebugJsonPanel title="Canonicalization Summary" payload={summary.canonicalization_summary ?? null} defaultExpanded={false} />
+      <h3>Rewrite Summary</h3>
+      <DebugJsonPanel title="Rewrite Summary" payload={summary.rewrite_summary ?? null} defaultExpanded={false} />
+    </>
+  );
+}
+
+function ResultBundleSummaryPanel({
+  summary,
+}: {
+  summary?: TaskDetailResponse["result_bundle_summary"];
+}) {
+  if (!summary) {
+    return <p className="muted">No result bundle summary.</p>;
+  }
+
+  return (
+    <>
+      <div className="kv-grid">
+        <div className="kv-item">
+          <span className="kv-key">result_id</span>
+          <span className="kv-value">{summary.result_id ?? "-"}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">summary</span>
+          <span className="kv-value">{summary.summary ?? "-"}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">main_output_count</span>
+          <span className="kv-value">{formatValue(summary.main_output_count)}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">created_at</span>
+          <span className="kv-value">{summary.created_at ?? "-"}</span>
+        </div>
+      </div>
+      <h3>Main Outputs</h3>
+      <StringList values={summary.main_outputs} emptyText="No main outputs." />
+      <h3>Primary Outputs</h3>
+      <StringList values={summary.primary_outputs} emptyText="No primary outputs." />
+      <h3>Audit Artifacts</h3>
+      <StringList values={summary.audit_artifacts} emptyText="No audit artifacts." />
+    </>
+  );
+}
+
+function ResultObjectSummaryPanel({
+  summary,
+}: {
+  summary?: TaskDetailResponse["result_object_summary"];
+}) {
+  if (!summary) {
+    return <p className="muted">No result object summary.</p>;
+  }
+
+  return (
+    <div className="kv-grid">
+      <div className="kv-item">
+        <span className="kv-key">result_id</span>
+        <span className="kv-value">{summary.result_id ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">summary</span>
+        <span className="kv-value">{summary.summary ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">artifact_count</span>
+        <span className="kv-value">{formatValue(summary.artifact_count)}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">created_at</span>
+        <span className="kv-value">{summary.created_at ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">assertion_id</span>
+        <span className="kv-value">{summary.assertion_id ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">node_id</span>
+        <span className="kv-value">{summary.node_id ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">repairable</span>
+        <span className="kv-value">{formatValue(summary.repairable)}</span>
+      </div>
+    </div>
+  );
+}
+
+function FinalExplanationSummaryPanel({
+  summary,
+}: {
+  summary?: TaskDetailResponse["final_explanation_summary"];
+}) {
+  if (!summary) {
+    return <p className="muted">No final explanation summary.</p>;
+  }
+
+  return (
+    <div className="kv-grid">
+      <div className="kv-item">
+        <span className="kv-key">title</span>
+        <span className="kv-value">{summary.title ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">highlight_count</span>
+        <span className="kv-value">{formatValue(summary.highlight_count)}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">generated_at</span>
+        <span className="kv-value">{summary.generated_at ?? "-"}</span>
+      </div>
+    </div>
+  );
+}
+
+function FailureSummaryPanel({
+  summary,
+}: {
+  summary?: TaskDetailResponse["last_failure_summary"];
+}) {
+  if (!summary) {
+    return <p className="muted">No failure summary.</p>;
+  }
+
+  return (
+    <div className="kv-grid">
+      <div className="kv-item">
+        <span className="kv-key">failure_code</span>
+        <span className="kv-value">{summary.failure_code ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">failure_message</span>
+        <span className="kv-value">{summary.failure_message ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">created_at</span>
+        <span className="kv-value">{summary.created_at ?? "-"}</span>
+      </div>
+    </div>
+  );
+}
+
+function MissingSlotList({
+  slots,
+}: {
+  slots?: MissingSlotDto[];
+}) {
+  if (!slots || slots.length === 0) {
+    return <p className="muted">No missing slots.</p>;
+  }
+
+  return (
+    <ul className="simple-list">
+      {slots.map((slot, index) => (
+        <li key={`${slot.slot_name}-${index}`}>
+          {slot.slot_name} | expected_type={slot.expected_type ?? "-"} | required={formatValue(slot.required)}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function RequiredUserActionList({
+  actions,
+}: {
+  actions?: RequiredUserActionDto[];
+}) {
+  if (!actions || actions.length === 0) {
+    return <p className="muted">No required user actions.</p>;
+  }
+
+  return (
+    <ul className="simple-list">
+      {actions.map((action, index) => (
+        <li key={`${action.key}-${index}`}>
+          {action.label} [{action.key}] | action_type={action.action_type} | required={formatValue(action.required)}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function WaitingContextPanel({
+  waitingContext,
+}: {
+  waitingContext?: TaskDetailResponse["waiting_context"];
+}) {
+  if (!waitingContext) {
+    return <p className="muted">No waiting context.</p>;
+  }
+
+  return (
+    <>
+      <div className="kv-grid">
+        <div className="kv-item">
+          <span className="kv-key">waiting_reason_type</span>
+          <span className="kv-value">{waitingContext.waiting_reason_type ?? "-"}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">can_resume</span>
+          <span className="kv-value">{formatValue(waitingContext.can_resume)}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">resume_hint</span>
+          <span className="kv-value">{waitingContext.resume_hint ?? "-"}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">missing_slot_count</span>
+          <span className="kv-value">{formatValue(waitingContext.missing_slots?.length)}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">invalid_binding_count</span>
+          <span className="kv-value">{formatValue(waitingContext.invalid_bindings?.length)}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">required_action_count</span>
+          <span className="kv-value">{formatValue(waitingContext.required_user_actions?.length)}</span>
+        </div>
+      </div>
+      <h3>Missing Slots</h3>
+      <MissingSlotList slots={waitingContext.missing_slots} />
+      <h3>Invalid Bindings</h3>
+      <StringList values={waitingContext.invalid_bindings} emptyText="No invalid bindings." />
+      <h3>Required User Actions</h3>
+      <RequiredUserActionList actions={waitingContext.required_user_actions} />
+    </>
+  );
+}
+
+function RepairActionExplanationList({
+  explanations,
+}: {
+  explanations?: RepairActionExplanationDto[];
+}) {
+  if (!explanations || explanations.length === 0) {
+    return <p className="muted">No repair action explanations.</p>;
+  }
+
+  return (
+    <ul className="simple-list">
+      {explanations.map((item, index) => (
+        <li key={`${item.key}-${index}`}>
+          {item.key} | {item.message}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function RepairProposalPanel({
+  proposal,
+}: {
+  proposal?: TaskDetailResponse["repair_proposal"];
+}) {
+  if (!proposal) {
+    return <p className="muted">No repair proposal available.</p>;
+  }
+
+  return (
+    <>
+      <div className="kv-grid">
+        <div className="kv-item">
+          <span className="kv-key">user_facing_reason</span>
+          <span className="kv-value llm-text">{proposal.user_facing_reason ?? "-"}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">resume_hint</span>
+          <span className="kv-value llm-text">{proposal.resume_hint ?? "-"}</span>
+        </div>
+      </div>
+      <h3>Action Explanations</h3>
+      <RepairActionExplanationList explanations={proposal.action_explanations} />
+      <h3>Notes</h3>
+      <StringList values={proposal.notes} emptyText="No repair notes." />
+    </>
   );
 }
 
@@ -93,8 +979,11 @@ export default function TaskDetailPage() {
   const [canceling, setCanceling] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [resuming, setResuming] = useState(false);
+  const [forceReverting, setForceReverting] = useState(false);
   const [logicalSlot, setLogicalSlot] = useState("");
   const [userNote, setUserNote] = useState("");
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
+  const [targetCheckpointVersion, setTargetCheckpointVersion] = useState("");
 
   const loadData = useCallback(async () => {
     const [taskResponse, eventsResponse, manifestResponse, runsResponse] = await Promise.all([
@@ -192,10 +1081,41 @@ export default function TaskDetailPage() {
     };
   }, [loadData, router, taskId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!getAccessToken()) {
+      return;
+    }
+    void getMe()
+      .then((response) => {
+        if (!cancelled) {
+          setCurrentUserRole(response.role ?? null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCurrentUserRole(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [taskId]);
+
   const canCancel = task?.state === "QUEUED" || task?.state === "RUNNING";
   const canResume = task?.waiting_context?.can_resume === true;
-  const missingRoles = task?.validation_summary?.missing_roles;
-  const invalidBindings = task?.validation_summary?.invalid_bindings;
+  const canForceRevert = task?.state === "STATE_CORRUPTED" && currentUserRole === "ADMIN";
+
+  useEffect(() => {
+    if (
+      task?.state === "STATE_CORRUPTED"
+      && task.checkpoint_version !== null
+      && task.checkpoint_version !== undefined
+      && !targetCheckpointVersion
+    ) {
+      setTargetCheckpointVersion(String(Math.max(task.checkpoint_version - 1, 0)));
+    }
+  }, [targetCheckpointVersion, task?.checkpoint_version, task?.state]);
 
   async function handleCancel() {
     if (!canCancel || canceling) {
@@ -251,6 +1171,31 @@ export default function TaskDetailPage() {
     }
   }
 
+  async function handleForceRevert() {
+    if (!canForceRevert || forceReverting) {
+      return;
+    }
+    const parsedCheckpointVersion = Number.parseInt(targetCheckpointVersion, 10);
+    if (!Number.isInteger(parsedCheckpointVersion) || parsedCheckpointVersion < 0) {
+      setError("target checkpoint version must be a non-negative integer");
+      return;
+    }
+    setForceReverting(true);
+    setError("Force revert request has been sent...");
+    try {
+      await forceRevertCheckpoint(taskId, {
+        request_id: crypto.randomUUID(),
+        target_checkpoint_version: parsedCheckpointVersion,
+      });
+      await loadData();
+      setError(null);
+    } catch (forceRevertError) {
+      setError(forceRevertError instanceof Error ? forceRevertError.message : "Force revert failed");
+    } finally {
+      setForceReverting(false);
+    }
+  }
+
   return (
     <main className="container">
       <div className="card">
@@ -284,13 +1229,57 @@ export default function TaskDetailPage() {
       </div>
 
       <div className="card">
+        <h2>Governance</h2>
+        {task ? (
+          <>
+            <div className="kv-grid">
+              <div className="kv-item"><span className="kv-key">planning_revision</span><span className="kv-value">{formatValue(task.planning_revision)}</span></div>
+              <div className="kv-item"><span className="kv-key">checkpoint_version</span><span className="kv-value">{formatValue(task.checkpoint_version)}</span></div>
+              <div className="kv-item"><span className="kv-key">graph_digest</span><span className="kv-value">{task.graph_digest ?? "-"}</span></div>
+            </div>
+            <h3>Resume Transaction</h3>
+            <ResumeTransactionPanel transaction={task.resume_transaction} />
+            <h3>Corruption / Promotion</h3>
+            <CorruptionStatePanel corruption={task.corruption_state} promotionStatus={task.promotion_status} />
+            {canForceRevert ? (
+              <>
+                <h3>Admin Recovery</h3>
+                <p className="muted">
+                  Force-revert realigns authority to a frozen checkpoint after `STATE_CORRUPTED`.
+                </p>
+                <div className="row" style={{ marginTop: 12 }}>
+                  <input
+                    type="number"
+                    min={0}
+                    placeholder="target checkpoint version"
+                    value={targetCheckpointVersion}
+                    onChange={(event) => setTargetCheckpointVersion(event.target.value)}
+                  />
+                  <button
+                    disabled={!targetCheckpointVersion || forceReverting}
+                    onClick={handleForceRevert}
+                  >
+                    {forceReverting ? "Force Reverting..." : "Force Revert Checkpoint"}
+                  </button>
+                </div>
+              </>
+            ) : null}
+            <h3>Planning Summary</h3>
+            <DebugJsonPanel title="Planning Summary" payload={task.planning_summary ?? null} defaultExpanded={false} />
+          </>
+        ) : (
+          <p className="muted">No governance state available.</p>
+        )}
+      </div>
+
+      <div className="card">
         <h2>Goal Parse</h2>
-        <KeyValueGrid value={task?.goal_parse_summary} />
+        <GoalParsePanel summary={task?.goal_parse_summary} />
       </div>
 
       <div className="card">
         <h2>Skill Route</h2>
-        <KeyValueGrid value={task?.skill_route_summary} />
+        <SkillRoutePanel summary={task?.skill_route_summary} />
       </div>
 
       <div className="card">
@@ -314,11 +1303,65 @@ export default function TaskDetailPage() {
                 <span className="kv-key">created_at</span>
                 <span className="kv-value">{manifest.created_at ?? "-"}</span>
               </div>
+              <div className="kv-item">
+                <span className="kv-key">capability_key</span>
+                <span className="kv-value">{manifest.capability_key ?? "-"}</span>
+              </div>
+              <div className="kv-item">
+                <span className="kv-key">freeze_status</span>
+                <span className="kv-value">{manifest.freeze_status ?? "-"}</span>
+              </div>
+              <div className="kv-item">
+                <span className="kv-key">planning_revision</span>
+                <span className="kv-value">{formatValue(manifest.planning_revision)}</span>
+              </div>
+              <div className="kv-item">
+                <span className="kv-key">checkpoint_version</span>
+                <span className="kv-value">{formatValue(manifest.checkpoint_version)}</span>
+              </div>
+              <div className="kv-item">
+                <span className="kv-key">graph_digest</span>
+                <span className="kv-value">{manifest.graph_digest ?? "-"}</span>
+              </div>
             </div>
-            <h3>Runtime Assertions</h3>
-            <KeyValueGrid value={manifest.runtime_assertions} />
-          </>
-        ) : (
+          <h3>Manifest Resume Transaction</h3>
+          <ResumeTransactionPanel transaction={manifest.resume_transaction} />
+          <h3>Manifest Corruption / Promotion</h3>
+          <CorruptionStatePanel corruption={manifest.corruption_state} promotionStatus={manifest.promotion_status} />
+          <h3>Manifest Planning Summary</h3>
+          <DebugJsonPanel title="Manifest Planning Summary" payload={manifest.planning_summary ?? null} defaultExpanded={false} />
+          <h3>Manifest Goal Parse</h3>
+          <GoalParsePanel summary={manifest.goal_parse} />
+          <h3>Manifest Skill Route</h3>
+          <SkillRoutePanel summary={manifest.skill_route} />
+          <h3>Capability Facts</h3>
+          <ManifestCapabilityFactsPanel facts={manifest.capability_facts} />
+          <h3>Capability Output Contract</h3>
+          <CapabilityContractList outputs={manifest.capability_facts?.output_contract?.outputs} />
+          <h3>Capability Validation Hints</h3>
+          <CapabilityValidationHintList hints={manifest.capability_facts?.validation_hints} />
+          <h3>Capability Repair Hints</h3>
+          <CapabilityRepairHintList hints={manifest.capability_facts?.repair_hints} />
+          <h3>Logical Input Roles</h3>
+          <LogicalInputRoleList roles={manifest.logical_input_roles} />
+          <h3>Slot Schema View</h3>
+          <SlotSchemaViewPanel slotSchemaView={manifest.slot_schema_view} />
+          <h3>Role Arg Mappings</h3>
+          <RoleArgMappingList mappings={manifest.role_arg_mappings} />
+          <h3>Stable Defaults</h3>
+          <StableDefaultsPanel defaults={manifest.stable_defaults} />
+            <h3>Slot Bindings</h3>
+            <SlotBindingList bindings={manifest.slot_bindings} />
+            <h3>Args Draft</h3>
+            <ArgsDraftPanel argsDraft={manifest.args_draft ?? null} />
+            <h3>Manifest Validation Summary</h3>
+            <ValidationSummaryPanel summary={manifest.validation_summary} />
+          <h3>Execution Graph</h3>
+          <ExecutionGraphPanel graph={manifest.execution_graph} />
+          <h3>Runtime Assertions</h3>
+          <RuntimeAssertionList assertions={manifest.runtime_assertions} />
+        </>
+      ) : (
           <p className="muted">Manifest is not frozen yet.</p>
         )}
       </div>
@@ -338,6 +1381,22 @@ export default function TaskDetailPage() {
             <div className="kv-item">
               <span className="kv-key">last_heartbeat_at</span>
               <span className="kv-value">{task.job.last_heartbeat_at ?? "-"}</span>
+            </div>
+            <div className="kv-item">
+              <span className="kv-key">provider_key</span>
+              <span className="kv-value">{task.job.provider_key ?? "-"}</span>
+            </div>
+            <div className="kv-item">
+              <span className="kv-key">capability_key</span>
+              <span className="kv-value">{task.job.capability_key ?? "-"}</span>
+            </div>
+            <div className="kv-item">
+              <span className="kv-key">runtime_profile</span>
+              <span className="kv-value">{task.job.runtime_profile ?? "-"}</span>
+            </div>
+            <div className="kv-item">
+              <span className="kv-key">case_id</span>
+              <span className="kv-value">{task.job.case_id ?? "-"}</span>
             </div>
           </div>
         ) : (
@@ -362,57 +1421,48 @@ export default function TaskDetailPage() {
 
       <div className="card">
         <h2>Pass1 Summary</h2>
-        <KeyValueGrid value={task?.pass1_summary} />
+        <Pass1SummaryPanel summary={task?.pass1_summary} />
       </div>
 
       <div className="card">
         <h2>Bindings</h2>
-        <KeyValueGrid value={task?.slot_bindings_summary} />
+        <SlotBindingsSummaryPanel summary={task?.slot_bindings_summary} />
       </div>
 
       <div className="card">
         <h2>Args Draft</h2>
-        <KeyValueGrid value={task?.args_draft_summary} />
+        <ArgsDraftSummaryPanel summary={task?.args_draft_summary} />
       </div>
 
       <div className="card">
         <h2>Validation</h2>
-        <KeyValueGrid value={task?.validation_summary} />
-        <h3>Missing Roles</h3>
-        <StringList values={Array.isArray(missingRoles) ? missingRoles : undefined} emptyText="No missing roles." />
-        <h3>Invalid Bindings</h3>
-        <StringList values={Array.isArray(invalidBindings) ? invalidBindings : undefined} emptyText="No invalid bindings." />
+        <ValidationSummaryPanel summary={task?.validation_summary} />
       </div>
 
       <div className="card">
         <h2>Pass2 Summary</h2>
-        <KeyValueGrid value={task?.pass2_summary} />
+        <Pass2SummaryPanel summary={task?.pass2_summary} />
       </div>
 
       <div className="card">
         <h2>Result Summaries</h2>
-        <KeyValueGrid
-          value={{
-            ...(task?.result_object_summary ?? {}),
-            result_bundle_summary: task?.result_bundle_summary ?? null,
-            final_explanation_summary: task?.final_explanation_summary ?? null,
-            last_failure_summary: task?.last_failure_summary ?? null,
-          }}
-        />
+        <h3>Result Object Summary</h3>
+        <ResultObjectSummaryPanel summary={task?.result_object_summary} />
+        <h3>Result Bundle Summary</h3>
+        <ResultBundleSummaryPanel summary={task?.result_bundle_summary} />
+        <h3>Final Explanation Summary</h3>
+        <FinalExplanationSummaryPanel summary={task?.final_explanation_summary} />
+        <h3>Last Failure Summary</h3>
+        <FailureSummaryPanel summary={task?.last_failure_summary} />
       </div>
 
       {task?.state === "WAITING_USER" ? (
         <div className="card">
           <h2>Repair Panel</h2>
-          <KeyValueGrid value={task.waiting_context} />
-          <h3>Required User Actions</h3>
-          <ul className="simple-list">
-            {(task.waiting_context?.required_user_actions ?? []).map((action) => (
-              <li key={action.key}>{`${action.label} [${action.key}]`}</li>
-            ))}
-          </ul>
+          <h3>Waiting Context</h3>
+          <WaitingContextPanel waitingContext={task.waiting_context} />
           <h3>Repair Proposal</h3>
-          <KeyValueGrid value={task.repair_proposal} valueClassName="llm-text" />
+          <RepairProposalPanel proposal={task.repair_proposal} />
           <div className="row" style={{ marginTop: 12 }}>
             <input
               placeholder="logical_slot"
@@ -449,10 +1499,7 @@ export default function TaskDetailPage() {
         )}
       </div>
 
-      <div className="card">
-        <h2>Raw JSON</h2>
-        <pre>{JSON.stringify({ task, manifest, events }, null, 2)}</pre>
-      </div>
+      <DebugJsonPanel title="Debug JSON" payload={{ task, manifest, events }} />
     </main>
   );
 }

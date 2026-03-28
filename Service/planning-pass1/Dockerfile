@@ -2,8 +2,23 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+ARG SAGE_INVEST_PIP_SPEC=
+
+ENV CPLUS_INCLUDE_PATH=/usr/include/gdal
+ENV C_INCLUDE_PATH=/usr/include/gdal
+
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
+RUN if [ -n "$SAGE_INVEST_PIP_SPEC" ]; then \
+      apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        gdal-bin \
+        libgdal-dev && \
+      rm -rf /var/lib/apt/lists/* && \
+      GDAL_VERSION="$(gdal-config --version)" && \
+      pip install --no-cache-dir "gdal==$GDAL_VERSION" && \
+      pip install --no-cache-dir "$SAGE_INVEST_PIP_SPEC"; \
+    fi
 
 COPY app ./app
 

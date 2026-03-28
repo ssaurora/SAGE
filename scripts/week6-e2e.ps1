@@ -296,7 +296,7 @@ foreach ($name in $envVars) {
 }
 
 try {
-    Write-Output "[1/10] Start PostgreSQL"
+    Write-Output "[1/12] Start PostgreSQL"
     Remove-ContainerIfExists -Name $postgresContainer
     docker run --name $postgresContainer --rm -d -p ${postgresPort}:5432 -e POSTGRES_DB=sage -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres postgres:17 | Out-Null
     Wait-Until -TimeoutSeconds 90 -ErrorMessage "PostgreSQL startup timed out" -Probe {
@@ -304,7 +304,7 @@ try {
         return ($LASTEXITCODE -eq 0)
     }
 
-    Write-Output "[2/10] Start Redis"
+    Write-Output "[2/12] Start Redis"
     Remove-ContainerIfExists -Name $redisContainer
     docker run --name $redisContainer --rm -d -p ${redisPort}:6379 redis:7-alpine | Out-Null
     Wait-Until -TimeoutSeconds 60 -ErrorMessage "Redis startup timed out" -Probe {
@@ -312,7 +312,7 @@ try {
         return ($LASTEXITCODE -eq 0 -and ($pong -join "") -match "PONG")
     }
 
-    Write-Output "[3/10] Start Service container"
+    Write-Output "[3/12] Start Service container"
     Remove-ContainerIfExists -Name $serviceContainer
     Push-Location $serviceDir
     try {
@@ -331,7 +331,7 @@ try {
         Test-HttpOk -Urls @("http://localhost:${servicePort}/health", "http://127.0.0.1:${servicePort}/health")
     }
 
-    Write-Output "[4/10] Start BackEnd"
+    Write-Output "[4/12] Start BackEnd"
     Stop-ProcessListeningOnPort -Port $backendPort
     $backendContainerId = Start-BackendContainer -BackendDir $backendDir -ImageTag $backendImage -ContainerName $backendContainer -HostPort $backendPort -PostgresPort $postgresPort -ServicePort $servicePort -JwtSecret "sage-week6-e2e-secret-key-123456789"
 
@@ -353,7 +353,9 @@ try {
     $meResponse = Invoke-RestMethod -Method Get -Uri "http://localhost:${backendPort}/auth/me" -Headers $headers
     Assert-True ([string]$meResponse.username -eq "demo") "authenticated /auth/me should return demo"
 
-    Write-Output "[5/10] Success path"
+    Assert-True ([string]$meResponse.role -eq "ADMIN") "authenticated /auth/me should return ADMIN role"
+
+    Write-Output "[5/12] Success path"
     $successBody = @{ user_query = "Run week4 success chain" } | ConvertTo-Json
     $successTask = Invoke-RestMethod -Method Post -Uri "http://localhost:${backendPort}/tasks" -Headers $headers -ContentType "application/json" -Body $successBody
     $successTaskId = [string]$successTask.task_id
@@ -364,12 +366,19 @@ try {
     $successDetail = Invoke-RestMethod -Method Get -Uri "http://localhost:${backendPort}/tasks/$successTaskId" -Headers $headers
     Assert-True (-not [string]::IsNullOrWhiteSpace([string]$successDetail.latest_result_bundle_id)) "latest_result_bundle_id should exist"
     Assert-True (-not [string]::IsNullOrWhiteSpace([string]$successDetail.latest_workspace_id)) "latest_workspace_id should exist"
+    Assert-True ([int]$successDetail.planning_revision -ge 1) "success planning_revision should be >= 1"
+    Assert-True ([int]$successDetail.checkpoint_version -ge 1) "success checkpoint_version should be >= 1"
+    Assert-True ([string]$successDetail.promotion_status -eq "PROMOTED") "success promotion_status should be PROMOTED"
 
     $successManifest = Invoke-RestMethod -Method Get -Uri "http://localhost:${backendPort}/tasks/$successTaskId/manifest" -Headers $headers
     Assert-True (-not [string]::IsNullOrWhiteSpace([string]$successManifest.manifest_id)) "manifest_id should exist"
     Assert-True ($null -ne $successManifest.goal_parse) "goal_parse should exist"
     Assert-True ($null -ne $successManifest.skill_route) "skill_route should exist"
     Assert-True ($null -ne $successManifest.runtime_assertions) "runtime_assertions should exist"
+    Assert-True ([string]$successManifest.freeze_status -eq "FROZEN") "manifest freeze_status should be FROZEN"
+    Assert-True ([int]$successManifest.checkpoint_version -ge 1) "manifest checkpoint_version should be >= 1"
+    Assert-True (-not [string]::IsNullOrWhiteSpace([string]$successManifest.graph_digest)) "manifest graph_digest should exist"
+    Assert-True ($null -ne $successManifest.planning_summary) "manifest planning_summary should exist"
 
     $successResult = Invoke-RestMethod -Method Get -Uri "http://localhost:${backendPort}/tasks/$successTaskId/result" -Headers $headers
     Assert-True ($null -ne $successResult.result_bundle) "result_bundle should exist"
@@ -378,6 +387,7 @@ try {
     Assert-True ($null -ne $successResult.artifact_catalog) "artifact_catalog should exist"
     Assert-True ($null -ne $successResult.result_bundle.metrics.water_yield_index) "water_yield_index should exist"
     Assert-True ($null -ne $successResult.result_bundle.metrics.climate_balance) "climate_balance should exist"
+    Assert-True ([string]$successResult.promotion_status -eq "PROMOTED") "result promotion_status should be PROMOTED"
 
     $successRuns = Invoke-RestMethod -Method Get -Uri "http://localhost:${backendPort}/tasks/$successTaskId/runs" -Headers $headers
     Assert-True (@($successRuns.items).Count -ge 1) "success runs should exist"
@@ -389,7 +399,7 @@ try {
     Assert-True (@($successAttempt.artifacts.logs).Count -ge 1) "logs should exist"
     Assert-True ($successAttempt.workspace.workspace_state -in @("CLEANED", "ARCHIVED", "FAILED_CLEANUP")) "workspace_state should be terminal"
 
-    Write-Output "[6/10] Repair + resume path"
+    Write-Output "[6/12] Repair + resume path"
     $repairBody = @{ user_query = "week5 missing precipitation input" } | ConvertTo-Json
     $repairTask = Invoke-RestMethod -Method Post -Uri "http://localhost:${backendPort}/tasks" -Headers $headers -ContentType "application/json" -Body $repairBody
     $repairTaskId = [string]$repairTask.task_id
@@ -428,8 +438,11 @@ try {
     $repairArtifactAttempt2 = @($repairArtifacts.items | Where-Object { $_.attempt_no -eq 2 })[0]
     Assert-True ($null -ne $repairArtifactAttempt2) "attempt 2 artifacts should exist"
     Assert-True (@($repairArtifactAttempt2.artifacts.logs).Count -ge 1) "attempt 2 logs should exist"
+    $repairDetail = Invoke-RestMethod -Method Get -Uri "http://localhost:${backendPort}/tasks/$repairTaskId" -Headers $headers
+    Assert-True ([string]$repairDetail.resume_transaction.status -eq "COMMITTED") "repair resume transaction should be COMMITTED"
+    Assert-True ([int]$repairDetail.checkpoint_version -ge 1) "repair checkpoint_version should be >= 1"
 
-    Write-Output "[7/10] Fatal validation path"
+    Write-Output "[7/12] Fatal validation path"
     $fatalBody = @{ user_query = "week5 invalidbinding demo" } | ConvertTo-Json
     $fatalTask = Invoke-RestMethod -Method Post -Uri "http://localhost:${backendPort}/tasks" -Headers $headers -ContentType "application/json" -Body $fatalBody
     $fatalTaskId = [string]$fatalTask.task_id
@@ -442,7 +455,87 @@ try {
     $fatalRuns = Invoke-RestMethod -Method Get -Uri "http://localhost:${backendPort}/tasks/$fatalTaskId/runs" -Headers $headers
     Assert-True (@($fatalRuns.items).Count -ge 1) "fatal path should record attempt history"
 
-    Write-Output "[8/10] Cancel path with Redis coordination"
+    Write-Output "[8/12] Assertion failure repair path"
+    $assertionBody = @{ user_query = "week6 assertionfailure demo" } | ConvertTo-Json
+    $assertionTask = Invoke-RestMethod -Method Post -Uri "http://localhost:${backendPort}/tasks" -Headers $headers -ContentType "application/json" -Body $assertionBody
+    $assertionTaskId = [string]$assertionTask.task_id
+    Assert-True (-not [string]::IsNullOrWhiteSpace($assertionTaskId)) "assertion task id should exist"
+    $assertionWaiting = Wait-TaskState -TaskId $assertionTaskId -Headers $headers -States @("WAITING_USER", "FAILED") -TimeoutSeconds 120
+    Assert-True ($assertionWaiting.state -eq "WAITING_USER") "assertion failure should route to WAITING_USER"
+    $assertionContext = Get-WaitingContext -TaskSnapshot $assertionWaiting
+    Assert-True ((Get-CanResumeValue -WaitingContext $assertionContext) -eq $false) "assertion waiting state should not be resumable before override"
+    $assertionActionKeys = @($assertionContext.required_user_actions | ForEach-Object { $_.key })
+    Assert-True ($assertionActionKeys -contains "upload_precipitation") "assertion waiting actions should include upload_precipitation, actual: $($assertionActionKeys -join ', ')"
+    $assertionResult = Invoke-RestMethod -Method Get -Uri "http://localhost:${backendPort}/tasks/$assertionTaskId/result" -Headers $headers
+    Assert-True ([string]$assertionResult.failure_summary.failure_code -eq "ASSERTION_FAILED") "assertion failure code should be ASSERTION_FAILED"
+    Assert-True ([bool]$assertionResult.failure_summary.repairable) "assertion failure should be repairable"
+
+    Set-Content -Path $uploadTempFile -Value "fake precipitation raster for assertion repair" -Encoding UTF8
+    $assertionUploadRaw = curl.exe -s -X POST "http://localhost:${backendPort}/tasks/$assertionTaskId/attachments" -H "Authorization: Bearer $accessToken" -F "file=@$uploadTempFile" -F "logical_slot=precipitation"
+    $assertionUploadResponse = $assertionUploadRaw | ConvertFrom-Json
+    Assert-True ($assertionUploadResponse.assignment_status -eq "ASSIGNED") "assertion repair upload should be assigned"
+    Wait-Until -TimeoutSeconds 40 -ErrorMessage "assertion waiting_context did not become resumable" -Probe {
+        $snapshot = Invoke-RestMethod -Method Get -Uri "http://localhost:${backendPort}/tasks/$assertionTaskId" -Headers $headers
+        $ctx = Get-WaitingContext -TaskSnapshot $snapshot
+        (Get-CanResumeValue -WaitingContext $ctx) -eq $true
+    }
+
+    $assertionResumeBody = @{
+        resume_request_id = [guid]::NewGuid().ToString()
+        user_note = "uploaded precipitation after runtime assertion failure"
+    } | ConvertTo-Json -Depth 5
+    $assertionResume = Invoke-RestMethod -Method Post -Uri "http://localhost:${backendPort}/tasks/$assertionTaskId/resume" -Headers $headers -ContentType "application/json" -Body $assertionResumeBody
+    Assert-True ($assertionResume.resume_accepted -eq $true) "assertion repair resume should be accepted"
+    $assertionFinal = Wait-TaskState -TaskId $assertionTaskId -Headers $headers -States @("SUCCEEDED", "FAILED", "CANCELLED") -TimeoutSeconds 120
+    Assert-True ($assertionFinal.state -eq "SUCCEEDED") "assertion repair path should recover to SUCCEEDED"
+
+    Write-Output "[9/12] Promotion failure + force revert"
+    $promotionBody = @{ user_query = "week6 promotionfailure demo" } | ConvertTo-Json
+    $promotionTask = Invoke-RestMethod -Method Post -Uri "http://localhost:${backendPort}/tasks" -Headers $headers -ContentType "application/json" -Body $promotionBody
+    $promotionTaskId = [string]$promotionTask.task_id
+    Assert-True (-not [string]::IsNullOrWhiteSpace($promotionTaskId)) "promotion failure task id should exist"
+    $promotionCorrupted = Wait-TaskState -TaskId $promotionTaskId -Headers $headers -States @("STATE_CORRUPTED") -TimeoutSeconds 120
+    Assert-True ($promotionCorrupted.state -eq "STATE_CORRUPTED") "promotion failure should reach STATE_CORRUPTED"
+    Assert-True ([string]$promotionCorrupted.promotion_status -eq "FAILED") "corrupted promotion_status should be FAILED"
+    Assert-True ($promotionCorrupted.corruption_state.is_corrupted -eq $true) "corruption_state should be marked corrupted"
+    Assert-True ([string]$promotionCorrupted.corruption_state.reason -like "ARTIFACT_PROMOTION_FAILED*") "corruption reason should describe promotion failure"
+
+    $corruptedResumeStatus = 0
+    try {
+        Invoke-WebRequest -Method Post -Uri "http://localhost:${backendPort}/tasks/$promotionTaskId/resume" -Headers $headers -ContentType "application/json" -Body (@{ resume_request_id = [guid]::NewGuid().ToString() } | ConvertTo-Json) | Out-Null
+        $corruptedResumeStatus = 200
+    }
+    catch {
+        if ($null -eq $_.Exception.Response) {
+            throw
+        }
+        $corruptedResumeStatus = [int]$_.Exception.Response.StatusCode
+    }
+    Assert-True ($corruptedResumeStatus -eq 409) "resume should be rejected in STATE_CORRUPTED"
+
+    $corruptedUploadStatus = curl.exe -s -o NUL -w "%{http_code}" -X POST "http://localhost:${backendPort}/tasks/$promotionTaskId/attachments" -H "Authorization: Bearer $accessToken" -F "file=@$uploadTempFile" -F "logical_slot=precipitation"
+    Assert-True ([int]$corruptedUploadStatus -eq 409) "upload should be rejected in STATE_CORRUPTED"
+
+    $forceRevertBody = @{
+        request_id = [guid]::NewGuid().ToString()
+        target_checkpoint_version = [int]$promotionCorrupted.checkpoint_version
+    } | ConvertTo-Json
+    $forceRevertResponse = Invoke-RestMethod -Method Post -Uri "http://localhost:${backendPort}/tasks/$promotionTaskId/force-revert-checkpoint" -Headers $headers -ContentType "application/json" -Body $forceRevertBody
+    Assert-True ([string]$forceRevertResponse.state -eq "WAITING_USER") "force revert should move task back to WAITING_USER"
+
+    $promotionWaiting = Wait-TaskState -TaskId $promotionTaskId -Headers $headers -States @("WAITING_USER") -TimeoutSeconds 60
+    Assert-True ((Get-CanResumeValue -WaitingContext (Get-WaitingContext -TaskSnapshot $promotionWaiting)) -eq $true) "force-reverted task should be resumable"
+    $promotionResumeBody = @{
+        resume_request_id = [guid]::NewGuid().ToString()
+        args_overrides = @{ simulate_promotion_failure = $false }
+        user_note = "disable simulated promotion failure after force revert"
+    } | ConvertTo-Json -Depth 5
+    $promotionResume = Invoke-RestMethod -Method Post -Uri "http://localhost:${backendPort}/tasks/$promotionTaskId/resume" -Headers $headers -ContentType "application/json" -Body $promotionResumeBody
+    Assert-True ($promotionResume.resume_accepted -eq $true) "promotion failure task should resume after force revert"
+    $promotionFinal = Wait-TaskState -TaskId $promotionTaskId -Headers $headers -States @("SUCCEEDED", "FAILED", "CANCELLED") -TimeoutSeconds 120
+    Assert-True ($promotionFinal.state -eq "SUCCEEDED") "promotion failure task should recover to SUCCEEDED after force revert"
+
+    Write-Output "[10/12] Cancel path with Redis coordination"
     $cancelBody = @{ user_query = "Run week4 cancel chain" } | ConvertTo-Json
     $cancelTask = Invoke-RestMethod -Method Post -Uri "http://localhost:${backendPort}/tasks" -Headers $headers -ContentType "application/json" -Body $cancelBody
     $cancelTaskId = [string]$cancelTask.task_id
@@ -484,16 +577,21 @@ try {
     $cancelAttempt = @($cancelArtifacts.items)[0]
     Assert-True (@($cancelAttempt.artifacts.logs).Count -ge 1) "cancel path logs should exist"
 
-    Write-Output "[9/10] Event spot check"
+    Write-Output "[11/12] Event spot check"
     $repairEvents = Invoke-RestMethod -Method Get -Uri "http://localhost:${backendPort}/tasks/$repairTaskId/events" -Headers $headers
     $repairEventTypes = @($repairEvents.items | ForEach-Object { $_.event_type })
     Assert-True ($repairEventTypes -contains "WAITING_USER_ENTERED") "repair events should include WAITING_USER_ENTERED"
     Assert-True ($repairEventTypes -contains "RESUME_ACCEPTED") "repair events should include RESUME_ACCEPTED"
+    $promotionEvents = Invoke-RestMethod -Method Get -Uri "http://localhost:${backendPort}/tasks/$promotionTaskId/events" -Headers $headers
+    $promotionEventTypes = @($promotionEvents.items | ForEach-Object { $_.event_type })
+    Assert-True ($promotionEventTypes -contains "RESUME_ACCEPTED") "promotion recovery events should include RESUME_ACCEPTED"
 
-    Write-Output "[10/10] Week6 E2E passed"
+    Write-Output "[12/12] Week6 E2E passed"
     Write-Output "success: $successTaskId => $($successFinal.state)"
     Write-Output "repair:  $repairTaskId => $($repairFinal.state)"
     Write-Output "fatal:   $fatalTaskId => $($fatalFinal.state)"
+    Write-Output "assert:  $assertionTaskId => $($assertionFinal.state)"
+    Write-Output "promote: $promotionTaskId => $($promotionFinal.state)"
     Write-Output "cancel:  $cancelTaskId => $($cancelFinal.state)"
 
     if ($KeepRunning) {

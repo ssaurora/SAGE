@@ -27,6 +27,8 @@ from app.schemas import (
     FinalExplanation,
     JobState,
     JobStatusResponse,
+    OutputReference,
+    ProviderInputBinding,
     ResultBundle,
     ResultObject,
     WorkspaceSummary,
@@ -69,6 +71,18 @@ class RuntimeJob:
     runtime_process: subprocess.Popen[str] | None = None
     log_handle: object | None = None
     workspace_context: WorkspaceContext | None = None
+
+
+@dataclass
+class RuntimeAssertionViolation(RuntimeError):
+    assertion_id: str
+    node_id: str | None
+    message: str
+    repairable: bool
+    details: dict[str, str | int | float | bool | None]
+
+    def __str__(self) -> str:
+        return self.message
 
 
 class JobRuntimeManager:
@@ -185,6 +199,7 @@ class JobRuntimeManager:
             )
             self._attach_workspace(job_id, context)
             self._write_audit_input(context, request, job_id)
+            self._evaluate_runtime_assertions(request, context)
             self._launch_runtime_process(job_id, request, context)
 
             while True:
@@ -216,8 +231,20 @@ class JobRuntimeManager:
             if self._is_cancel_requested(job_id):
                 self._finish_cancelled(job_id, self._cancel_reason(job_id))
                 return
-            error = ErrorObject(error_code="JOB_RUNTIME_ERROR", message=str(exc), created_at=datetime.now(UTC))
+            error_code = "JOB_RUNTIME_ERROR"
             failure = FailureSummary(failure_code="JOB_RUNTIME_ERROR", failure_message=str(exc), created_at=datetime.now(UTC))
+            if isinstance(exc, RuntimeAssertionViolation):
+                error_code = "ASSERTION_FAILED"
+                failure = FailureSummary(
+                    failure_code="ASSERTION_FAILED",
+                    failure_message=exc.message,
+                    created_at=datetime.now(UTC),
+                    assertion_id=exc.assertion_id,
+                    node_id=exc.node_id,
+                    repairable=exc.repairable,
+                    details=exc.details,
+                )
+            error = ErrorObject(error_code=error_code, message=str(exc), created_at=datetime.now(UTC))
             self._finish_failed(job_id, error, failure)
 
     def _collect_runtime_outputs(
@@ -235,16 +262,71 @@ class JobRuntimeManager:
         result_id = str(payload["result_id"])
         summary = str(payload["summary"])
         metrics = payload["metrics"]
+        output_registry = payload.get("output_registry") if isinstance(payload.get("output_registry"), dict) else {}
+        case_id = self._resolve_case_id(request)
+        contract_mode = str(request.args_draft.get("contract_mode", "unknown"))
+        runtime_mode = str(request.args_draft.get("runtime_mode", "unknown"))
+        provider_input_bindings = self._build_provider_input_bindings(request)
+        primary_output_refs = self._extract_primary_output_refs(output_registry)
 
-        derived_summary = {
-            "watershed_summary": {
-                "capability_key": request.capability_key,
-                "provider_key": request.provider_key,
-                "runtime_profile": request.runtime_profile,
-                "water_yield_index": metrics["water_yield_index"],
-                "climate_balance": metrics["climate_balance"],
-            }
+        watershed_summary_payload = {
+            "capability_key": request.capability_key,
+            "provider_key": request.provider_key,
+            "runtime_profile": request.runtime_profile,
+            "case_id": case_id,
+            "contract_mode": contract_mode,
+            "runtime_mode": runtime_mode,
+            "input_binding_count": len(provider_input_bindings),
         }
+        highlights = [
+            f"provider = {request.provider_key}",
+            f"case_id = {case_id or '-'}",
+        ]
+        if "water_yield_index" in metrics and "climate_balance" in metrics:
+            watershed_summary_payload.update(
+                {
+                    "water_yield_index": metrics["water_yield_index"],
+                    "climate_balance": metrics["climate_balance"],
+                }
+            )
+            highlights = [
+                f"water_yield_index = {metrics['water_yield_index']}",
+                f"climate_balance = {metrics['climate_balance']}",
+                *highlights,
+            ]
+            narrative = (
+                f"Task {request.task_id} completed a {runtime_mode} water_yield run. "
+                f"The current contract mode is {contract_mode} and case_id is {case_id or '-'}. "
+                f"The run used precipitation_index={metrics.get('precipitation_index', '-')} "
+                f"and eto_index={metrics.get('eto_index', '-')}, producing result object {result_id}."
+            )
+        else:
+            watershed_summary_payload.update(
+                {
+                    "used_real_invest": bool(metrics.get("used_real_invest", False)),
+                    "output_file_count": int(metrics.get("output_file_count", len(output_registry))),
+                    "file_registry_count": int(metrics.get("file_registry_count", len(output_registry))),
+                    "geotiff_count": int(metrics.get("geotiff_count", 0)),
+                    "vector_count": int(metrics.get("vector_count", 0)),
+                    "table_count": int(metrics.get("table_count", 0)),
+                    "primary_output_ref_count": len(primary_output_refs),
+                }
+            )
+            highlights = [
+                f"used_real_invest = {bool(metrics.get('used_real_invest', False))}",
+                f"output_file_count = {int(metrics.get('output_file_count', len(output_registry)))}",
+                f"file_registry_count = {int(metrics.get('file_registry_count', len(output_registry)))}",
+                *highlights,
+            ]
+            narrative = (
+                f"Task {request.task_id} completed a {runtime_mode} water_yield run. "
+                f"The current contract mode is {contract_mode} and case_id is {case_id or '-'}. "
+                f"The run produced {int(metrics.get('output_file_count', len(output_registry)))} output files, "
+                f"{int(metrics.get('file_registry_count', len(output_registry)))} registered outputs, "
+                f"and {len(primary_output_refs)} primary output references."
+            )
+
+        derived_summary = {"watershed_summary": watershed_summary_payload}
         derived_file = context.work_dir / "watershed_summary.json"
         derived_file.write_text(json.dumps(derived_summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -254,6 +336,7 @@ class JobRuntimeManager:
             result_id=result_id,
             summary=summary,
             metrics=metrics,
+            output_registry=output_registry,
             task_id=request.task_id,
             job_id=job_id,
         )
@@ -263,6 +346,8 @@ class JobRuntimeManager:
             request=request,
             job_id=job_id,
             metrics=metrics,
+            provider_input_bindings=provider_input_bindings,
+            output_registry=output_registry,
         )
 
         result_bundle = ResultBundle(
@@ -271,7 +356,9 @@ class JobRuntimeManager:
             job_id=job_id,
             summary=summary,
             metrics=metrics,
-            main_outputs=contract_primary_outputs + ["watershed_summary"],
+            output_registry=output_registry,
+            primary_output_refs=[OutputReference(output_id=ref["output_id"], path=ref["path"]) for ref in primary_output_refs],
+            main_outputs=contract_primary_outputs + ["watershed_summary", *sorted(output_registry.keys())],
             artifacts=[
                 "result_bundle.json",
                 "runtime_result.json",
@@ -310,16 +397,8 @@ class JobRuntimeManager:
 
         final_explanation = FinalExplanation(
             title="Water Yield Result Summary",
-            highlights=[
-                f"water_yield_index = {metrics['water_yield_index']}",
-                f"climate_balance = {metrics['climate_balance']}",
-                f"provider = {request.provider_key}",
-            ],
-            narrative=(
-                f"Task {request.task_id} completed a minimal deterministic water_yield run. "
-                f"The run used precipitation_index={metrics['precipitation_index']} and eto_index={metrics['eto_index']}, "
-                f"producing result object {result_id}."
-            ),
+            highlights=highlights,
+            narrative=narrative,
             generated_at=datetime.now(UTC),
         )
 
@@ -330,6 +409,8 @@ class JobRuntimeManager:
         archive_summary = archive_workspace(context)
         cleanup_summary = cleanup_workspace(context)
         artifact_catalog = self._build_artifact_catalog(context, skill.capability.output_contract.outputs)
+        if request.args_draft.get("simulate_promotion_failure"):
+            artifact_catalog = self._duplicate_artifact_id_for_promotion_failure(artifact_catalog)
         workspace_summary = WorkspaceSummary(
             workspace_id=context.workspace_id,
             workspace_output_path=str(context.work_dir),
@@ -343,10 +424,18 @@ class JobRuntimeManager:
             image=os.getenv("RUNTIME_IMAGE", "sage-pass1:week6"),
             workspace_output_path=str(context.archive_dir),
             result_file_exists=(context.archive_dir / "result_bundle.json").exists(),
+            provider_key=request.provider_key,
+            runtime_profile=request.runtime_profile,
+            case_id=case_id,
+            contract_mode=contract_mode,
+            runtime_mode=runtime_mode,
+            input_bindings=provider_input_bindings,
+            promotion_status="READY_FOR_PROMOTION",
         )
         return result_bundle, result_object, final_explanation, docker_evidence, workspace_summary, artifact_catalog
 
     def _write_audit_input(self, context: WorkspaceContext, request: CreateJobRequest, job_id: str) -> None:
+        provider_input_bindings = self._build_provider_input_bindings(request)
         runtime_input = {
             "task_id": request.task_id,
             "job_id": job_id,
@@ -355,18 +444,91 @@ class JobRuntimeManager:
             "capability_key": request.capability_key,
             "provider_key": request.provider_key,
             "runtime_profile": request.runtime_profile,
+            "case_id": self._resolve_case_id(request),
             "node_count": len(request.materialized_execution_graph.nodes),
             "edge_count": len(request.materialized_execution_graph.edges),
-            "args_draft": request.args_draft,
+            "slot_bindings": [binding.model_dump(mode="json") for binding in request.slot_bindings],
+            "provider_input_bindings": [binding.model_dump(mode="json") for binding in provider_input_bindings],
+            "args_draft": {
+                **request.args_draft,
+                "workspace_dir": str(context.work_dir),
+                "results_suffix": f"attempt_{request.attempt_no}",
+            },
+            "runtime_assertions": [assertion.model_dump(mode="json") for assertion in request.runtime_assertions],
             "output_dir": str(context.work_dir),
         }
         input_file = context.audit_dir / "runtime_request.json"
         input_file.write_text(json.dumps(runtime_input, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    def _evaluate_runtime_assertions(self, request: CreateJobRequest, context: WorkspaceContext) -> None:
+        enriched_args = {
+            **request.args_draft,
+            "workspace_dir": str(context.work_dir),
+            "results_suffix": f"attempt_{request.attempt_no}",
+        }
+        for assertion in request.runtime_assertions:
+            if not assertion.required:
+                continue
+            if assertion.assertion_type == "required_arg":
+                target_key = assertion.target_key or ""
+                value = enriched_args.get(target_key)
+                if value is None or (isinstance(value, str) and not value.strip()):
+                    raise RuntimeAssertionViolation(
+                        assertion_id=assertion.assertion_id,
+                        node_id=assertion.node_id,
+                        message=assertion.message,
+                        repairable=assertion.repairable,
+                        details={
+                            **assertion.details,
+                            "target_key": target_key,
+                            "workspace_id": request.workspace_id,
+                        },
+                    )
+            if assertion.assertion_type == "file_exists":
+                target_key = assertion.target_key or ""
+                value = enriched_args.get(target_key)
+                candidate_path = None if value is None else Path(str(value))
+                if candidate_path is None or not candidate_path.exists():
+                    raise RuntimeAssertionViolation(
+                        assertion_id=assertion.assertion_id,
+                        node_id=assertion.node_id,
+                        message=assertion.message,
+                        repairable=assertion.repairable,
+                        details={
+                            **assertion.details,
+                            "target_key": target_key,
+                            "target_path": None if candidate_path is None else str(candidate_path),
+                            "workspace_id": request.workspace_id,
+                        },
+                    )
+
     def _launch_runtime_process(self, job_id: str, request: CreateJobRequest, context: WorkspaceContext) -> None:
         input_file = context.audit_dir / "runtime_request.json"
         log_file = context.logs_dir / "runtime.log"
-        inline_code = """
+        log_handle = open(log_file, "w", encoding="utf-8")
+        if self._use_real_invest_runner(request):
+            cmd = [sys.executable, "-m", "app.invest_real_runner", str(input_file)]
+        else:
+            cmd = [sys.executable, "-c", self._build_deterministic_inline_code(), str(input_file)]
+        if os.name == "nt":
+            process = subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP, stdout=log_handle, stderr=subprocess.STDOUT, text=True)
+            process_group = process.pid
+        else:
+            process = subprocess.Popen(cmd, start_new_session=True, stdout=log_handle, stderr=subprocess.STDOUT, text=True)
+            process_group = process.pid
+
+        with self._lock:
+            runtime_job = self._jobs[job_id]
+            runtime_job.runtime_process = process
+            runtime_job.runtime_pid_group = process_group
+            runtime_job.log_handle = log_handle
+
+    def _use_real_invest_runner(self, request: CreateJobRequest) -> bool:
+        runtime_mode = str(request.args_draft.get("runtime_mode", "")).strip().lower()
+        return request.provider_key == "planning-pass1-invest-local" or runtime_mode == "invest_real_runner"
+
+    def _build_deterministic_inline_code(self) -> str:
+        return """
 import json, sys, time, uuid
 from pathlib import Path
 
@@ -400,6 +562,10 @@ result = {
         'capability_key': str(payload['capability_key']),
         'provider_key': str(payload['provider_key']),
         'runtime_profile': str(payload['runtime_profile']),
+        'case_id': str(payload.get('case_id') or ''),
+        'contract_mode': str(args_draft.get('contract_mode', 'unknown')),
+        'runtime_mode': str(args_draft.get('runtime_mode', 'deterministic_stub')),
+        'input_binding_count': len(payload.get('provider_input_bindings', [])),
         'analysis_template': str(args_draft.get('analysis_template', 'water_yield_v1')),
         'precipitation_index': precipitation_index,
         'eto_index': eto_index,
@@ -412,20 +578,6 @@ result = {
 }
 (output_dir / 'runtime_result.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
 """
-        log_handle = open(log_file, "w", encoding="utf-8")
-        cmd = [sys.executable, "-c", inline_code, str(input_file)]
-        if os.name == "nt":
-            process = subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP, stdout=log_handle, stderr=subprocess.STDOUT, text=True)
-            process_group = process.pid
-        else:
-            process = subprocess.Popen(cmd, start_new_session=True, stdout=log_handle, stderr=subprocess.STDOUT, text=True)
-            process_group = process.pid
-
-        with self._lock:
-            runtime_job = self._jobs[job_id]
-            runtime_job.runtime_process = process
-            runtime_job.runtime_pid_group = process_group
-            runtime_job.log_handle = log_handle
 
     def _write_contract_primary_outputs(
         self,
@@ -434,6 +586,7 @@ result = {
         result_id: str,
         summary: str,
         metrics: dict[str, str | int | float | bool],
+        output_registry: dict[str, str],
         task_id: str,
         job_id: str,
     ) -> list[str]:
@@ -449,6 +602,8 @@ result = {
                 "job_id": job_id,
                 "summary": summary,
                 "metrics": metrics,
+                "output_registry": output_registry,
+                "primary_output_refs": self._extract_primary_output_refs(output_registry),
             }
             output_file.write_text(json.dumps(output_payload, ensure_ascii=False, indent=2), encoding="utf-8")
             primary_logical_names.append(item.logical_name)
@@ -461,6 +616,8 @@ result = {
         request: CreateJobRequest,
         job_id: str,
         metrics: dict[str, str | int | float | bool],
+        provider_input_bindings: list[ProviderInputBinding],
+        output_registry: dict[str, str],
     ) -> None:
         for item in output_items:
             if item.artifact_role != "AUDIT_ARTIFACT":
@@ -475,12 +632,108 @@ result = {
                 "capability_key": request.capability_key,
                 "provider_key": request.provider_key,
                 "runtime_profile": request.runtime_profile,
+                "case_id": self._resolve_case_id(request),
+                "contract_mode": request.args_draft.get("contract_mode"),
+                "runtime_mode": request.args_draft.get("runtime_mode"),
+                "slot_bindings": [binding.model_dump(mode="json") for binding in request.slot_bindings],
+                "provider_input_bindings": [binding.model_dump(mode="json") for binding in provider_input_bindings],
+                "output_registry": output_registry,
                 "metrics_snapshot": metrics,
             }
             output_file.write_text(json.dumps(output_payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    def _build_provider_input_bindings(self, request: CreateJobRequest) -> list[ProviderInputBinding]:
+        skill = get_skill_definition(request.capability_key)
+        mapping_by_role = {mapping.role_name: mapping for mapping in skill.role_arg_mappings}
+        case_id = self._resolve_case_id(request)
+        bindings: list[ProviderInputBinding] = []
+        seen_roles: set[str] = set()
+        for binding in request.slot_bindings:
+            mapping = mapping_by_role.get(binding.role_name)
+            slot_arg_key = None if mapping is None else mapping.slot_arg_key
+            provider_input_path = self._resolve_provider_input_path(binding.role_name, slot_arg_key, request)
+            bindings.append(
+                ProviderInputBinding(
+                    role_name=binding.role_name,
+                    slot_name=binding.slot_name,
+                    source=binding.source,
+                    arg_key=slot_arg_key,
+                    provider_input_path=provider_input_path,
+                    source_ref=self._build_source_ref(case_id, binding.role_name, binding.slot_name, provider_input_path),
+                )
+            )
+            seen_roles.add(binding.role_name)
+        for contract_input in ("watersheds", "lulc", "biophysical_table"):
+            if contract_input in seen_roles:
+                continue
+            provider_input_path = self._resolve_provider_input_path(contract_input, None, request)
+            bindings.append(
+                ProviderInputBinding(
+                    role_name=contract_input,
+                    slot_name=contract_input,
+                    source="case_contract",
+                    arg_key=f"{contract_input}_path",
+                    provider_input_path=provider_input_path,
+                    source_ref=self._build_source_ref(case_id, contract_input, contract_input, provider_input_path),
+                )
+            )
+        return bindings
+
+    def _resolve_provider_input_path(
+        self,
+        role_name: str,
+        slot_arg_key: str | None,
+        request: CreateJobRequest,
+    ) -> str | None:
+        if slot_arg_key:
+            path_arg_key = slot_arg_key[:-5] + "_path" if slot_arg_key.endswith("_slot") else None
+            if path_arg_key:
+                value = request.args_draft.get(path_arg_key)
+                if isinstance(value, str) and value.strip():
+                    return value
+        value = request.args_draft.get(f"{role_name}_path")
+        if isinstance(value, str) and value.strip():
+            return value
+        return None
+
+    def _resolve_case_id(self, request: CreateJobRequest) -> str | None:
+        if request.case_id and request.case_id.strip():
+            return request.case_id.strip()
+        value = request.args_draft.get("case_id")
+        if isinstance(value, str) and value.strip():
+            return value
+        return None
+
+    def _build_source_ref(
+        self,
+        case_id: str | None,
+        role_name: str,
+        slot_name: str | None,
+        provider_input_path: str | None,
+    ) -> str:
+        if case_id and provider_input_path and "/sample-data/" in provider_input_path:
+            return f"sample-data:{case_id}:{role_name}"
+        return f"slot-binding:{slot_name or role_name}"
+
+    def _extract_primary_output_refs(self, output_registry: dict[str, str]) -> list[dict[str, str]]:
+        refs: list[dict[str, str]] = []
+        preferred_tokens = ("watershed", "wyield", "water_yield")
+        for output_id, path in sorted(output_registry.items()):
+            normalized_id = output_id.lower()
+            normalized_path = path.lower()
+            if not any(token in normalized_id or token in normalized_path for token in preferred_tokens):
+                continue
+            refs.append({"output_id": output_id, "path": path})
+        return refs
+
     def _build_artifact_catalog(self, context: WorkspaceContext, output_items: list[CapabilityOutputItem]) -> ArtifactCatalog:
         contract_names = self._build_contract_name_map(output_items)
+        reserved_archive_names = {
+            "result_bundle.json",
+            "runtime_result.json",
+            "metrics.json",
+            *contract_names["PRIMARY_OUTPUT"].keys(),
+        }
         return ArtifactCatalog(
             primary_outputs=self._collect_artifacts(
                 context,
@@ -497,9 +750,26 @@ result = {
                 set(contract_names["AUDIT_ARTIFACT"].keys()) | {"runtime_request.json"},
                 contract_names["AUDIT_ARTIFACT"],
             ),
-            derived_outputs=self._collect_artifacts(context, context.archive_dir, "DERIVED_OUTPUT", {"watershed_summary.json"}),
+            derived_outputs=self._collect_derived_outputs(context, reserved_archive_names),
             logs=self._collect_artifacts(context, context.logs_dir, "LOG", set()),
         )
+
+    def _duplicate_artifact_id_for_promotion_failure(self, artifact_catalog: ArtifactCatalog) -> ArtifactCatalog:
+        duplicate_source = None
+        duplicate_target = None
+        for collection in (
+            artifact_catalog.primary_outputs,
+            artifact_catalog.audit_artifacts,
+            artifact_catalog.derived_outputs,
+            artifact_catalog.logs,
+        ):
+            if collection and len(collection) >= 2:
+                duplicate_source = collection[0]
+                duplicate_target = collection[1]
+                break
+        if duplicate_source is not None and duplicate_target is not None:
+            duplicate_target.artifact_id = duplicate_source.artifact_id
+        return artifact_catalog
 
     def _build_contract_name_map(self, output_items: list[CapabilityOutputItem]) -> dict[str, dict[str, str]]:
         by_role: dict[str, dict[str, str]] = {
@@ -536,6 +806,33 @@ result = {
                     artifact_id=artifact_id,
                     artifact_role=artifact_role,
                     logical_name=logical_name_overrides.get(path.name, path.name),
+                    relative_path=str(path.relative_to(context.root_dir)).replace("\\", "/"),
+                    content_type=_guess_content_type(path),
+                    size_bytes=path.stat().st_size,
+                    sha256=_sha256(path),
+                )
+            )
+        return items
+
+    def _collect_derived_outputs(self, context: WorkspaceContext, reserved_archive_names: set[str]) -> list[ArtifactMeta]:
+        items: list[ArtifactMeta] = []
+        if not context.archive_dir.exists():
+            return items
+        allowed_suffixes = {".json", ".tif", ".tiff", ".csv", ".gpkg", ".shp", ".geojson", ".dbf"}
+        for path in sorted(context.archive_dir.rglob("*")):
+            if not path.is_file():
+                continue
+            if path.name in reserved_archive_names:
+                continue
+            if path.suffix.lower() not in allowed_suffixes:
+                continue
+            artifact_id = f"artifact_{uuid.uuid5(uuid.NAMESPACE_URL, str(path)).hex[:16]}"
+            logical_name = path.stem if path.name != "watershed_summary.json" else "watershed_summary"
+            items.append(
+                ArtifactMeta(
+                    artifact_id=artifact_id,
+                    artifact_role="DERIVED_OUTPUT",
+                    logical_name=logical_name,
                     relative_path=str(path.relative_to(context.root_dir)).replace("\\", "/"),
                     content_type=_guess_content_type(path),
                     size_bytes=path.stat().st_size,
