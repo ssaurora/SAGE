@@ -210,6 +210,18 @@ public interface JobRecordMapper {
             @Param("updatedAt") OffsetDateTime updatedAt
     );
 
+    @Update("""
+            UPDATE job_record
+            SET final_explanation_json = #{finalExplanationJson},
+                updated_at = #{updatedAt}
+            WHERE job_id = #{jobId}
+            """)
+    int updateFinalExplanation(
+            @Param("jobId") String jobId,
+            @Param("finalExplanationJson") String finalExplanationJson,
+            @Param("updatedAt") OffsetDateTime updatedAt
+    );
+
     @Select("""
             SELECT job_id,
                    task_id,

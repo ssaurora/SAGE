@@ -82,6 +82,29 @@ class MinReadyEvaluatorTest {
     }
 
     @Test
+    void acceptsClarifyActionWhenUserNoteIsPresent() {
+        RepairProposalRequest.WaitingContext waitingContext = waitingContext(
+                List.of(),
+                List.of(requiredAction("clarify", "clarify_intent"))
+        );
+        ResumeTaskRequest request = new ResumeTaskRequest();
+        request.setUserNote("Run the real annual water yield case for gura.");
+
+        assertTrue(MinReadyEvaluator.isReady(waitingContext, List.of(), request));
+    }
+
+    @Test
+    void rejectsClarifyActionWhenUserNoteIsMissing() {
+        RepairProposalRequest.WaitingContext waitingContext = waitingContext(
+                List.of(),
+                List.of(requiredAction("clarify", "clarify_intent"))
+        );
+        ResumeTaskRequest request = new ResumeTaskRequest();
+
+        assertFalse(MinReadyEvaluator.isReady(waitingContext, List.of(), request));
+    }
+
+    @Test
     void rejectsUnknownRequiredActionTypes() {
         RepairProposalRequest.WaitingContext waitingContext = waitingContext(
                 List.of(),

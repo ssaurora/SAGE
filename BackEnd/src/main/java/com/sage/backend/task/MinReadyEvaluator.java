@@ -64,6 +64,12 @@ final class MinReadyEvaluator {
                     }
                     continue;
                 }
+                if ("clarify".equalsIgnoreCase(actionType)) {
+                    if (request.getUserNote() == null || request.getUserNote().isBlank()) {
+                        return false;
+                    }
+                    continue;
+                }
                 return false;
             }
         }

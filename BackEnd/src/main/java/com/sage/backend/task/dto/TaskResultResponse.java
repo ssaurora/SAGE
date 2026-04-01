@@ -57,6 +57,48 @@ public class TaskResultResponse {
     @JsonProperty("promotion_status")
     private String promotionStatus;
 
+    @JsonProperty("planning_intent_status")
+    private String planningIntentStatus;
+
+    @JsonProperty("binding_status")
+    private String bindingStatus;
+
+    @JsonProperty("overruled_fields")
+    private List<String> overruledFields;
+
+    @JsonProperty("blocked_mutations")
+    private List<String> blockedMutations;
+
+    @JsonProperty("assembly_blocked")
+    private Boolean assemblyBlocked;
+
+    @JsonProperty("cognition_verdict")
+    private String cognitionVerdict;
+
+    @JsonProperty("goal_route_cognition")
+    private Map<String, Object> goalRouteCognition;
+
+    @JsonProperty("goal_route_output")
+    private Map<String, Object> goalRouteOutput;
+
+    @JsonProperty("passb_cognition")
+    private Map<String, Object> passbCognition;
+
+    @JsonProperty("passb_output")
+    private Map<String, Object> passbOutput;
+
+    @JsonProperty("repair_proposal_cognition")
+    private Map<String, Object> repairProposalCognition;
+
+    @JsonProperty("repair_proposal_output")
+    private Map<String, Object> repairProposalOutput;
+
+    @JsonProperty("final_explanation_cognition")
+    private Map<String, Object> finalExplanationCognition;
+
+    @JsonProperty("final_explanation_output")
+    private Map<String, Object> finalExplanationOutput;
+
     @JsonProperty("result_bundle")
     private ResultBundle resultBundle;
 
@@ -209,6 +251,118 @@ public class TaskResultResponse {
 
     public void setPromotionStatus(String promotionStatus) {
         this.promotionStatus = promotionStatus;
+    }
+
+    public String getPlanningIntentStatus() {
+        return planningIntentStatus;
+    }
+
+    public void setPlanningIntentStatus(String planningIntentStatus) {
+        this.planningIntentStatus = planningIntentStatus;
+    }
+
+    public String getBindingStatus() {
+        return bindingStatus;
+    }
+
+    public void setBindingStatus(String bindingStatus) {
+        this.bindingStatus = bindingStatus;
+    }
+
+    public List<String> getOverruledFields() {
+        return overruledFields;
+    }
+
+    public void setOverruledFields(List<String> overruledFields) {
+        this.overruledFields = overruledFields;
+    }
+
+    public List<String> getBlockedMutations() {
+        return blockedMutations;
+    }
+
+    public void setBlockedMutations(List<String> blockedMutations) {
+        this.blockedMutations = blockedMutations;
+    }
+
+    public Boolean getAssemblyBlocked() {
+        return assemblyBlocked;
+    }
+
+    public void setAssemblyBlocked(Boolean assemblyBlocked) {
+        this.assemblyBlocked = assemblyBlocked;
+    }
+
+    public String getCognitionVerdict() {
+        return cognitionVerdict;
+    }
+
+    public void setCognitionVerdict(String cognitionVerdict) {
+        this.cognitionVerdict = cognitionVerdict;
+    }
+
+    public Map<String, Object> getGoalRouteCognition() {
+        return goalRouteCognition;
+    }
+
+    public void setGoalRouteCognition(Map<String, Object> goalRouteCognition) {
+        this.goalRouteCognition = goalRouteCognition;
+    }
+
+    public Map<String, Object> getGoalRouteOutput() {
+        return goalRouteOutput;
+    }
+
+    public void setGoalRouteOutput(Map<String, Object> goalRouteOutput) {
+        this.goalRouteOutput = goalRouteOutput;
+    }
+
+    public Map<String, Object> getPassbCognition() {
+        return passbCognition;
+    }
+
+    public void setPassbCognition(Map<String, Object> passbCognition) {
+        this.passbCognition = passbCognition;
+    }
+
+    public Map<String, Object> getPassbOutput() {
+        return passbOutput;
+    }
+
+    public void setPassbOutput(Map<String, Object> passbOutput) {
+        this.passbOutput = passbOutput;
+    }
+
+    public Map<String, Object> getRepairProposalCognition() {
+        return repairProposalCognition;
+    }
+
+    public void setRepairProposalCognition(Map<String, Object> repairProposalCognition) {
+        this.repairProposalCognition = repairProposalCognition;
+    }
+
+    public Map<String, Object> getRepairProposalOutput() {
+        return repairProposalOutput;
+    }
+
+    public void setRepairProposalOutput(Map<String, Object> repairProposalOutput) {
+        this.repairProposalOutput = repairProposalOutput;
+    }
+
+    public Map<String, Object> getFinalExplanationCognition() {
+        return finalExplanationCognition;
+    }
+
+    public void setFinalExplanationCognition(Map<String, Object> finalExplanationCognition) {
+        this.finalExplanationCognition = finalExplanationCognition;
+    }
+
+    public Map<String, Object> getFinalExplanationOutput() {
+        return finalExplanationOutput;
+    }
+
+    public void setFinalExplanationOutput(Map<String, Object> finalExplanationOutput) {
+        this.finalExplanationOutput = finalExplanationOutput;
     }
 
     public ResultBundle getResultBundle() {
@@ -436,6 +590,8 @@ public class TaskResultResponse {
     }
 
     public static class FinalExplanation {
+        private Boolean available;
+
         private String title;
 
         private List<String> highlights;
@@ -444,6 +600,20 @@ public class TaskResultResponse {
 
         @JsonProperty("generated_at")
         private String generatedAt;
+
+        @JsonProperty("failure_code")
+        private String failureCode;
+
+        @JsonProperty("failure_message")
+        private String failureMessage;
+
+        public Boolean getAvailable() {
+            return available;
+        }
+
+        public void setAvailable(Boolean available) {
+            this.available = available;
+        }
 
         public String getTitle() {
             return title;
@@ -475,6 +645,22 @@ public class TaskResultResponse {
 
         public void setGeneratedAt(String generatedAt) {
             this.generatedAt = generatedAt;
+        }
+
+        public String getFailureCode() {
+            return failureCode;
+        }
+
+        public void setFailureCode(String failureCode) {
+            this.failureCode = failureCode;
+        }
+
+        public String getFailureMessage() {
+            return failureMessage;
+        }
+
+        public void setFailureMessage(String failureMessage) {
+            this.failureMessage = failureMessage;
         }
     }
 

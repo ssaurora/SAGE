@@ -138,6 +138,65 @@ final class TaskProjectionBuilder {
         return summary;
     }
 
+    static Map<String, Object> buildCognitionView(JsonNode root, ObjectMapper objectMapper) {
+        if (root == null || root.isNull() || root.isMissingNode()) {
+            return null;
+        }
+        JsonNode metadata = root.path("cognition_metadata");
+        if (metadata == null || metadata.isNull() || metadata.isMissingNode() || !metadata.isObject()) {
+            return null;
+        }
+        return buildJsonObjectView(metadata, objectMapper);
+    }
+
+    static Map<String, Object> buildGoalRouteOutput(JsonNode goalParseRoot, JsonNode skillRouteRoot, ObjectMapper objectMapper) {
+        if ((goalParseRoot == null || goalParseRoot.isNull() || goalParseRoot.isMissingNode())
+                && (skillRouteRoot == null || skillRouteRoot.isNull() || skillRouteRoot.isMissingNode())) {
+            return null;
+        }
+        Map<String, Object> output = new LinkedHashMap<>();
+        if (goalParseRoot != null && !goalParseRoot.isNull() && !goalParseRoot.isMissingNode()) {
+            String planningIntentStatus = goalParseRoot.path("planning_intent_status").asText(null);
+            if (planningIntentStatus != null && !planningIntentStatus.isBlank()) {
+                output.put("planning_intent_status", planningIntentStatus);
+            }
+            if (goalParseRoot.path("confidence").isNumber()) {
+                output.put("confidence", goalParseRoot.path("confidence").asDouble());
+            }
+            Map<String, Object> decisionSummary = buildJsonObjectView(goalParseRoot.path("decision_summary"), objectMapper);
+            if (decisionSummary != null && !decisionSummary.isEmpty()) {
+                output.put("decision_summary", decisionSummary);
+            }
+            output.put("goal_parse", buildJsonObjectView(goalParseRoot, objectMapper));
+        }
+        if (skillRouteRoot != null && !skillRouteRoot.isNull() && !skillRouteRoot.isMissingNode()) {
+            if (!output.containsKey("planning_intent_status")) {
+                String planningIntentStatus = skillRouteRoot.path("planning_intent_status").asText(null);
+                if (planningIntentStatus != null && !planningIntentStatus.isBlank()) {
+                    output.put("planning_intent_status", planningIntentStatus);
+                }
+            }
+            if (!output.containsKey("confidence") && skillRouteRoot.path("confidence").isNumber()) {
+                output.put("confidence", skillRouteRoot.path("confidence").asDouble());
+            }
+            if (!output.containsKey("decision_summary")) {
+                Map<String, Object> decisionSummary = buildJsonObjectView(skillRouteRoot.path("decision_summary"), objectMapper);
+                if (decisionSummary != null && !decisionSummary.isEmpty()) {
+                    output.put("decision_summary", decisionSummary);
+                }
+            }
+            output.put("skill_route", buildJsonObjectView(skillRouteRoot, objectMapper));
+        }
+        return output.isEmpty() ? null : output;
+    }
+
+    static Map<String, Object> buildStageOutput(JsonNode root, ObjectMapper objectMapper) {
+        if (root == null || root.isNull() || root.isMissingNode()) {
+            return null;
+        }
+        return buildJsonObjectView(root, objectMapper);
+    }
+
     static TaskDetailResponse.SkillRouteSummary buildSkillRouteSummary(JsonNode root) {
         if (root == null || root.isNull() || root.isMissingNode()) {
             return null;
@@ -295,6 +354,9 @@ final class TaskProjectionBuilder {
         summary.setTitle(root.path("title").asText(null));
         summary.setHighlightCount(root.path("highlight_count").isNumber() ? root.path("highlight_count").asInt() : null);
         summary.setGeneratedAt(root.path("generated_at").asText(null));
+        summary.setAvailable(root.path("available").isBoolean() ? root.path("available").asBoolean() : null);
+        summary.setFailureCode(root.path("failure_code").asText(null));
+        summary.setFailureMessage(root.path("failure_message").asText(null));
         return summary;
     }
 
@@ -332,10 +394,13 @@ final class TaskProjectionBuilder {
             return null;
         }
         TaskDetailResponse.RepairProposal summary = new TaskDetailResponse.RepairProposal();
+        summary.setAvailable(root.path("available").isBoolean() ? root.path("available").asBoolean() : null);
         summary.setUserFacingReason(root.path("user_facing_reason").asText(null));
         summary.setResumeHint(root.path("resume_hint").asText(null));
         summary.setActionExplanations(buildRepairActionExplanations(root.path("action_explanations")));
         summary.setNotes(jsonArrayToStrings(root.path("notes")));
+        summary.setFailureCode(root.path("failure_code").asText(null));
+        summary.setFailureMessage(root.path("failure_message").asText(null));
         return summary;
     }
 
@@ -366,10 +431,13 @@ final class TaskProjectionBuilder {
             return null;
         }
         TaskResultResponse.FinalExplanation explanation = new TaskResultResponse.FinalExplanation();
+        explanation.setAvailable(root.path("available").isBoolean() ? root.path("available").asBoolean() : null);
         explanation.setTitle(root.path("title").asText(null));
         explanation.setHighlights(jsonArrayToStrings(root.path("highlights")));
         explanation.setNarrative(root.path("narrative").asText(null));
         explanation.setGeneratedAt(root.path("generated_at").asText(null));
+        explanation.setFailureCode(root.path("failure_code").asText(null));
+        explanation.setFailureMessage(root.path("failure_message").asText(null));
         return explanation;
     }
 
@@ -645,6 +713,9 @@ final class TaskProjectionBuilder {
         summary.put("title", finalExplanation.path("title").asText(""));
         summary.put("highlight_count", highlights.isArray() ? highlights.size() : 0);
         summary.put("generated_at", finalExplanation.path("generated_at").asText(""));
+        summary.put("available", finalExplanation.path("available").isBoolean() ? finalExplanation.path("available").asBoolean() : null);
+        summary.put("failure_code", finalExplanation.path("failure_code").asText(null));
+        summary.put("failure_message", finalExplanation.path("failure_message").asText(null));
         return summary;
     }
 

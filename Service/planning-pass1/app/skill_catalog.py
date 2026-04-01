@@ -43,12 +43,33 @@ def get_skill_definition(capability_key: str | None) -> SkillDefinition:
         capability_key=CANONICAL_CAPABILITY_KEY,
         display_name="Water Yield",
         validation_hints=[
+            CapabilityValidationHint(role_name="watersheds", expected_slot_type="vector"),
+            CapabilityValidationHint(role_name="lulc", expected_slot_type="raster"),
+            CapabilityValidationHint(role_name="biophysical_table", expected_slot_type="table"),
             CapabilityValidationHint(role_name="precipitation", expected_slot_type="raster"),
             CapabilityValidationHint(role_name="eto", expected_slot_type="raster"),
             CapabilityValidationHint(role_name="depth_to_root_restricting_layer", expected_slot_type="raster"),
             CapabilityValidationHint(role_name="plant_available_water_content", expected_slot_type="raster"),
         ],
         repair_hints=[
+            CapabilityRepairHint(
+                role_name="watersheds",
+                action_type="upload",
+                action_key="upload_watersheds",
+                action_label="Upload watersheds",
+            ),
+            CapabilityRepairHint(
+                role_name="lulc",
+                action_type="upload",
+                action_key="upload_lulc",
+                action_label="Upload lulc raster",
+            ),
+            CapabilityRepairHint(
+                role_name="biophysical_table",
+                action_type="upload",
+                action_key="upload_biophysical_table",
+                action_label="Upload biophysical table",
+            ),
             CapabilityRepairHint(
                 role_name="precipitation",
                 action_type="upload",
@@ -76,8 +97,11 @@ def get_skill_definition(capability_key: str | None) -> SkillDefinition:
         ],
         output_contract=CapabilityOutputContract(
             outputs=[
-                CapabilityOutputItem(artifact_role="PRIMARY_OUTPUT", logical_name="water_yield_result"),
+                CapabilityOutputItem(artifact_role="PRIMARY_OUTPUT", logical_name="watershed_results"),
+                CapabilityOutputItem(artifact_role="PRIMARY_OUTPUT", logical_name="water_yield_raster"),
+                CapabilityOutputItem(artifact_role="PRIMARY_OUTPUT", logical_name="aet_raster"),
                 CapabilityOutputItem(artifact_role="AUDIT_ARTIFACT", logical_name="run_manifest"),
+                CapabilityOutputItem(artifact_role="AUDIT_ARTIFACT", logical_name="runtime_request"),
             ]
         ),
         runtime_profile_hint="docker-local",
@@ -89,6 +113,9 @@ def get_skill_definition(capability_key: str | None) -> SkillDefinition:
         selected_template="water_yield_v1",
         capability=capability,
         required_roles=[
+            LogicalInputRole(role_name="watersheds", required=True),
+            LogicalInputRole(role_name="lulc", required=True),
+            LogicalInputRole(role_name="biophysical_table", required=True),
             LogicalInputRole(role_name="precipitation", required=True),
             LogicalInputRole(role_name="eto", required=True),
         ],
@@ -97,9 +124,9 @@ def get_skill_definition(capability_key: str | None) -> SkillDefinition:
             LogicalInputRole(role_name="plant_available_water_content", required=False),
         ],
         slot_specs=[
-            SkillSlotSpec(slot_name="watersheds", type="vector"),
-            SkillSlotSpec(slot_name="lulc", type="raster"),
-            SkillSlotSpec(slot_name="biophysical_table", type="table"),
+            SkillSlotSpec(slot_name="watersheds", type="vector", bound_role="watersheds"),
+            SkillSlotSpec(slot_name="lulc", type="raster", bound_role="lulc"),
+            SkillSlotSpec(slot_name="biophysical_table", type="table", bound_role="biophysical_table"),
             SkillSlotSpec(slot_name="precipitation", type="raster", bound_role="precipitation"),
             SkillSlotSpec(slot_name="eto", type="raster", bound_role="eto"),
             SkillSlotSpec(
@@ -114,6 +141,18 @@ def get_skill_definition(capability_key: str | None) -> SkillDefinition:
             ),
         ],
         role_arg_mappings=[
+            SkillRoleArgMapping(
+                role_name="watersheds",
+                slot_arg_key="watersheds_slot",
+            ),
+            SkillRoleArgMapping(
+                role_name="lulc",
+                slot_arg_key="lulc_slot",
+            ),
+            SkillRoleArgMapping(
+                role_name="biophysical_table",
+                slot_arg_key="biophysical_table_slot",
+            ),
             SkillRoleArgMapping(
                 role_name="precipitation",
                 slot_arg_key="precipitation_slot",
@@ -141,6 +180,7 @@ def get_skill_definition(capability_key: str | None) -> SkillDefinition:
         ],
         stable_defaults={
             "analysis_template": "water_yield_v1",
+            "seasonality_constant": 5.0,
             "root_depth_factor": 0.8,
             "pawc_factor": 0.85,
         },

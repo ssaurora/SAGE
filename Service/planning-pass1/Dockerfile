@@ -10,7 +10,8 @@ ENV C_INCLUDE_PATH=/usr/include/gdal
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 RUN if [ -n "$SAGE_INVEST_PIP_SPEC" ]; then \
-      apt-get update && apt-get install -y --no-install-recommends \
+      apt-get update -o Acquire::Retries=5 && \
+      apt-get install -y --fix-missing -o Acquire::Retries=5 --no-install-recommends \
         build-essential \
         gdal-bin \
         libgdal-dev && \

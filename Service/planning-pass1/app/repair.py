@@ -1,20 +1,18 @@
 from __future__ import annotations
 
 from app.schemas import (
+    CognitionMetadata,
     RepairActionExplanation,
     RepairProposalRequest,
     RepairProposalResponse,
     RequiredUserAction,
 )
-import base64
-import hashlib
-import hmac
-import json
 import os
-import time
 from typing import Any
 
 import httpx
+
+from app.cognition_support import call_glm_json
 
 DEBUG_REPAIR = os.getenv("SAGE_REPAIR_DEBUG", "false").strip().lower() in ("1", "true", "yes", "on")
 DEBUG_MAX_CHARS = int(os.getenv("SAGE_REPAIR_DEBUG_MAX_CHARS", "2000"))
@@ -38,8 +36,7 @@ def build_repair_proposal_response(payload: RepairProposalRequest) -> RepairProp
             return build_glm_repair_proposal(payload)
         except Exception as exc:
             debug_log(f"GLM provider failed: {type(exc).__name__}: {exc}")
-            debug_note = f"LLM fallback: {type(exc).__name__}: {exc}"
-            return build_deterministic_repair_proposal(payload, debug_note=debug_note)
+            return build_unavailable_repair_proposal(payload, provider="glm", exc=exc)
     return build_deterministic_repair_proposal(payload)
 
 
@@ -92,33 +89,27 @@ def build_deterministic_repair_proposal(
         notes.append(f"debug_note: {debug_note}")
 
     return RepairProposalResponse(
+        available=True,
         user_facing_reason=user_facing_reason,
         resume_hint=resume_hint,
         action_explanations=action_explanations,
         notes=notes,
+        failure_code=None,
+        failure_message=None,
+        cognition_metadata=CognitionMetadata(
+            source="deterministic_baseline",
+            provider="deterministic",
+            model=None,
+            prompt_version="repair_proposal_v1",
+            fallback_used=False,
+            schema_valid=True,
+            response_id=None,
+            status="DETERMINISTIC_BASELINE",
+        ),
     )
 
 
 def build_glm_repair_proposal(payload: RepairProposalRequest) -> RepairProposalResponse:
-    api_base = os.getenv("SAGE_GLM_API_BASE", "https://open.bigmodel.cn/api/paas/v4").rstrip("/")
-    chat_path = os.getenv("SAGE_GLM_CHAT_PATH", "/chat/completions")
-    model = os.getenv("SAGE_GLM_MODEL", "glm-4.7")
-    api_key = os.getenv("SAGE_GLM_API_KEY", "").strip()
-    auth_mode = os.getenv("SAGE_GLM_AUTH_MODE", "jwt").strip().lower()
-    timeout_ms = int(os.getenv("SAGE_GLM_TIMEOUT_MS", "8000"))
-    temperature = float(os.getenv("SAGE_GLM_TEMPERATURE", "0.2"))
-    max_tokens = int(os.getenv("SAGE_GLM_MAX_TOKENS", "700"))
-    exp_seconds = int(os.getenv("SAGE_GLM_JWT_EXP_SECONDS", "3600"))
-
-    if not api_key:
-        raise ValueError("SAGE_GLM_API_KEY is required for glm provider")
-
-    auth_token = build_glm_auth_token(api_key, auth_mode, exp_seconds)
-    headers = {
-        "Authorization": f"Bearer {auth_token}",
-        "Content-Type": "application/json",
-    }
-
     system_prompt = (
         "You are a repair assistant. "
         "Return ONLY strict JSON with keys: "
@@ -128,32 +119,13 @@ def build_glm_repair_proposal(payload: RepairProposalRequest) -> RepairProposalR
     )
 
     user_payload = normalize_repair_payload(payload)
-
-    body = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
-        ],
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }
-
-    url = f"{api_base}{chat_path}"
-    with httpx.Client(timeout=timeout_ms / 1000) as client:
-        response = client.post(url, headers=headers, json=body)
-        response.raise_for_status()
-        try:
-            data = response.json()
-        except Exception as exc:
-            debug_log(f"GLM response was not JSON: {type(exc).__name__}: {exc}")
-            debug_log(f"GLM raw response text: {truncate_text(response.text)}")
-            raise
-
-    debug_log(f"GLM response JSON: {truncate_text(json.dumps(data, ensure_ascii=False))}")
-    content = extract_llm_content(data)
-    debug_log(f"GLM message content: {truncate_text(content)}")
-    parsed = parse_llm_json(content)
+    parsed, metadata = call_glm_json(
+        system_prompt,
+        user_payload,
+        temperature=0.2,
+        max_tokens=1400,
+        timeout_ms=30000,
+    )
 
     action_explanations: list[RepairActionExplanation] = []
     for item in parsed.get("action_explanations", []) or []:
@@ -164,70 +136,63 @@ def build_glm_repair_proposal(payload: RepairProposalRequest) -> RepairProposalR
 
     notes = [str(note) for note in (parsed.get("notes") or [])]
     if DEBUG_REPAIR:
-        notes.append(f"debug_llm_raw: {truncate_text(content)}")
-        notes.append(f"debug_llm_model: {model}")
+        notes.append(f"debug_llm_model: {metadata.get('model')}")
 
     return RepairProposalResponse(
+        available=True,
         user_facing_reason=str(parsed.get("user_facing_reason") or "Task requires additional user actions."),
         resume_hint=str(parsed.get("resume_hint") or "Complete required actions and try resume."),
         action_explanations=action_explanations,
         notes=notes,
+        failure_code=None,
+        failure_message=None,
+        cognition_metadata=CognitionMetadata(
+            source="glm_primary",
+            provider="glm",
+            model=str(metadata.get("model") or ""),
+            prompt_version="repair_proposal_v1",
+            fallback_used=False,
+            schema_valid=True,
+            response_id=str(metadata.get("response_id") or "") or None,
+            status="LLM_PRIMARY",
+        ),
     )
 
 
-def build_glm_auth_token(api_key: str, auth_mode: str, exp_seconds: int) -> str:
-    if auth_mode == "bearer":
-        return api_key
-
-    if "." not in api_key:
-        raise ValueError("GLM API key must be in '<id>.<secret>' form for jwt mode")
-
-    key_id, secret = api_key.split(".", 1)
-    now = int(time.time())
-    header = {"alg": "HS256", "sign_type": "SIGN", "typ": "JWT"}
-    payload = {"api_key": key_id, "exp": now + exp_seconds, "timestamp": now}
-
-    signing_input = f"{b64url_json(header)}.{b64url_json(payload)}"
-    signature = hmac.new(secret.encode("utf-8"), signing_input.encode("utf-8"), hashlib.sha256).digest()
-    return f"{signing_input}.{b64url_bytes(signature)}"
-
-
-def b64url_json(data: dict[str, Any]) -> str:
-    return b64url_bytes(json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
-
-
-def b64url_bytes(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
-
-
-def extract_llm_content(response: dict[str, Any]) -> str:
-    if isinstance(response, dict):
-        choices = response.get("choices")
-        if isinstance(choices, list) and choices:
-            message = choices[0].get("message") if isinstance(choices[0], dict) else None
-            if isinstance(message, dict):
-                return str(message.get("content") or "")
-        output_text = response.get("output_text")
-        if isinstance(output_text, str):
-            return output_text
-    return ""
-
-
-def parse_llm_json(content: str) -> dict[str, Any]:
-    if not content:
-        raise ValueError("LLM response content missing")
-
-    trimmed = content.strip()
-    if trimmed.startswith("```") and trimmed.endswith("```"):
-        trimmed = trimmed[3:-3].strip()
-        if trimmed.lower().startswith("json"):
-            trimmed = trimmed[4:].strip()
-
-    try:
-        return json.loads(trimmed)
-    except json.JSONDecodeError:
-        debug_log(f"LLM response was not valid JSON: {truncate_text(trimmed)}")
-        raise ValueError("LLM response was not valid JSON")
+def build_unavailable_repair_proposal(
+    payload: RepairProposalRequest,
+    *,
+    provider: str,
+    exc: Exception,
+) -> RepairProposalResponse:
+    failure_code, failure_message = classify_failure(exc)
+    notes = [
+        "Repair proposal cognition unavailable.",
+        "Dispatcher rules remain the source of truth.",
+    ]
+    if DEBUG_REPAIR:
+        notes.append(f"debug_note: {type(exc).__name__}: {exc}")
+    return RepairProposalResponse(
+        available=False,
+        user_facing_reason=None,
+        resume_hint=None,
+        action_explanations=[],
+        notes=notes,
+        failure_code=failure_code,
+        failure_message=failure_message,
+        cognition_metadata=CognitionMetadata(
+            source="glm_required_failure",
+            provider=provider,
+            model=os.getenv("SAGE_GLM_MODEL", "glm-4.7") if provider == "glm" else None,
+            prompt_version="repair_proposal_v1",
+            fallback_used=False,
+            schema_valid=False,
+            response_id=None,
+            status="COGNITION_UNAVAILABLE",
+            failure_code=failure_code,
+            failure_message=failure_message,
+        ),
+    )
 
 
 def normalize_repair_payload(payload: RepairProposalRequest) -> dict[str, Any]:
@@ -275,3 +240,14 @@ def serialize_required_action(action: RequiredUserAction) -> dict[str, Any]:
         "label": action.label,
         "required": action.required,
     }
+
+
+def classify_failure(exc: Exception) -> tuple[str, str]:
+    if isinstance(exc, httpx.TimeoutException):
+        return "COGNITION_TIMEOUT", "Repair proposal request timed out."
+    if isinstance(exc, httpx.HTTPError):
+        return "COGNITION_UNAVAILABLE", "Repair proposal provider request failed."
+    message = str(exc)
+    if "valid json" in message.lower():
+        return "COGNITION_SCHEMA_INVALID", "Repair proposal provider returned invalid JSON."
+    return "COGNITION_UNAVAILABLE", message or "Repair proposal provider failed."

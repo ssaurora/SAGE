@@ -2,6 +2,7 @@ param(
     [switch]$SkipWeek4,
     [switch]$SkipWeek5,
     [switch]$SkipWeek6,
+    [switch]$SkipPhase3RealCase,
     [int]$WeekCooldownSeconds = 8
 )
 
@@ -20,6 +21,7 @@ $gateDefinitions = [ordered]@{
     G7 = "ARTIFACT_TRACEABILITY"
     G8 = "REDIS_BOUNDARY"
     G9 = "LLM_BOUNDARY"
+    G10 = "REAL_CASE_ACCEPTANCE"
 }
 
 $failDefinitions = [ordered]@{
@@ -30,6 +32,7 @@ $failDefinitions = [ordered]@{
     F5 = "Cancel continues running"
     F6 = "Redis outage corrupts truth"
     F7 = "Java owns prompt/provider/model"
+    F8 = "Real-case acceptance chain failed"
 }
 
 $moduleResults = New-Object System.Collections.Generic.List[object]
@@ -341,6 +344,18 @@ if (-not $SkipWeek6 -and -not $stopAfterInfraFailure) {
         -FailConditionIds @('F3', 'F4', 'F5', 'F6') `
         -ContainerNames @('sage-week6-postgres', 'sage-week6-redis', 'sage-week6-service', 'sage-week6-backend')
     if ($week6Result.Infra) {
+        $stopAfterInfraFailure = $true
+    }
+}
+
+if (-not $SkipPhase3RealCase -and -not $stopAfterInfraFailure) {
+    $phase3RealCaseResult = Invoke-WeekStage `
+        -ScriptPath (Join-Path $PSScriptRoot 'phase3-realcase-e2e.ps1') `
+        -ModuleName 'phase3-realcase-e2e' `
+        -AssertionIds @('G10') `
+        -FailConditionIds @('F8') `
+        -ContainerNames @('sage-postgres', 'sage-redis', 'sage-service', 'sage-backend', 'sage-frontend')
+    if ($phase3RealCaseResult.Infra) {
         $stopAfterInfraFailure = $true
     }
 }

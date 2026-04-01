@@ -29,7 +29,7 @@ public class RepairProposalService {
             }
             return fallbackService.generate(request, "Cognition output schema invalid");
         } catch (Exception exception) {
-            LOGGER.warn("Repair proposal fallback: {}", exception.getMessage());
+            LOGGER.warn("Repair proposal unavailable: {}", exception.getMessage());
             return fallbackService.generate(request, "Cognition request failed");
         }
     }
@@ -44,10 +44,19 @@ public class RepairProposalService {
     }
 
     private boolean isValidSchema(RepairProposalResponse proposal) {
-        return proposal != null
-                && proposal.getUserFacingReason() != null && !proposal.getUserFacingReason().isBlank()
+        if (proposal == null || proposal.getNotes() == null) {
+            return false;
+        }
+        if (Boolean.FALSE.equals(proposal.getAvailable())) {
+            return proposal.getFailureCode() != null && !proposal.getFailureCode().isBlank()
+                    && proposal.getFailureMessage() != null && !proposal.getFailureMessage().isBlank()
+                    && proposal.getCognitionMetadata() != null
+                    && !proposal.getCognitionMetadata().isEmpty();
+        }
+        return proposal.getUserFacingReason() != null && !proposal.getUserFacingReason().isBlank()
                 && proposal.getResumeHint() != null && !proposal.getResumeHint().isBlank()
                 && proposal.getActionExplanations() != null
-                && proposal.getNotes() != null;
+                && proposal.getCognitionMetadata() != null
+                && !proposal.getCognitionMetadata().isEmpty();
     }
 }

@@ -11,6 +11,62 @@ class PlanningPass1Request(BaseModel):
     user_query: str = Field(min_length=1)
     state_version: int = Field(ge=0)
     capability_key: str | None = None
+    selected_template: str | None = None
+
+
+class CognitionMetadata(BaseModel):
+    source: str = ""
+    provider: str = ""
+    model: str | None = None
+    prompt_version: str = ""
+    fallback_used: bool = False
+    schema_valid: bool = True
+    response_id: str | None = None
+    status: str = ""
+    failure_code: str | None = None
+    failure_message: str | None = None
+
+
+class GoalParseOutput(BaseModel):
+    goal_type: str = ""
+    user_query: str = ""
+    analysis_kind: str = ""
+    intent_mode: str = ""
+    source: str = ""
+    entities: list[str] = Field(default_factory=list)
+
+
+class SkillRouteOutput(BaseModel):
+    route_mode: str = ""
+    primary_skill: str = ""
+    capability_key: str = ""
+    route_source: str = ""
+    confidence: float | None = None
+    selected_template: str = ""
+    template_version: str = ""
+    execution_mode: str = ""
+    provider_preference: str | None = None
+    runtime_profile_preference: str | None = None
+    source: str = ""
+
+
+class CognitionGoalRouteRequest(BaseModel):
+    task_id: str = Field(min_length=1)
+    user_query: str = Field(min_length=1)
+    state_version: int = Field(ge=0)
+    user_note: str = ""
+    allowed_capabilities: list[str] = Field(default_factory=list)
+    allowed_templates: list[str] = Field(default_factory=list)
+    known_cases: list[str] = Field(default_factory=list)
+
+
+class CognitionGoalRouteResponse(BaseModel):
+    planning_intent_status: str
+    goal_parse: GoalParseOutput = Field(default_factory=GoalParseOutput)
+    skill_route: SkillRouteOutput = Field(default_factory=SkillRouteOutput)
+    confidence: float | None = None
+    decision_summary: dict[str, str | int | float | bool | list[str]] = Field(default_factory=dict)
+    cognition_metadata: CognitionMetadata = Field(default_factory=CognitionMetadata)
 
 
 class LogicalInputRole(BaseModel):
@@ -105,6 +161,12 @@ class CognitionPassBRequest(BaseModel):
     user_query: str = Field(min_length=1)
     state_version: int = Field(ge=0)
     pass1_result: PlanningPass1Response
+    goal_parse: dict[str, object] = Field(default_factory=dict)
+    skill_route: dict[str, object] = Field(default_factory=dict)
+    user_note: str = ""
+    attachment_facts: list[dict[str, object]] = Field(default_factory=list)
+    accepted_overrides: dict[str, object] = Field(default_factory=dict)
+    resume_context: dict[str, object] = Field(default_factory=dict)
 
 
 class SlotBinding(BaseModel):
@@ -118,10 +180,21 @@ class DecisionSummary(BaseModel):
     assumptions: list[str]
 
 
+class InferredSemanticArg(BaseModel):
+    value: str | int | float | bool | None = None
+    reason: str
+    source: str
+
+
 class CognitionPassBResponse(BaseModel):
+    binding_status: str = "resolved"
     slot_bindings: list[SlotBinding]
-    args_draft: dict[str, str | int | float | bool]
+    user_semantic_args: dict[str, str | int | float | bool] = Field(default_factory=dict)
+    inferred_semantic_args: dict[str, InferredSemanticArg] = Field(default_factory=dict)
+    args_draft: dict[str, str | int | float | bool] = Field(default_factory=dict)
     decision_summary: DecisionSummary
+    confidence: float | None = None
+    cognition_metadata: CognitionMetadata = Field(default_factory=CognitionMetadata)
 
 
 class PrimitiveValidationRequest(BaseModel):
@@ -228,10 +301,14 @@ class RepairActionExplanation(BaseModel):
 
 
 class RepairProposalResponse(BaseModel):
-    user_facing_reason: str
-    resume_hint: str
+    available: bool = True
+    user_facing_reason: str | None = None
+    resume_hint: str | None = None
     action_explanations: list[RepairActionExplanation] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+    failure_code: str | None = None
+    failure_message: str | None = None
+    cognition_metadata: CognitionMetadata = Field(default_factory=CognitionMetadata)
 
 
 class JobState(str, Enum):
@@ -305,10 +382,26 @@ class ResultBundle(BaseModel):
 
 
 class FinalExplanation(BaseModel):
-    title: str
-    highlights: list[str]
-    narrative: str
-    generated_at: datetime
+    available: bool = True
+    title: str | None = None
+    highlights: list[str] = Field(default_factory=list)
+    narrative: str | None = None
+    generated_at: datetime | None = None
+    failure_code: str | None = None
+    failure_message: str | None = None
+    cognition_metadata: CognitionMetadata = Field(default_factory=CognitionMetadata)
+
+
+class CognitionFinalExplanationRequest(BaseModel):
+    task_id: str = Field(min_length=1)
+    user_query: str = Field(min_length=1)
+    case_id: str | None = None
+    provider_key: str | None = None
+    runtime_profile: str | None = None
+    result_bundle: dict[str, object] = Field(default_factory=dict)
+    artifact_catalog: dict[str, object] = Field(default_factory=dict)
+    docker_runtime_evidence: dict[str, object] = Field(default_factory=dict)
+    workspace_summary: dict[str, object] = Field(default_factory=dict)
 
 
 class FailureSummary(BaseModel):

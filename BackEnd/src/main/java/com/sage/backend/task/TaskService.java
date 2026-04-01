@@ -5,7 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sage.backend.audit.AuditService;
+import com.sage.backend.cognition.CognitionFinalExplanationClient;
+import com.sage.backend.cognition.CognitionGoalRouteClient;
 import com.sage.backend.cognition.CognitionPassBClient;
+import com.sage.backend.cognition.dto.CognitionFinalExplanationRequest;
+import com.sage.backend.cognition.dto.CognitionFinalExplanationResponse;
+import com.sage.backend.cognition.dto.CognitionGoalRouteRequest;
+import com.sage.backend.cognition.dto.CognitionGoalRouteResponse;
 import com.sage.backend.cognition.dto.CognitionPassBRequest;
 import com.sage.backend.cognition.dto.CognitionPassBResponse;
 import com.sage.backend.common.TaskIdGenerator;
@@ -111,6 +117,8 @@ public class TaskService {
     private final TaskAttemptMapper taskAttemptMapper;
     private final EventService eventService;
     private final AuditService auditService;
+    private final CognitionFinalExplanationClient cognitionFinalExplanationClient;
+    private final CognitionGoalRouteClient cognitionGoalRouteClient;
     private final Pass1Client pass1Client;
     private final CognitionPassBClient cognitionPassBClient;
     private final ValidationClient validationClient;
@@ -120,6 +128,7 @@ public class TaskService {
     private final RepairProposalService repairProposalService;
     private final AssertionFailureMapper assertionFailureMapper;
     private final GoalRouteService goalRouteService;
+    private final ExecutionContractAssembler executionContractAssembler;
     private final RegistryService registryService;
     private final WorkspaceTraceService workspaceTraceService;
     private final ObjectMapper objectMapper;
@@ -135,6 +144,8 @@ public class TaskService {
             TaskAttemptMapper taskAttemptMapper,
             EventService eventService,
             AuditService auditService,
+            CognitionFinalExplanationClient cognitionFinalExplanationClient,
+            CognitionGoalRouteClient cognitionGoalRouteClient,
             Pass1Client pass1Client,
             CognitionPassBClient cognitionPassBClient,
             ValidationClient validationClient,
@@ -144,6 +155,7 @@ public class TaskService {
             RepairProposalService repairProposalService,
             AssertionFailureMapper assertionFailureMapper,
             GoalRouteService goalRouteService,
+            ExecutionContractAssembler executionContractAssembler,
             RegistryService registryService,
             WorkspaceTraceService workspaceTraceService,
             ObjectMapper objectMapper,
@@ -157,6 +169,8 @@ public class TaskService {
         this.taskAttemptMapper = taskAttemptMapper;
         this.eventService = eventService;
         this.auditService = auditService;
+        this.cognitionFinalExplanationClient = cognitionFinalExplanationClient;
+        this.cognitionGoalRouteClient = cognitionGoalRouteClient;
         this.pass1Client = pass1Client;
         this.cognitionPassBClient = cognitionPassBClient;
         this.validationClient = validationClient;
@@ -166,6 +180,7 @@ public class TaskService {
         this.repairProposalService = repairProposalService;
         this.assertionFailureMapper = assertionFailureMapper;
         this.goalRouteService = goalRouteService;
+        this.executionContractAssembler = executionContractAssembler;
         this.registryService = registryService;
         this.workspaceTraceService = workspaceTraceService;
         this.objectMapper = objectMapper;
@@ -207,24 +222,69 @@ public class TaskService {
             currentVersion += 1;
             currentState = TaskStatus.COGNIZING;
 
-            GoalRouteService.GoalRouteDecision goalRouteDecision = goalRouteService.derive(request.getUserQuery());
-            String goalParseJson = writeJson(goalRouteDecision.goalParse());
-            String skillRouteJson = writeJson(goalRouteDecision.skillRoute());
+            CognitionGoalRouteResponse goalRouteResponse = runGoalRoute(taskId, request.getUserQuery(), currentVersion, null);
+            ObjectNode goalParseNode = buildGoalParseNode(goalRouteResponse, request.getUserQuery());
+            ObjectNode skillRouteNode = buildSkillRouteNode(goalRouteResponse);
+            String goalParseJson = writeJson(goalParseNode);
+            String skillRouteJson = writeJson(skillRouteNode);
             taskStateMapper.updateGoalAndRoute(taskId, goalParseJson, skillRouteJson);
             appendEvent(taskId, EventType.GOAL_PARSED.name(), null, null, currentVersion, goalParseJson);
             appendEvent(taskId, EventType.SKILL_ROUTED.name(), null, null, currentVersion, skillRouteJson);
+
+            if ("unsupported".equalsIgnoreCase(goalRouteResponse.getPlanningIntentStatus())) {
+                String failureSummaryJson = writePayload(buildUnsupportedFailureSummaryPayload(goalRouteNodeSummary(goalParseNode)));
+                taskStateMapper.updateOutputSummaries(taskId, null, null, failureSummaryJson, null);
+                taskStateMapper.updateCognitionVerdict(taskId, "UNSUPPORTED");
+                ensureUpdated(taskStateMapper.updateState(taskId, currentVersion, TaskStatus.FAILED.name()));
+                appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.FAILED.name(), currentVersion + 1, null);
+                appendEvent(taskId, EventType.TASK_FAILED.name(), null, null, currentVersion + 1, failureSummaryJson);
+                return buildCreateTaskResponse(taskId, null, TaskStatus.FAILED.name(), currentVersion + 1);
+            }
+
+            if ("ambiguous".equalsIgnoreCase(goalRouteResponse.getPlanningIntentStatus())) {
+                WaitingStateSnapshot waitingState = buildClarifyWaitingState(taskId, "CLARIFY_INTENT", "Clarify the requested analysis before resuming.", null);
+                taskStateMapper.updateCognitionVerdict(taskId, "AMBIGUOUS");
+                ensureUpdated(taskStateMapper.updateStateWithWaitingContext(
+                        taskId,
+                        currentVersion,
+                        TaskStatus.WAITING_USER.name(),
+                        waitingState.waitingContextJson(),
+                        waitingState.decision().waitingContext().getWaitingReasonType(),
+                        OffsetDateTime.now(ZoneOffset.UTC)
+                ));
+                appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.WAITING_USER.name(), currentVersion + 1, null);
+                recordWaitingUserEntry(taskId, resolveActiveAttemptNo(taskState), waitingState, null, currentVersion + 1);
+                return buildCreateTaskResponse(taskId, null, TaskStatus.WAITING_USER.name(), currentVersion + 1);
+            }
+
+            if (isRealCaseRoute(skillRouteNode)) {
+                String cognitionFailureCode = evaluateRequiredLlmMetadata(goalParseNode.path("cognition_metadata"));
+                if (cognitionFailureCode != null) {
+                    return failCreateForRequiredCognition(
+                            taskId,
+                            currentVersion,
+                            currentState,
+                            traceId,
+                            "goal-route",
+                            cognitionFailureCode,
+                            goalParseNode
+                    );
+                }
+            }
 
             appendEvent(taskId, EventType.PLANNING_PASS1_STARTED.name(), null, null, currentVersion, null);
             Pass1Response pass1Response = runPass1(
                     taskId,
                     request.getUserQuery(),
                     currentVersion,
-                    goalRouteDecision.skillRoute().path("capability_key").asText(null)
+                    skillRouteNode.path("capability_key").asText(null),
+                    skillRouteNode.path("selected_template").asText(null)
             );
             String pass1Json = objectMapper.writeValueAsString(pass1Response);
             JsonNode pass1Node = objectMapper.readTree(pass1Json);
-            String enrichedGoalParseJson = writeJson(goalRouteService.enrichGoalParse(goalRouteDecision.goalParse(), pass1Node));
-            String enrichedSkillRouteJson = writeJson(goalRouteService.enrichSkillRoute(goalRouteDecision.skillRoute(), pass1Node));
+            skillRouteNode.put("template_version", pass1Response.getTemplateVersion());
+            String enrichedGoalParseJson = writeJson(goalParseNode);
+            String enrichedSkillRouteJson = writeJson(skillRouteNode);
             taskStateMapper.updateGoalAndRoute(taskId, enrichedGoalParseJson, enrichedSkillRouteJson);
             goalParseJson = enrichedGoalParseJson;
             skillRouteJson = enrichedSkillRouteJson;
@@ -244,11 +304,50 @@ public class TaskService {
                     taskId,
                     request.getUserQuery(),
                     currentVersion,
+                    goalParseNode,
+                    skillRouteNode,
                     pass1Node,
                     null
             );
             String passBJson = passBStage.passBJson();
             JsonNode passBNode = passBStage.passBNode();
+            String cognitionVerdict = CognitionVerdictResolver.resolve(goalParseNode, passBNode, passBStage.assemblyResult());
+            taskStateMapper.updateCognitionVerdict(taskId, cognitionVerdict);
+
+            if (isRealCaseRoute(skillRouteNode)) {
+                String cognitionFailureCode = evaluateRequiredLlmMetadata(passBNode.path("cognition_metadata"));
+                if (cognitionFailureCode != null) {
+                    return failCreateForRequiredCognition(
+                            taskId,
+                            currentVersion,
+                            currentState,
+                            traceId,
+                            "passb",
+                            cognitionFailureCode,
+                            passBNode
+                    );
+                }
+            }
+
+            if ("ambiguous".equalsIgnoreCase(passBNode.path("binding_status").asText(""))) {
+                WaitingStateSnapshot waitingState = buildClarifyWaitingState(
+                        taskId,
+                        "CLARIFY_BINDING",
+                        "Clarify the requested bindings before resuming.",
+                        null
+                );
+                ensureUpdated(taskStateMapper.updateStateWithWaitingContext(
+                        taskId,
+                        currentVersion,
+                        TaskStatus.WAITING_USER.name(),
+                        waitingState.waitingContextJson(),
+                        waitingState.decision().waitingContext().getWaitingReasonType(),
+                        OffsetDateTime.now(ZoneOffset.UTC)
+                ));
+                appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.WAITING_USER.name(), currentVersion + 1, null);
+                recordWaitingUserEntry(taskId, resolveActiveAttemptNo(taskState), waitingState, null, currentVersion + 1);
+                return buildCreateTaskResponse(taskId, null, TaskStatus.WAITING_USER.name(), currentVersion + 1);
+            }
 
             ensureUpdated(taskStateMapper.updateState(taskId, currentVersion, TaskStatus.VALIDATING.name()));
             appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.VALIDATING.name(), currentVersion + 1, null);
@@ -354,6 +453,7 @@ public class TaskService {
                     committedPlanningRevision,
                     committedCheckpointVersion,
                     currentInventoryVersion(taskState),
+                    cognitionVerdict,
                     null
             ));
             appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.QUEUED.name(), currentVersion + 1, null);
@@ -395,6 +495,7 @@ public class TaskService {
         response.setStateVersion(taskState.getStateVersion());
         response.setPlanningRevision(taskState.getPlanningRevision());
         response.setCheckpointVersion(taskState.getCheckpointVersion());
+        response.setCognitionVerdict(taskState.getCognitionVerdict());
         response.setResumeTransaction(TaskProjectionBuilder.buildResumeTransaction(readJsonNode(taskState.getResumeTxnJson())));
         response.setCorruptionState(buildCorruptionState(taskState));
         response.setPromotionStatus(derivePromotionStatus(taskState.getCurrentState(), taskState.getCorruptionReason()));
@@ -416,13 +517,26 @@ public class TaskService {
         JsonNode pass2Root = readJsonNode(taskState.getPass2ResultJson());
         response.setGraphDigest(pass2Root.path("graph_digest").asText(null));
         response.setPlanningSummary(TaskProjectionBuilder.buildJsonObjectView(pass2Root.path("planning_summary"), objectMapper));
+        response.setPlanningIntentStatus(readJsonNode(taskState.getGoalParseJson()).path("planning_intent_status").asText(null));
+        JsonNode passBRoot = readJsonNode(taskState.getPassbResultJson());
+        response.setBindingStatus(passBRoot.path("binding_status").asText(null));
+        response.setOverruledFields(TaskProjectionBuilder.jsonArrayToStrings(passBRoot.path("overruled_fields")));
+        response.setBlockedMutations(TaskProjectionBuilder.jsonArrayToStrings(passBRoot.path("blocked_mutations")));
+        response.setAssemblyBlocked(passBRoot.path("assembly_blocked").isBoolean() ? passBRoot.path("assembly_blocked").asBoolean() : null);
+        response.setGoalRouteCognition(TaskProjectionBuilder.buildCognitionView(routeProjection.goalParse(), objectMapper));
+        response.setGoalRouteOutput(TaskProjectionBuilder.buildGoalRouteOutput(routeProjection.goalParse(), routeProjection.skillRoute(), objectMapper));
+        response.setPassbCognition(TaskProjectionBuilder.buildCognitionView(passBRoot, objectMapper));
+        response.setPassbOutput(TaskProjectionBuilder.buildStageOutput(passBRoot, objectMapper));
         AnalysisManifest activeManifest = resolveActiveManifest(taskState);
         String activeCaseId = extractCaseId(activeManifest);
 
         int attemptNo = resolveActiveAttemptNo(taskState);
         RepairRecord latestRepair = repairRecordMapper.findLatestByTaskIdAndAttemptNo(taskId, attemptNo);
         if (latestRepair != null) {
-            response.setRepairProposal(TaskProjectionBuilder.buildRepairProposal(readJsonNode(latestRepair.getRepairProposalJson())));
+            JsonNode repairProposalNode = readJsonNode(latestRepair.getRepairProposalJson());
+            response.setRepairProposal(TaskProjectionBuilder.buildRepairProposal(repairProposalNode));
+            response.setRepairProposalCognition(TaskProjectionBuilder.buildCognitionView(repairProposalNode, objectMapper));
+            response.setRepairProposalOutput(TaskProjectionBuilder.buildStageOutput(repairProposalNode, objectMapper));
         }
 
         JobRecord jobRecord = taskState.getJobId() == null ? null : jobRecordMapper.findByJobId(taskState.getJobId());
@@ -436,6 +550,9 @@ public class TaskService {
             jobSummary.setRuntimeProfile(jobRecord.getRuntimeProfile());
             jobSummary.setCaseId(activeCaseId);
             response.setJob(jobSummary);
+            JsonNode finalExplanationNode = readJsonNode(jobRecord.getFinalExplanationJson());
+            response.setFinalExplanationCognition(TaskProjectionBuilder.buildCognitionView(finalExplanationNode, objectMapper));
+            response.setFinalExplanationOutput(TaskProjectionBuilder.buildStageOutput(finalExplanationNode, objectMapper));
         }
         return response;
     }
@@ -454,7 +571,20 @@ public class TaskService {
         response.setPromotionStatus(derivePromotionStatus(taskState.getCurrentState(), taskState.getCorruptionReason()));
         response.setPlanningRevision(taskState.getPlanningRevision());
         response.setCheckpointVersion(taskState.getCheckpointVersion());
+        response.setCognitionVerdict(taskState.getCognitionVerdict());
         response.setCaseId(activeCaseId);
+        response.setPlanningIntentStatus(readJsonNode(taskState.getGoalParseJson()).path("planning_intent_status").asText(null));
+        JsonNode passBRoot = readJsonNode(taskState.getPassbResultJson());
+        response.setBindingStatus(passBRoot.path("binding_status").asText(null));
+        response.setOverruledFields(TaskProjectionBuilder.jsonArrayToStrings(passBRoot.path("overruled_fields")));
+        response.setBlockedMutations(TaskProjectionBuilder.jsonArrayToStrings(passBRoot.path("blocked_mutations")));
+        response.setAssemblyBlocked(passBRoot.path("assembly_blocked").isBoolean() ? passBRoot.path("assembly_blocked").asBoolean() : null);
+        JsonNode goalParseRoot = readJsonNode(taskState.getGoalParseJson());
+        JsonNode skillRouteRoot = readJsonNode(taskState.getSkillRouteJson());
+        response.setGoalRouteCognition(TaskProjectionBuilder.buildCognitionView(goalParseRoot, objectMapper));
+        response.setGoalRouteOutput(TaskProjectionBuilder.buildGoalRouteOutput(goalParseRoot, skillRouteRoot, objectMapper));
+        response.setPassbCognition(TaskProjectionBuilder.buildCognitionView(passBRoot, objectMapper));
+        response.setPassbOutput(TaskProjectionBuilder.buildStageOutput(passBRoot, objectMapper));
         JsonNode pass2Root = readJsonNode(taskState.getPass2ResultJson());
         response.setCanonicalizationSummary(TaskProjectionBuilder.buildJsonObjectView(pass2Root.path("canonicalization_summary"), objectMapper));
         response.setRewriteSummary(TaskProjectionBuilder.buildJsonObjectView(pass2Root.path("rewrite_summary"), objectMapper));
@@ -466,7 +596,10 @@ public class TaskService {
             response.setRuntimeProfile(jobRecord.getRuntimeProfile());
             response.setCaseId(activeCaseId);
             response.setResultBundle(TaskProjectionBuilder.buildTaskResultBundle(readJsonNode(jobRecord.getResultBundleJson())));
-            response.setFinalExplanation(TaskProjectionBuilder.buildTaskFinalExplanation(readJsonNode(jobRecord.getFinalExplanationJson())));
+            JsonNode finalExplanationNode = readJsonNode(jobRecord.getFinalExplanationJson());
+            response.setFinalExplanation(TaskProjectionBuilder.buildTaskFinalExplanation(finalExplanationNode));
+            response.setFinalExplanationCognition(TaskProjectionBuilder.buildCognitionView(finalExplanationNode, objectMapper));
+            response.setFinalExplanationOutput(TaskProjectionBuilder.buildStageOutput(finalExplanationNode, objectMapper));
             TaskResultResponse.FailureSummary jobFailureSummary = TaskProjectionBuilder.buildTaskResultFailureSummary(readJsonNode(jobRecord.getFailureSummaryJson()));
             if (jobFailureSummary != null) {
                 response.setFailureSummary(jobFailureSummary);
@@ -480,6 +613,13 @@ public class TaskService {
             response.setWorkspaceSummary(TaskProjectionBuilder.buildWorkspaceSummary(readJsonNode(jobRecord.getWorkspaceSummaryJson())));
             response.setArtifactCatalog(TaskProjectionBuilder.buildArtifactCatalog(readJsonNode(jobRecord.getArtifactCatalogJson())));
             response.setPlanningSummary(TaskProjectionBuilder.buildJsonObjectView(readJsonNode(jobRecord.getPlanningPass2SummaryJson()), objectMapper));
+        }
+        int attemptNo = resolveActiveAttemptNo(taskState);
+        RepairRecord latestRepair = repairRecordMapper.findLatestByTaskIdAndAttemptNo(taskId, attemptNo);
+        if (latestRepair != null) {
+            JsonNode repairProposalNode = readJsonNode(latestRepair.getRepairProposalJson());
+            response.setRepairProposalCognition(TaskProjectionBuilder.buildCognitionView(repairProposalNode, objectMapper));
+            response.setRepairProposalOutput(TaskProjectionBuilder.buildStageOutput(repairProposalNode, objectMapper));
         }
         if (activeManifest != null) {
             response.setFreezeStatus(activeManifest.getFreezeStatus());
@@ -591,6 +731,19 @@ public class TaskService {
         response.setCheckpointVersion(manifest.getCheckpointVersion());
         response.setGraphDigest(manifest.getGraphDigest());
         response.setPlanningSummary(TaskProjectionBuilder.buildJsonObjectView(readJsonNode(manifest.getPlanningSummaryJson()), objectMapper));
+        response.setCognitionVerdict(taskState.getCognitionVerdict());
+        JsonNode goalParseRoot = readJsonNode(taskState.getGoalParseJson());
+        JsonNode skillRouteRoot = readJsonNode(taskState.getSkillRouteJson());
+        response.setPlanningIntentStatus(goalParseRoot.path("planning_intent_status").asText(null));
+        JsonNode passBRoot = readJsonNode(taskState.getPassbResultJson());
+        response.setBindingStatus(passBRoot.path("binding_status").asText(null));
+        response.setOverruledFields(TaskProjectionBuilder.jsonArrayToStrings(passBRoot.path("overruled_fields")));
+        response.setBlockedMutations(TaskProjectionBuilder.jsonArrayToStrings(passBRoot.path("blocked_mutations")));
+        response.setAssemblyBlocked(passBRoot.path("assembly_blocked").isBoolean() ? passBRoot.path("assembly_blocked").asBoolean() : null);
+        response.setGoalRouteCognition(TaskProjectionBuilder.buildCognitionView(goalParseRoot, objectMapper));
+        response.setGoalRouteOutput(TaskProjectionBuilder.buildGoalRouteOutput(goalParseRoot, skillRouteRoot, objectMapper));
+        response.setPassbCognition(TaskProjectionBuilder.buildCognitionView(passBRoot, objectMapper));
+        response.setPassbOutput(TaskProjectionBuilder.buildStageOutput(passBRoot, objectMapper));
         response.setResumeTransaction(TaskProjectionBuilder.buildResumeTransaction(readJsonNode(taskState.getResumeTxnJson())));
         response.setCorruptionState(buildCorruptionState(taskState));
         response.setPromotionStatus(derivePromotionStatus(taskState.getCurrentState(), taskState.getCorruptionReason()));
@@ -614,6 +767,19 @@ public class TaskService {
         response.setExecutionGraph(TaskProjectionBuilder.buildManifestExecutionGraph(readJsonNode(manifest.getExecutionGraphJson())));
         response.setRuntimeAssertions(TaskProjectionBuilder.buildManifestRuntimeAssertions(readJsonNode(manifest.getRuntimeAssertionsJson())));
         response.setCreatedAt(manifest.getCreatedAt() == null ? null : manifest.getCreatedAt().toString());
+        int attemptNo = resolveActiveAttemptNo(taskState);
+        RepairRecord latestRepair = repairRecordMapper.findLatestByTaskIdAndAttemptNo(taskId, attemptNo);
+        if (latestRepair != null) {
+            JsonNode repairProposalNode = readJsonNode(latestRepair.getRepairProposalJson());
+            response.setRepairProposalCognition(TaskProjectionBuilder.buildCognitionView(repairProposalNode, objectMapper));
+            response.setRepairProposalOutput(TaskProjectionBuilder.buildStageOutput(repairProposalNode, objectMapper));
+        }
+        JobRecord jobRecord = taskState.getJobId() == null ? null : jobRecordMapper.findByJobId(taskState.getJobId());
+        if (jobRecord != null) {
+            JsonNode finalExplanationNode = readJsonNode(jobRecord.getFinalExplanationJson());
+            response.setFinalExplanationCognition(TaskProjectionBuilder.buildCognitionView(finalExplanationNode, objectMapper));
+            response.setFinalExplanationOutput(TaskProjectionBuilder.buildStageOutput(finalExplanationNode, objectMapper));
+        }
         return response;
     }
 
@@ -1095,8 +1261,10 @@ public class TaskService {
         }
 
         try {
-            SuccessOutputSummaries outputSummaries = buildSuccessOutputSummaries(status);
-            workspaceTraceService.persistSuccess(taskState, jobRecord, status.getResultBundle(), status.getFinalExplanation(), status.getArtifactCatalog());
+            JsonNode finalExplanationNode = buildFinalExplanationNode(taskState, jobRecord, status);
+            SuccessOutputSummaries outputSummaries = buildSuccessOutputSummaries(status, finalExplanationNode);
+            workspaceTraceService.persistSuccess(taskState, jobRecord, status.getResultBundle(), finalExplanationNode, status.getArtifactCatalog());
+            jobRecordMapper.updateFinalExplanation(jobRecord.getJobId(), writeJsonIfPresent(finalExplanationNode), OffsetDateTime.now(ZoneOffset.UTC));
             taskStateMapper.updateOutputSummaries(
                     taskId,
                     outputSummaries.resultBundleSummary(),
@@ -1183,10 +1351,10 @@ public class TaskService {
         return new TerminalFailureHandling(mapJobStateToTaskState(newState), null);
     }
 
-    private SuccessOutputSummaries buildSuccessOutputSummaries(JobStatusResponse status) throws Exception {
+    private SuccessOutputSummaries buildSuccessOutputSummaries(JobStatusResponse status, JsonNode finalExplanation) throws Exception {
         return new SuccessOutputSummaries(
                 writePayload(TaskProjectionBuilder.buildResultBundleSummary(status.getResultBundle())),
-                writePayload(TaskProjectionBuilder.buildFinalExplanationSummaryPayload(status.getFinalExplanation())),
+                writePayload(TaskProjectionBuilder.buildFinalExplanationSummaryPayload(finalExplanation)),
                 writePayload(TaskProjectionBuilder.buildResultObjectSummaryPayload(status.getResultObject(), status.getResultBundle()))
         );
     }
@@ -1210,16 +1378,214 @@ public class TaskService {
         PreparedJobSubmission preparedSubmission = null;
 
         try {
-            JsonNode pass1Node = objectMapper.readTree(taskState.getPass1ResultJson());
-            PassBStageResult passBStage = runPassBStage(
-                    taskId,
-                    safeString(taskState.getUserQuery()),
-                    currentVersion,
-                    pass1Node,
-                    request
-            );
-            ObjectNode passBNode = passBStage.passBNode();
-            String passBJson = passBStage.passBJson();
+            ObjectNode goalParseNode;
+            ObjectNode skillRouteNode;
+            JsonNode pass1Node;
+            ObjectNode passBNode;
+            String passBJson;
+            String cognitionVerdict;
+
+            if (canReusePlanningForResume(taskState)) {
+                goalParseNode = requireObjectNode(readJsonNode(taskState.getGoalParseJson()));
+                skillRouteNode = requireObjectNode(readJsonNode(taskState.getSkillRouteJson()));
+                pass1Node = readJsonNode(taskState.getPass1ResultJson());
+                passBNode = requireObjectNode(readJsonNode(taskState.getPassbResultJson()));
+                applyResumeInputs(pass1Node, passBNode, request, taskId);
+                ExecutionContractAssembler.AssemblyResult assemblyResult = executionContractAssembler.assemble(taskId, skillRouteNode, pass1Node, passBNode);
+                passBJson = writeJson(passBNode);
+                cognitionVerdict = CognitionVerdictResolver.resolve(goalParseNode, passBNode, assemblyResult);
+                taskStateMapper.updateCognitionVerdict(taskId, cognitionVerdict);
+            } else {
+                CognitionGoalRouteResponse goalRouteResponse = runGoalRoute(
+                        taskId,
+                        safeString(taskState.getUserQuery()),
+                        currentVersion,
+                        request.getUserNote()
+                );
+                goalParseNode = buildGoalParseNode(goalRouteResponse, safeString(taskState.getUserQuery()));
+                skillRouteNode = buildSkillRouteNode(goalRouteResponse);
+                taskStateMapper.updateGoalAndRoute(taskId, writeJson(goalParseNode), writeJson(skillRouteNode));
+
+                if ("unsupported".equalsIgnoreCase(goalRouteResponse.getPlanningIntentStatus())) {
+                    String rolledBackTxn = writeJson(buildResumeTransactionPayload(
+                            request.getResumeRequestId(),
+                            "ROLLED_BACK",
+                            baseCheckpointVersion,
+                            candidateCheckpointVersion,
+                            candidateInventoryVersion,
+                            null,
+                            resolveActiveAttemptNo(taskState),
+                            null,
+                            "UNSUPPORTED"
+                    ));
+                    taskStateMapper.updateResumeTransaction(taskId, rolledBackTxn);
+                    taskStateMapper.updateCognitionVerdict(taskId, "UNSUPPORTED");
+                    String failureSummaryJson = writePayload(buildUnsupportedFailureSummaryPayload(goalRouteNodeSummary(goalParseNode)));
+                    taskStateMapper.updateOutputSummaries(taskId, null, null, failureSummaryJson, null);
+                    ensureUpdated(taskStateMapper.updateState(taskId, currentVersion, TaskStatus.FAILED.name()));
+                    appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.FAILED.name(), currentVersion + 1, null);
+                    appendEvent(taskId, EventType.TASK_FAILED.name(), null, null, currentVersion + 1, failureSummaryJson);
+                    return buildResumeTaskResponse(taskId, TaskStatus.FAILED.name(), currentVersion + 1, true, taskState.getActiveAttemptNo());
+                }
+
+                if ("ambiguous".equalsIgnoreCase(goalRouteResponse.getPlanningIntentStatus())) {
+                    WaitingStateSnapshot waitingState = buildClarifyWaitingState(
+                            taskId,
+                            "CLARIFY_INTENT",
+                            "Clarify the requested analysis before resuming.",
+                            request.getUserNote()
+                    );
+                    String rolledBackTxn = writeJson(buildResumeTransactionPayload(
+                            request.getResumeRequestId(),
+                            "ROLLED_BACK",
+                            baseCheckpointVersion,
+                            candidateCheckpointVersion,
+                            candidateInventoryVersion,
+                            null,
+                            resolveActiveAttemptNo(taskState),
+                            null,
+                            "AMBIGUOUS_INTENT"
+                    ));
+                    taskStateMapper.updateCognitionVerdict(taskId, "AMBIGUOUS");
+                    ensureUpdated(taskStateMapper.rollbackResumeToWaiting(
+                            taskId,
+                            currentVersion,
+                            TaskStatus.WAITING_USER.name(),
+                            waitingState.waitingContextJson(),
+                            waitingState.decision().waitingContext().getWaitingReasonType(),
+                            OffsetDateTime.now(ZoneOffset.UTC),
+                            rolledBackTxn
+                    ));
+                    appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.WAITING_USER.name(), currentVersion + 1, null);
+                    recordWaitingUserEntry(taskId, resolveActiveAttemptNo(taskState), waitingState, writeJson(request), currentVersion + 1);
+                    return buildResumeTaskResponse(taskId, TaskStatus.WAITING_USER.name(), currentVersion + 1, true, taskState.getActiveAttemptNo());
+                }
+
+                if (isRealCaseRoute(skillRouteNode)) {
+                    String cognitionFailureCode = evaluateRequiredLlmMetadata(goalParseNode.path("cognition_metadata"));
+                    if (cognitionFailureCode != null) {
+                        return failResumeForRequiredCognition(
+                                taskState,
+                                request,
+                                currentVersion,
+                                currentState,
+                                baseCheckpointVersion,
+                                candidateCheckpointVersion,
+                                candidateInventoryVersion,
+                                "goal-route",
+                                cognitionFailureCode,
+                                goalParseNode
+                        );
+                    }
+                }
+
+                appendEvent(taskId, EventType.PLANNING_PASS1_STARTED.name(), null, null, currentVersion, null);
+                Pass1Response pass1Response = runPass1(
+                        taskId,
+                        safeString(taskState.getUserQuery()),
+                        currentVersion,
+                        skillRouteNode.path("capability_key").asText(null),
+                        skillRouteNode.path("selected_template").asText(null)
+                );
+                String pass1Json = objectMapper.writeValueAsString(pass1Response);
+                pass1Node = objectMapper.readTree(pass1Json);
+                skillRouteNode.put("template_version", pass1Response.getTemplateVersion());
+                taskStateMapper.updateGoalAndRoute(taskId, writeJson(goalParseNode), writeJson(skillRouteNode));
+                ensureUpdated(taskStateMapper.updateStateAndPass1(taskId, currentVersion, TaskStatus.PLANNING.name(), pass1Json));
+                appendEvent(
+                        taskId,
+                        EventType.PLANNING_PASS1_COMPLETED.name(),
+                        null,
+                        null,
+                        currentVersion + 1,
+                        writePayload(TaskControlPayloadBuilder.buildPass1CompletedPayload(pass1Response.getSelectedTemplate()))
+                );
+                currentVersion += 1;
+                currentState = TaskStatus.PLANNING;
+
+                PassBStageResult passBStage = runPassBStage(
+                        taskId,
+                        safeString(taskState.getUserQuery()),
+                        currentVersion,
+                        goalParseNode,
+                        skillRouteNode,
+                        pass1Node,
+                        request
+                );
+                passBNode = passBStage.passBNode();
+                passBJson = passBStage.passBJson();
+                cognitionVerdict = CognitionVerdictResolver.resolve(goalParseNode, passBNode, passBStage.assemblyResult());
+                taskStateMapper.updateCognitionVerdict(taskId, cognitionVerdict);
+            }
+
+            if (isRealCaseRoute(skillRouteNode)) {
+                String cognitionFailureCode = evaluateRequiredLlmMetadata(goalParseNode.path("cognition_metadata"));
+                if (cognitionFailureCode != null) {
+                    return failResumeForRequiredCognition(
+                            taskState,
+                            request,
+                            currentVersion,
+                            currentState,
+                            baseCheckpointVersion,
+                            candidateCheckpointVersion,
+                            candidateInventoryVersion,
+                            "goal-route",
+                            cognitionFailureCode,
+                            goalParseNode
+                    );
+                }
+            }
+
+            if (isRealCaseRoute(skillRouteNode)) {
+                String cognitionFailureCode = evaluateRequiredLlmMetadata(passBNode.path("cognition_metadata"));
+                if (cognitionFailureCode != null) {
+                    return failResumeForRequiredCognition(
+                            taskState,
+                            request,
+                            currentVersion,
+                            currentState,
+                            baseCheckpointVersion,
+                            candidateCheckpointVersion,
+                            candidateInventoryVersion,
+                            "passb",
+                            cognitionFailureCode,
+                            passBNode
+                    );
+                }
+            }
+
+            if ("ambiguous".equalsIgnoreCase(passBNode.path("binding_status").asText(""))) {
+                WaitingStateSnapshot waitingState = buildClarifyWaitingState(
+                        taskId,
+                        "CLARIFY_BINDING",
+                        "Clarify the requested bindings before resuming.",
+                        request.getUserNote()
+                );
+                String rolledBackTxn = writeJson(buildResumeTransactionPayload(
+                        request.getResumeRequestId(),
+                        "ROLLED_BACK",
+                        baseCheckpointVersion,
+                        candidateCheckpointVersion,
+                        candidateInventoryVersion,
+                        null,
+                        resolveActiveAttemptNo(taskState),
+                        null,
+                        "AMBIGUOUS_BINDING"
+                ));
+                taskStateMapper.updateCognitionVerdict(taskId, "AMBIGUOUS");
+                ensureUpdated(taskStateMapper.rollbackResumeToWaiting(
+                        taskId,
+                        currentVersion,
+                        TaskStatus.WAITING_USER.name(),
+                        waitingState.waitingContextJson(),
+                        waitingState.decision().waitingContext().getWaitingReasonType(),
+                        OffsetDateTime.now(ZoneOffset.UTC),
+                        rolledBackTxn
+                ));
+                appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.WAITING_USER.name(), currentVersion + 1, null);
+                recordWaitingUserEntry(taskId, resolveActiveAttemptNo(taskState), waitingState, writeJson(request), currentVersion + 1);
+                return buildResumeTaskResponse(taskId, TaskStatus.WAITING_USER.name(), currentVersion + 1, true, taskState.getActiveAttemptNo());
+            }
 
             ValidationStageResult validationStage = runValidationStage(taskId, currentVersion, pass1Node, passBNode);
             taskStateMapper.updateInputChainSnapshot(
@@ -1369,6 +1735,7 @@ public class TaskService {
                     nextPlanningRevision(taskState),
                     candidateCheckpointVersion,
                     candidateInventoryVersion,
+                    cognitionVerdict,
                     committedTxn
             ));
             appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.QUEUED.name(), currentVersion + 1, null);
@@ -1414,6 +1781,32 @@ public class TaskService {
             }
             throw new ResponseStatusException(BAD_GATEWAY, "Resume pipeline failed", exception);
         }
+    }
+
+    private boolean canReusePlanningForResume(TaskState taskState) {
+        if (taskState == null) {
+            return false;
+        }
+        JsonNode waitingContext = readJsonNode(taskState.getWaitingContextJson());
+        String waitingReasonType = safeString(waitingContext.path("waiting_reason_type").asText(null));
+        if (waitingReasonType.startsWith("CLARIFY")) {
+            return false;
+        }
+        return taskState.getGoalParseJson() != null
+                && !taskState.getGoalParseJson().isBlank()
+                && taskState.getSkillRouteJson() != null
+                && !taskState.getSkillRouteJson().isBlank()
+                && taskState.getPass1ResultJson() != null
+                && !taskState.getPass1ResultJson().isBlank()
+                && taskState.getPassbResultJson() != null
+                && !taskState.getPassbResultJson().isBlank();
+    }
+
+    private ObjectNode requireObjectNode(JsonNode node) {
+        if (node instanceof ObjectNode objectNode) {
+            return objectNode.deepCopy();
+        }
+        throw new IllegalStateException("Expected object node for resume planning reuse");
     }
 
     private void applyResumeInputs(JsonNode pass1Result, ObjectNode passBNode, ResumeTaskRequest request, String taskId) {
@@ -1536,6 +1929,19 @@ public class TaskService {
     }
 
     private WaitingStateSnapshot rebuildWaitingState(TaskState taskState, String userNote) {
+        JsonNode existingWaitingContext = readJsonNode(taskState.getWaitingContextJson());
+        if (requiresClarify(existingWaitingContext) && (userNote == null || userNote.isBlank())) {
+            String waitingReasonType = existingWaitingContext.path("waiting_reason_type").asText("CLARIFY_REQUIRED");
+            String actionLabel = "Clarify the request before resuming.";
+            JsonNode actions = existingWaitingContext.path("required_user_actions");
+            if (actions.isArray() && !actions.isEmpty()) {
+                String existingLabel = actions.get(0).path("label").asText("");
+                if (!existingLabel.isBlank()) {
+                    actionLabel = existingLabel;
+                }
+            }
+            return buildClarifyWaitingState(taskState.getTaskId(), waitingReasonType, actionLabel, userNote);
+        }
         return rebuildWaitingState(
                 taskState.getTaskId(),
                 readJsonNode(taskState.getPass1ResultJson()),
@@ -1603,6 +2009,45 @@ public class TaskService {
         return RepairFactHelper.readPrimitiveValidation(objectMapper, node);
     }
 
+    private boolean requiresClarify(JsonNode waitingContextNode) {
+        JsonNode actions = waitingContextNode.path("required_user_actions");
+        if (!actions.isArray()) {
+            return false;
+        }
+        for (JsonNode action : actions) {
+            if ("clarify".equalsIgnoreCase(action.path("action_type").asText(""))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private WaitingStateSnapshot buildClarifyWaitingState(
+            String taskId,
+            String waitingReasonType,
+            String actionLabel,
+            String userNote
+    ) {
+        com.sage.backend.repair.dto.RepairProposalRequest.WaitingContext waitingContext =
+                new com.sage.backend.repair.dto.RepairProposalRequest.WaitingContext();
+        waitingContext.setWaitingReasonType(waitingReasonType);
+        waitingContext.setMissingSlots(List.of());
+        waitingContext.setInvalidBindings(List.of());
+
+        com.sage.backend.repair.dto.RepairProposalRequest.RequiredUserAction clarifyAction =
+                new com.sage.backend.repair.dto.RepairProposalRequest.RequiredUserAction();
+        clarifyAction.setActionType("clarify");
+        clarifyAction.setKey("clarify_" + safeString(waitingReasonType).toLowerCase());
+        clarifyAction.setLabel(actionLabel);
+        clarifyAction.setRequired(true);
+        waitingContext.setRequiredUserActions(List.of(clarifyAction));
+        waitingContext.setResumeHint("Provide clarification in user_note before resuming.");
+        waitingContext.setCanResume(false);
+
+        RepairDecision decision = new RepairDecision("RECOVERABLE", "WAITING_USER", waitingContext);
+        return buildWaitingStateSnapshot(taskId, decision, objectMapper.createObjectNode(), objectMapper.createObjectNode(), userNote, false);
+    }
+
     private void validateAttachmentOwnership(String taskId, List<String> attachmentIds) {
         if (attachmentIds == null || attachmentIds.isEmpty()) {
             return;
@@ -1632,21 +2077,336 @@ public class TaskService {
         }
     }
 
-    private Pass1Response runPass1(String taskId, String userQuery, int stateVersion, String capabilityKey) {
+    private CognitionGoalRouteResponse runGoalRoute(String taskId, String userQuery, int stateVersion, String userNote) {
+        CognitionGoalRouteRequest request = new CognitionGoalRouteRequest();
+        request.setTaskId(taskId);
+        request.setUserQuery(userQuery);
+        request.setStateVersion(stateVersion);
+        request.setUserNote(safeString(userNote));
+        request.setAllowedCapabilities(List.of("water_yield"));
+        request.setAllowedTemplates(List.of("water_yield_v1"));
+        request.setKnownCases(List.of("annual_water_yield_gura"));
+        return cognitionGoalRouteClient.route(request);
+    }
+
+    private ObjectNode buildGoalParseNode(CognitionGoalRouteResponse response, String userQuery) {
+        ObjectNode node = response.getGoalParse() instanceof ObjectNode objectNode
+                ? objectNode.deepCopy()
+                : objectMapper.createObjectNode();
+        node.put("user_query", safeString(userQuery));
+        node.put("planning_intent_status", safeString(response.getPlanningIntentStatus()));
+        if (response.getConfidence() != null) {
+            node.put("confidence", response.getConfidence());
+        }
+        if (response.getDecisionSummary() != null && !response.getDecisionSummary().isEmpty()) {
+            node.set("decision_summary", objectMapper.valueToTree(response.getDecisionSummary()));
+        }
+        if (response.getCognitionMetadata() != null && !response.getCognitionMetadata().isEmpty()) {
+            node.set("cognition_metadata", objectMapper.valueToTree(response.getCognitionMetadata()));
+        }
+        return node;
+    }
+
+    private ObjectNode buildSkillRouteNode(CognitionGoalRouteResponse response) {
+        ObjectNode node = response.getSkillRoute() instanceof ObjectNode objectNode
+                ? objectNode.deepCopy()
+                : objectMapper.createObjectNode();
+        node.put("planning_intent_status", safeString(response.getPlanningIntentStatus()));
+        if (response.getConfidence() != null) {
+            node.put("confidence", response.getConfidence());
+        }
+        if (response.getDecisionSummary() != null && !response.getDecisionSummary().isEmpty()) {
+            node.set("decision_summary", objectMapper.valueToTree(response.getDecisionSummary()));
+        }
+        if (response.getCognitionMetadata() != null && !response.getCognitionMetadata().isEmpty()) {
+            node.set("cognition_metadata", objectMapper.valueToTree(response.getCognitionMetadata()));
+        }
+        return node;
+    }
+
+    private Map<String, Object> goalRouteNodeSummary(JsonNode goalParseNode) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("planning_intent_status", goalParseNode.path("planning_intent_status").asText(null));
+        summary.put("goal_type", goalParseNode.path("goal_type").asText(null));
+        summary.put("analysis_kind", goalParseNode.path("analysis_kind").asText(null));
+        summary.put("source", goalParseNode.path("source").asText(null));
+        return summary;
+    }
+
+    private Map<String, Object> buildUnsupportedFailureSummaryPayload(Map<String, Object> routeSummary) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("failure_code", "UNSUPPORTED_ANALYSIS");
+        payload.put("failure_message", "The request is not supported by the current cognition-enabled capability set.");
+        payload.put("created_at", OffsetDateTime.now(ZoneOffset.UTC).toString());
+        payload.put("details", routeSummary);
+        return payload;
+    }
+
+    private boolean isRealCaseRoute(JsonNode skillRouteNode) {
+        if (skillRouteNode == null || skillRouteNode.isNull() || skillRouteNode.isMissingNode()) {
+            return false;
+        }
+        return "real_case_validation".equalsIgnoreCase(skillRouteNode.path("execution_mode").asText(""));
+    }
+
+    private String evaluateRequiredLlmMetadata(JsonNode metadataNode) {
+        if (metadataNode == null || metadataNode.isNull() || metadataNode.isMissingNode()) {
+            return "COGNITION_UNAVAILABLE";
+        }
+        String provider = metadataNode.path("provider").asText("");
+        boolean fallbackUsed = metadataNode.path("fallback_used").asBoolean(false);
+        boolean schemaValid = !metadataNode.path("schema_valid").isBoolean() || metadataNode.path("schema_valid").asBoolean(true);
+        String status = metadataNode.path("status").asText("");
+        String failureCode = metadataNode.path("failure_code").asText("");
+        if (!"glm".equalsIgnoreCase(provider) || fallbackUsed) {
+            return "COGNITION_POLICY_VIOLATION";
+        }
+        if (!failureCode.isBlank()) {
+            return failureCode;
+        }
+        if (!schemaValid) {
+            return "COGNITION_SCHEMA_INVALID";
+        }
+        if ("COGNITION_TIMEOUT".equalsIgnoreCase(status)) {
+            return "COGNITION_TIMEOUT";
+        }
+        if ("COGNITION_SCHEMA_INVALID".equalsIgnoreCase(status)) {
+            return "COGNITION_SCHEMA_INVALID";
+        }
+        if ("COGNITION_POLICY_VIOLATION".equalsIgnoreCase(status)) {
+            return "COGNITION_POLICY_VIOLATION";
+        }
+        if ("COGNITION_UNAVAILABLE".equalsIgnoreCase(status) || "EXPLANATION_UNAVAILABLE".equalsIgnoreCase(status)) {
+            return "COGNITION_UNAVAILABLE";
+        }
+        return null;
+    }
+
+    private CreateTaskResponse failCreateForRequiredCognition(
+            String taskId,
+            int currentVersion,
+            TaskStatus currentState,
+            String traceId,
+            String stage,
+            String failureCode,
+            JsonNode payloadNode
+    ) throws Exception {
+        String failureSummaryJson = writePayload(buildCognitionFailureSummaryPayload(stage, failureCode, payloadNode));
+        taskStateMapper.updateOutputSummaries(taskId, null, null, failureSummaryJson, null);
+        taskStateMapper.updateCognitionVerdict(taskId, mapCognitionFailureVerdict(failureCode));
+        ensureUpdated(taskStateMapper.updateState(taskId, currentVersion, TaskStatus.FAILED.name()));
+        appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.FAILED.name(), currentVersion + 1, null);
+        appendEvent(taskId, EventType.TASK_FAILED.name(), null, null, currentVersion + 1, failureSummaryJson);
+        auditService.appendAudit(
+                taskId,
+                "TASK_CREATE",
+                "FAILED",
+                traceId,
+                writePayload(TaskControlPayloadBuilder.buildTaskCreateAuditPayload(
+                        TaskStatus.FAILED.name(),
+                        false,
+                        InputChainStatus.INCOMPLETE.name(),
+                        false,
+                        null,
+                        failureCode
+                ))
+        );
+        return buildCreateTaskResponse(taskId, null, TaskStatus.FAILED.name(), currentVersion + 1);
+    }
+
+    private ResumeTaskResponse failResumeForRequiredCognition(
+            TaskState taskState,
+            ResumeTaskRequest request,
+            int currentVersion,
+            TaskStatus currentState,
+            int baseCheckpointVersion,
+            int candidateCheckpointVersion,
+            int candidateInventoryVersion,
+            String stage,
+            String failureCode,
+            JsonNode payloadNode
+    ) throws Exception {
+        String taskId = taskState.getTaskId();
+        String rolledBackTxn = writeJson(buildResumeTransactionPayload(
+                request.getResumeRequestId(),
+                "ROLLED_BACK",
+                baseCheckpointVersion,
+                candidateCheckpointVersion,
+                candidateInventoryVersion,
+                null,
+                resolveActiveAttemptNo(taskState),
+                null,
+                failureCode
+        ));
+        taskStateMapper.updateResumeTransaction(taskId, rolledBackTxn);
+        taskStateMapper.updateCognitionVerdict(taskId, mapCognitionFailureVerdict(failureCode));
+        String failureSummaryJson = writePayload(buildCognitionFailureSummaryPayload(stage, failureCode, payloadNode));
+        taskStateMapper.updateOutputSummaries(taskId, null, null, failureSummaryJson, null);
+        ensureUpdated(taskStateMapper.updateState(taskId, currentVersion, TaskStatus.FAILED.name()));
+        appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.FAILED.name(), currentVersion + 1, null);
+        appendEvent(taskId, EventType.TASK_FAILED.name(), null, null, currentVersion + 1, failureSummaryJson);
+        return buildResumeTaskResponse(taskId, TaskStatus.FAILED.name(), currentVersion + 1, true, taskState.getActiveAttemptNo());
+    }
+
+    private Map<String, Object> buildCognitionFailureSummaryPayload(String stage, String failureCode, JsonNode payloadNode) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("stage", stage);
+        details.put("cognition_payload", TaskProjectionBuilder.jsonNodeToObject(payloadNode, objectMapper));
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("failure_code", failureCode);
+        payload.put("failure_message", describeCognitionFailure(failureCode, stage));
+        payload.put("created_at", OffsetDateTime.now(ZoneOffset.UTC).toString());
+        payload.put("details", details);
+        return payload;
+    }
+
+    private String describeCognitionFailure(String failureCode, String stage) {
+        return switch (failureCode) {
+            case "COGNITION_TIMEOUT" -> "Required LLM cognition timed out during " + stage + ".";
+            case "COGNITION_SCHEMA_INVALID" -> "Required LLM cognition returned invalid schema during " + stage + ".";
+            case "COGNITION_POLICY_VIOLATION" -> "Required LLM cognition policy was violated during " + stage + ".";
+            default -> "Required LLM cognition was unavailable during " + stage + ".";
+        };
+    }
+
+    private String mapCognitionFailureVerdict(String failureCode) {
+        if ("COGNITION_POLICY_VIOLATION".equalsIgnoreCase(failureCode)) {
+            return "LLM_POLICY_VIOLATION";
+        }
+        return "LLM_UNAVAILABLE";
+    }
+
+    private JsonNode buildFinalExplanationNode(TaskState taskState, JobRecord jobRecord, JobStatusResponse status) {
+        boolean realCase = isRealCaseRuntime(jobRecord, status);
+        if (!realCase) {
+            return status.getFinalExplanation();
+        }
+        try {
+            CognitionFinalExplanationResponse response = runFinalExplanation(taskState, jobRecord, status);
+            JsonNode node = objectMapper.valueToTree(response);
+            String failureCode = evaluateRequiredLlmMetadata(node.path("cognition_metadata"));
+            if (failureCode != null) {
+                return buildUnavailableFinalExplanationNode(failureCode, describeExplanationFailure(failureCode));
+            }
+            return node;
+        } catch (Exception exception) {
+            return buildUnavailableFinalExplanationNode(classifyCognitionException(exception), exception.getMessage());
+        }
+    }
+
+    private boolean isRealCaseRuntime(JobRecord jobRecord, JobStatusResponse status) {
+        if (jobRecord != null && "docker-invest-real".equalsIgnoreCase(jobRecord.getRuntimeProfile())) {
+            return true;
+        }
+        JsonNode runtimeEvidence = status == null ? null : status.getDockerRuntimeEvidence();
+        return runtimeEvidence != null
+                && ("docker-invest-real".equalsIgnoreCase(runtimeEvidence.path("runtime_profile").asText(""))
+                || !runtimeEvidence.path("case_id").asText("").isBlank());
+    }
+
+    private CognitionFinalExplanationResponse runFinalExplanation(TaskState taskState, JobRecord jobRecord, JobStatusResponse status) {
+        CognitionFinalExplanationRequest request = new CognitionFinalExplanationRequest();
+        request.setTaskId(taskState.getTaskId());
+        request.setUserQuery(safeString(taskState.getUserQuery()));
+        request.setCaseId(resolveCaseIdForFinalExplanation(taskState, status));
+        request.setProviderKey(jobRecord == null ? null : jobRecord.getProviderKey());
+        request.setRuntimeProfile(jobRecord == null ? null : jobRecord.getRuntimeProfile());
+        request.setResultBundle(status.getResultBundle());
+        request.setArtifactCatalog(status.getArtifactCatalog());
+        request.setDockerRuntimeEvidence(status.getDockerRuntimeEvidence());
+        request.setWorkspaceSummary(status.getWorkspaceSummary());
+        return cognitionFinalExplanationClient.generate(request);
+    }
+
+    private String resolveCaseIdForFinalExplanation(TaskState taskState, JobStatusResponse status) {
+        String caseId = extractCaseId(resolveActiveManifest(taskState));
+        if (caseId != null && !caseId.isBlank()) {
+            return caseId;
+        }
+        JsonNode runtimeEvidence = status == null ? null : status.getDockerRuntimeEvidence();
+        if (runtimeEvidence == null || runtimeEvidence.isNull() || runtimeEvidence.isMissingNode()) {
+            return null;
+        }
+        String runtimeCaseId = runtimeEvidence.path("case_id").asText(null);
+        return runtimeCaseId == null || runtimeCaseId.isBlank() ? null : runtimeCaseId;
+    }
+
+    private JsonNode buildUnavailableFinalExplanationNode(String failureCode, String failureMessage) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("available", false);
+        node.putNull("title");
+        node.putArray("highlights");
+        node.putNull("narrative");
+        node.putNull("generated_at");
+        node.put("failure_code", "EXPLANATION_UNAVAILABLE");
+        node.put("failure_message", normalizeFailureMessage(failureMessage, describeExplanationFailure(failureCode)));
+        ObjectNode metadata = node.putObject("cognition_metadata");
+        metadata.put("source", "glm_required_failure");
+        metadata.put("provider", "glm");
+        metadata.putNull("model");
+        metadata.put("prompt_version", "final_explanation_v1");
+        metadata.put("fallback_used", false);
+        metadata.put("schema_valid", false);
+        metadata.putNull("response_id");
+        metadata.put("status", "EXPLANATION_UNAVAILABLE");
+        metadata.put("failure_code", failureCode);
+        metadata.put("failure_message", normalizeFailureMessage(failureMessage, describeExplanationFailure(failureCode)));
+        return node;
+    }
+
+    private String classifyCognitionException(Exception exception) {
+        if (exception instanceof org.springframework.web.client.ResourceAccessException) {
+            return "COGNITION_TIMEOUT";
+        }
+        return "COGNITION_UNAVAILABLE";
+    }
+
+    private String describeExplanationFailure(String failureCode) {
+        return switch (failureCode) {
+            case "COGNITION_TIMEOUT" -> "Final explanation cognition timed out.";
+            case "COGNITION_SCHEMA_INVALID" -> "Final explanation cognition returned invalid schema.";
+            case "COGNITION_POLICY_VIOLATION" -> "Final explanation cognition did not satisfy the real-case LLM policy.";
+            default -> "Final explanation cognition unavailable.";
+        };
+    }
+
+    private String normalizeFailureMessage(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private Pass1Response runPass1(
+            String taskId,
+            String userQuery,
+            int stateVersion,
+            String capabilityKey,
+            String selectedTemplate
+    ) {
         Pass1Request req = new Pass1Request();
         req.setTaskId(taskId);
         req.setUserQuery(userQuery);
         req.setStateVersion(stateVersion);
         req.setCapabilityKey(capabilityKey);
+        req.setSelectedTemplate(selectedTemplate);
         return pass1Client.runPass1(req);
     }
 
-    private CognitionPassBResponse runPassB(String taskId, String userQuery, int stateVersion, JsonNode pass1Result) {
+    private CognitionPassBResponse runPassB(
+            String taskId,
+            String userQuery,
+            int stateVersion,
+            JsonNode pass1Result,
+            JsonNode goalParse,
+            JsonNode skillRoute,
+            String userNote
+    ) {
         CognitionPassBRequest req = new CognitionPassBRequest();
         req.setTaskId(taskId);
         req.setUserQuery(userQuery);
         req.setStateVersion(stateVersion);
         req.setPass1Result(pass1Result);
+        req.setGoalParse(goalParse);
+        req.setSkillRoute(skillRoute);
+        req.setUserNote(safeString(userNote));
         return cognitionPassBClient.runPassB(req);
     }
 
@@ -1654,18 +2414,32 @@ public class TaskService {
             String taskId,
             String userQuery,
             int stateVersion,
+            JsonNode goalParseNode,
+            JsonNode skillRouteNode,
             JsonNode pass1Node,
             ResumeTaskRequest resumeRequest
     ) throws Exception {
         appendEvent(taskId, EventType.COGNITION_PASSB_STARTED.name(), null, null, stateVersion, null);
-        CognitionPassBResponse passBResponse = runPassB(taskId, userQuery, stateVersion, pass1Node);
+        CognitionPassBResponse passBResponse = runPassB(
+                taskId,
+                userQuery,
+                stateVersion,
+                pass1Node,
+                goalParseNode,
+                skillRouteNode,
+                resumeRequest == null ? null : resumeRequest.getUserNote()
+        );
         String passBJson = objectMapper.writeValueAsString(passBResponse);
         ObjectNode passBNode = (ObjectNode) objectMapper.readTree(passBJson);
         boolean resume = resumeRequest != null;
         if (resume) {
             applyResumeInputs(pass1Node, passBNode, resumeRequest, taskId);
-            passBJson = writeJson(passBNode);
         }
+        ExecutionContractAssembler.AssemblyResult assemblyResult = executionContractAssembler.assemble(taskId, skillRouteNode, pass1Node, passBNode);
+        passBNode.putPOJO("blocked_mutations", assemblyResult.blockedMutations());
+        passBNode.putPOJO("overruled_fields", assemblyResult.overruledFields());
+        passBNode.put("assembly_blocked", assemblyResult.assemblyBlocked());
+        passBJson = writeJson(passBNode);
         appendEvent(
                 taskId,
                 EventType.COGNITION_PASSB_COMPLETED.name(),
@@ -1674,7 +2448,7 @@ public class TaskService {
                 stateVersion,
                 writePayload(TaskControlPayloadBuilder.buildPassBCompletionPayload(passBNode, resume))
         );
-        return new PassBStageResult(passBNode, passBJson);
+        return new PassBStageResult(passBNode, passBJson, assemblyResult);
     }
 
     private PrimitiveValidationResponse runValidation(String taskId, int stateVersion, JsonNode pass1Result, JsonNode passBResult) {
@@ -2371,7 +3145,8 @@ public class TaskService {
 
     private record PassBStageResult(
             ObjectNode passBNode,
-            String passBJson
+            String passBJson,
+            ExecutionContractAssembler.AssemblyResult assemblyResult
     ) {
     }
 

@@ -42,6 +42,7 @@ public interface TaskStateMapper {
                 planning_revision,
                 checkpoint_version,
                 inventory_version,
+                cognition_verdict,
                 corruption_reason,
                 latest_result_bundle_id,
                 latest_workspace_id,
@@ -79,6 +80,7 @@ public interface TaskStateMapper {
                 #{planningRevision},
                 #{checkpointVersion},
                 #{inventoryVersion},
+                #{cognitionVerdict},
                 #{corruptionReason},
                 #{latestResultBundleId},
                 #{latestWorkspaceId},
@@ -286,6 +288,7 @@ public interface TaskStateMapper {
                 planning_revision = #{planningRevision},
                 checkpoint_version = #{checkpointVersion},
                 inventory_version = #{inventoryVersion},
+                cognition_verdict = #{cognitionVerdict},
                 resume_txn_json = #{resumeTxnJson},
                 corruption_reason = NULL,
                 corrupted_since = NULL,
@@ -307,7 +310,19 @@ public interface TaskStateMapper {
             @Param("planningRevision") int planningRevision,
             @Param("checkpointVersion") int checkpointVersion,
             @Param("inventoryVersion") int inventoryVersion,
+            @Param("cognitionVerdict") String cognitionVerdict,
             @Param("resumeTxnJson") String resumeTxnJson
+    );
+
+    @Update("""
+            UPDATE task_state
+            SET cognition_verdict = #{cognitionVerdict},
+                updated_at = NOW()
+            WHERE task_id = #{taskId}
+            """)
+    int updateCognitionVerdict(
+            @Param("taskId") String taskId,
+            @Param("cognitionVerdict") String cognitionVerdict
     );
 
     @Update("""
@@ -467,6 +482,7 @@ public interface TaskStateMapper {
                    planning_revision,
                    checkpoint_version,
                    inventory_version,
+                   cognition_verdict,
                    corruption_reason,
                    latest_result_bundle_id,
                    latest_workspace_id,

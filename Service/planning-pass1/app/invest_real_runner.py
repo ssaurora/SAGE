@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+import time
 import uuid
 from pathlib import Path
 
@@ -25,6 +27,7 @@ def main() -> int:
     payload = json.loads(request_path.read_text(encoding="utf-8"))
     args = _build_invest_args(payload)
     _validate_required_inputs(args)
+    _apply_prestart_delay()
     execute = _load_execute()
     output_registry = execute(args)
     _write_runtime_result(payload, args, output_registry)
@@ -66,6 +69,19 @@ def _validate_required_inputs(args: dict[str, object]) -> None:
             raise RuntimeError(f"real InVEST provider requires non-empty {key}")
         if not Path(value).exists():
             raise FileNotFoundError(f"real InVEST provider input does not exist: {key}={value}")
+
+
+def _apply_prestart_delay() -> None:
+    raw_value = str(os.getenv("SAGE_INVEST_REAL_PRESTART_DELAY_SECONDS", "0")).strip()
+    if not raw_value:
+        return
+    try:
+        delay_seconds = float(raw_value)
+    except ValueError:
+        return
+    if delay_seconds <= 0:
+        return
+    time.sleep(delay_seconds)
 
 
 def _load_execute():

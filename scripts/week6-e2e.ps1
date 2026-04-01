@@ -323,7 +323,19 @@ try {
     } finally {
         Pop-Location
     }
-    $serviceRun = Invoke-NativeCapture -FilePath "docker" -Arguments @("run", "--name", $serviceContainer, "--rm", "-d", "-p", "${servicePort}:8001", "-e", "REDIS_ENABLED=true", "-e", "REDIS_URL=redis://host.docker.internal:${redisPort}/0", "sage-pass1:week6")
+    $serviceRun = Invoke-NativeCapture -FilePath "docker" -Arguments @(
+        "run", "--name", $serviceContainer, "--rm", "-d",
+        "-p", "${servicePort}:8001",
+        "-e", "REDIS_ENABLED=true",
+        "-e", "REDIS_URL=redis://host.docker.internal:${redisPort}/0",
+        "-e", "SAGE_COGNITION_PROVIDER=deterministic",
+        "-e", "SAGE_COGNITION_GOAL_ROUTE_PROVIDER=deterministic",
+        "-e", "SAGE_COGNITION_PASSB_PROVIDER=deterministic",
+        "-e", "SAGE_REPAIR_PROVIDER=deterministic",
+        "-e", "SAGE_FINAL_EXPLANATION_PROVIDER=deterministic",
+        "-e", "SAGE_REAL_CASE_LLM_REQUIRED=false",
+        "sage-pass1:week6"
+    )
     if ($serviceRun.ExitCode -ne 0) {
         throw "failed to start service container: $($serviceRun.Output)"
     }

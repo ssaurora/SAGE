@@ -9,6 +9,7 @@ import {
   CapabilityRepairHintDto,
   CapabilityValidationHintDto,
   cancelTask,
+  CognitionMetadataDto,
   forceRevertCheckpoint,
   getMe,
   getTask,
@@ -37,6 +38,235 @@ type GoalParseView =
 type SkillRouteView =
   | NonNullable<TaskDetailResponse["skill_route_summary"]>
   | NonNullable<TaskManifestResponse["skill_route"]>;
+
+function CognitionMetadataPanel({
+  metadata,
+  emptyText,
+}: {
+  metadata?: CognitionMetadataDto;
+  emptyText: string;
+}) {
+  if (!metadata) {
+    return <p className="muted">{emptyText}</p>;
+  }
+
+  return (
+    <div className="kv-grid">
+      <div className="kv-item"><span className="kv-key">provider</span><span className="kv-value">{metadata.provider ?? "-"}</span></div>
+      <div className="kv-item"><span className="kv-key">model</span><span className="kv-value">{metadata.model ?? "-"}</span></div>
+      <div className="kv-item"><span className="kv-key">source</span><span className="kv-value">{metadata.source ?? "-"}</span></div>
+      <div className="kv-item"><span className="kv-key">prompt_version</span><span className="kv-value">{metadata.prompt_version ?? "-"}</span></div>
+      <div className="kv-item"><span className="kv-key">fallback_used</span><span className="kv-value">{formatValue(metadata.fallback_used)}</span></div>
+      <div className="kv-item"><span className="kv-key">schema_valid</span><span className="kv-value">{formatValue(metadata.schema_valid)}</span></div>
+      <div className="kv-item"><span className="kv-key">status</span><span className="kv-value">{metadata.status ?? "-"}</span></div>
+      <div className="kv-item"><span className="kv-key">response_id</span><span className="kv-value">{metadata.response_id ?? "-"}</span></div>
+      <div className="kv-item"><span className="kv-key">failure_code</span><span className="kv-value">{metadata.failure_code ?? "-"}</span></div>
+      <div className="kv-item"><span className="kv-key">failure_message</span><span className="kv-value">{metadata.failure_message ?? "-"}</span></div>
+    </div>
+  );
+}
+
+function StageOutputPanel({
+  title,
+  payload,
+  emptyText,
+}: {
+  title: string;
+  payload?: Record<string, unknown> | null;
+  emptyText: string;
+}) {
+  if (!payload || Object.keys(payload).length === 0) {
+    return <p className="muted">{emptyText}</p>;
+  }
+
+  return <DebugJsonPanel title={title} payload={payload} defaultExpanded={false} />;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function asRecordArray(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((item) => asRecord(item)).filter((item): item is Record<string, unknown> => item !== null);
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => (typeof item === "string" ? item : null))
+    .filter((item): item is string => item !== null && item.trim().length > 0);
+}
+
+function GoalRouteReadablePanel({ payload }: { payload?: Record<string, unknown> | null }) {
+  const goalParse = asRecord(payload?.goal_parse);
+  const skillRoute = asRecord(payload?.skill_route);
+  const decisionSummary = asRecord(payload?.decision_summary);
+  const notes = asStringArray(decisionSummary?.notes);
+
+  if (!payload) {
+    return <p className="muted">No readable goal-route output available.</p>;
+  }
+
+  return (
+    <>
+      <div className="kv-grid">
+        <div className="kv-item"><span className="kv-key">planning_intent_status</span><span className="kv-value">{formatValue(payload.planning_intent_status)}</span></div>
+        <div className="kv-item"><span className="kv-key">confidence</span><span className="kv-value">{formatValue(payload.confidence)}</span></div>
+        <div className="kv-item"><span className="kv-key">decision_strategy</span><span className="kv-value">{formatValue(decisionSummary?.strategy)}</span></div>
+        <div className="kv-item"><span className="kv-key">decision_status</span><span className="kv-value">{formatValue(decisionSummary?.status)}</span></div>
+      </div>
+      <h4>Goal Parse</h4>
+      <div className="kv-grid">
+        <div className="kv-item"><span className="kv-key">goal_type</span><span className="kv-value">{formatValue(goalParse?.goal_type)}</span></div>
+        <div className="kv-item"><span className="kv-key">analysis_kind</span><span className="kv-value">{formatValue(goalParse?.analysis_kind)}</span></div>
+        <div className="kv-item"><span className="kv-key">intent_mode</span><span className="kv-value">{formatValue(goalParse?.intent_mode)}</span></div>
+        <div className="kv-item"><span className="kv-key">source</span><span className="kv-value">{formatValue(goalParse?.source)}</span></div>
+      </div>
+      <h4>Skill Route</h4>
+      <div className="kv-grid">
+        <div className="kv-item"><span className="kv-key">primary_skill</span><span className="kv-value">{formatValue(skillRoute?.primary_skill)}</span></div>
+        <div className="kv-item"><span className="kv-key">capability_key</span><span className="kv-value">{formatValue(skillRoute?.capability_key)}</span></div>
+        <div className="kv-item"><span className="kv-key">execution_mode</span><span className="kv-value">{formatValue(skillRoute?.execution_mode)}</span></div>
+        <div className="kv-item"><span className="kv-key">provider_preference</span><span className="kv-value">{formatValue(skillRoute?.provider_preference)}</span></div>
+        <div className="kv-item"><span className="kv-key">runtime_profile_preference</span><span className="kv-value">{formatValue(skillRoute?.runtime_profile_preference)}</span></div>
+        <div className="kv-item"><span className="kv-key">selected_template</span><span className="kv-value">{formatValue(skillRoute?.selected_template)}</span></div>
+      </div>
+      <h4>Decision Notes</h4>
+      <StringList values={notes} emptyText="No decision notes." />
+    </>
+  );
+}
+
+function PassBReadablePanel({ payload }: { payload?: Record<string, unknown> | null }) {
+  const decisionSummary = asRecord(payload?.decision_summary);
+  const slotBindings = asRecordArray(payload?.slot_bindings);
+  const inferredArgs = asRecord(payload?.inferred_semantic_args);
+  const userArgs = asRecord(payload?.user_semantic_args);
+  const argsDraft = asRecord(payload?.args_draft);
+  const assumptions = asStringArray(decisionSummary?.assumptions);
+
+  if (!payload) {
+    return <p className="muted">No readable passb output available.</p>;
+  }
+
+  return (
+    <>
+      <div className="kv-grid">
+        <div className="kv-item"><span className="kv-key">binding_status</span><span className="kv-value">{formatValue(payload.binding_status)}</span></div>
+        <div className="kv-item"><span className="kv-key">confidence</span><span className="kv-value">{formatValue(payload.confidence)}</span></div>
+        <div className="kv-item"><span className="kv-key">decision_strategy</span><span className="kv-value">{formatValue(decisionSummary?.strategy)}</span></div>
+        <div className="kv-item"><span className="kv-key">slot_binding_count</span><span className="kv-value">{formatValue(slotBindings.length)}</span></div>
+        <div className="kv-item"><span className="kv-key">args_draft_count</span><span className="kv-value">{formatValue(argsDraft ? Object.keys(argsDraft).length : 0)}</span></div>
+      </div>
+      <h4>Slot Bindings</h4>
+      {slotBindings.length > 0 ? (
+        <ul className="simple-list">
+          {slotBindings.map((binding, index) => (
+            <li key={`${formatValue(binding.role_name)}-${formatValue(binding.slot_name)}-${index}`}>
+              {formatValue(binding.role_name)} {"->"} {formatValue(binding.slot_name)} | source={formatValue(binding.source)}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="muted">No slot bindings.</p>
+      )}
+      <h4>User Semantic Args</h4>
+      {userArgs && Object.keys(userArgs).length > 0 ? (
+        <div className="kv-grid">
+          {Object.entries(userArgs).map(([key, value]) => (
+            <div className="kv-item" key={key}><span className="kv-key">{key}</span><span className="kv-value">{formatValue(value)}</span></div>
+          ))}
+        </div>
+      ) : (
+        <p className="muted">No user semantic args.</p>
+      )}
+      <h4>Inferred Semantic Args</h4>
+      {inferredArgs && Object.keys(inferredArgs).length > 0 ? (
+        <ul className="simple-list">
+          {Object.entries(inferredArgs).map(([key, value]) => {
+            const item = asRecord(value);
+            return (
+              <li key={key}>
+                {key} = {formatValue(item?.value)} | reason={formatValue(item?.reason)} | source={formatValue(item?.source)}
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="muted">No inferred semantic args.</p>
+      )}
+      <h4>Decision Assumptions</h4>
+      <StringList values={assumptions} emptyText="No decision assumptions." />
+    </>
+  );
+}
+
+function RepairProposalReadablePanel({ payload }: { payload?: Record<string, unknown> | null }) {
+  const actions = asRecordArray(payload?.action_explanations);
+  const notes = asStringArray(payload?.notes);
+
+  if (!payload) {
+    return <p className="muted">No readable repair proposal output available.</p>;
+  }
+
+  return (
+    <>
+      <div className="kv-grid">
+        <div className="kv-item"><span className="kv-key">available</span><span className="kv-value">{formatValue(payload.available)}</span></div>
+        <div className="kv-item"><span className="kv-key">failure_code</span><span className="kv-value">{formatValue(payload.failure_code)}</span></div>
+      </div>
+      <h4>User Facing Reason</h4>
+      <p>{formatValue(payload.user_facing_reason)}</p>
+      <h4>Resume Hint</h4>
+      <p>{formatValue(payload.resume_hint)}</p>
+      <h4>Action Explanations</h4>
+      {actions.length > 0 ? (
+        <ul className="simple-list">
+          {actions.map((action, index) => (
+            <li key={`${formatValue(action.key)}-${index}`}>
+              {formatValue(action.key)} | {formatValue(action.message)}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="muted">No action explanations.</p>
+      )}
+      <h4>Notes</h4>
+      <StringList values={notes} emptyText="No notes." />
+    </>
+  );
+}
+
+function FinalExplanationReadablePanel({ payload }: { payload?: Record<string, unknown> | null }) {
+  const highlights = asStringArray(payload?.highlights);
+
+  if (!payload) {
+    return <p className="muted">No readable final explanation output available.</p>;
+  }
+
+  return (
+    <>
+      <div className="kv-grid">
+        <div className="kv-item"><span className="kv-key">available</span><span className="kv-value">{formatValue(payload.available)}</span></div>
+        <div className="kv-item"><span className="kv-key">title</span><span className="kv-value">{formatValue(payload.title)}</span></div>
+        <div className="kv-item"><span className="kv-key">generated_at</span><span className="kv-value">{formatValue(payload.generated_at)}</span></div>
+        <div className="kv-item"><span className="kv-key">highlight_count</span><span className="kv-value">{formatValue(highlights.length)}</span></div>
+      </div>
+      <h4>Narrative</h4>
+      <p>{formatValue(payload.narrative)}</p>
+      <h4>Highlights</h4>
+      <StringList values={highlights} emptyText="No highlights." />
+    </>
+  );
+}
 
 function formatValue(value: unknown): string {
   if (value === null || value === undefined) {
@@ -786,6 +1016,10 @@ function FinalExplanationSummaryPanel({
   return (
     <div className="kv-grid">
       <div className="kv-item">
+        <span className="kv-key">available</span>
+        <span className="kv-value">{formatValue(summary.available)}</span>
+      </div>
+      <div className="kv-item">
         <span className="kv-key">title</span>
         <span className="kv-value">{summary.title ?? "-"}</span>
       </div>
@@ -796,6 +1030,14 @@ function FinalExplanationSummaryPanel({
       <div className="kv-item">
         <span className="kv-key">generated_at</span>
         <span className="kv-value">{summary.generated_at ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">failure_code</span>
+        <span className="kv-value">{summary.failure_code ?? "-"}</span>
+      </div>
+      <div className="kv-item">
+        <span className="kv-key">failure_message</span>
+        <span className="kv-value">{summary.failure_message ?? "-"}</span>
       </div>
     </div>
   );
@@ -948,12 +1190,24 @@ function RepairProposalPanel({
     <>
       <div className="kv-grid">
         <div className="kv-item">
+          <span className="kv-key">available</span>
+          <span className="kv-value">{formatValue(proposal.available)}</span>
+        </div>
+        <div className="kv-item">
           <span className="kv-key">user_facing_reason</span>
           <span className="kv-value llm-text">{proposal.user_facing_reason ?? "-"}</span>
         </div>
         <div className="kv-item">
           <span className="kv-key">resume_hint</span>
           <span className="kv-value llm-text">{proposal.resume_hint ?? "-"}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">failure_code</span>
+          <span className="kv-value">{proposal.failure_code ?? "-"}</span>
+        </div>
+        <div className="kv-item">
+          <span className="kv-key">failure_message</span>
+          <span className="kv-value">{proposal.failure_message ?? "-"}</span>
         </div>
       </div>
       <h3>Action Explanations</h3>
@@ -1241,6 +1495,17 @@ export default function TaskDetailPage() {
             <ResumeTransactionPanel transaction={task.resume_transaction} />
             <h3>Corruption / Promotion</h3>
             <CorruptionStatePanel corruption={task.corruption_state} promotionStatus={task.promotion_status} />
+            <h3>Cognition Authority</h3>
+            <div className="kv-grid">
+              <div className="kv-item"><span className="kv-key">planning_intent_status</span><span className="kv-value">{task.planning_intent_status ?? "-"}</span></div>
+              <div className="kv-item"><span className="kv-key">binding_status</span><span className="kv-value">{task.binding_status ?? "-"}</span></div>
+              <div className="kv-item"><span className="kv-key">cognition_verdict</span><span className="kv-value">{task.cognition_verdict ?? "-"}</span></div>
+              <div className="kv-item"><span className="kv-key">assembly_blocked</span><span className="kv-value">{formatValue(task.assembly_blocked)}</span></div>
+            </div>
+            <h4>Overruled Fields</h4>
+            <StringList values={task.overruled_fields} emptyText="No overruled fields." />
+            <h4>Blocked Mutations</h4>
+            <StringList values={task.blocked_mutations} emptyText="No blocked mutations." />
             {canForceRevert ? (
               <>
                 <h3>Admin Recovery</h3>
@@ -1275,11 +1540,68 @@ export default function TaskDetailPage() {
       <div className="card">
         <h2>Goal Parse</h2>
         <GoalParsePanel summary={task?.goal_parse_summary} />
+        <h3>Goal Route Cognition</h3>
+        <CognitionMetadataPanel metadata={task?.goal_route_cognition} emptyText="No goal-route cognition metadata." />
       </div>
 
       <div className="card">
         <h2>Skill Route</h2>
         <SkillRoutePanel summary={task?.skill_route_summary} />
+        <h3>PassB Cognition</h3>
+        <CognitionMetadataPanel metadata={task?.passb_cognition} emptyText="No passb cognition metadata." />
+      </div>
+
+      <div className="card">
+        <h2>LLM Trace</h2>
+        <p className="muted">
+          These panels show the structured outputs produced by the cognition layer at each stage, not just the provider summary.
+        </p>
+        <h3>Goal Route Output</h3>
+        <GoalRouteReadablePanel
+          payload={task?.goal_route_output ?? (manifest?.goal_parse || manifest?.skill_route ? {
+            goal_parse: manifest?.goal_parse ?? null,
+            skill_route: manifest?.skill_route ?? null,
+          } : null)}
+        />
+        <StageOutputPanel
+          title="Goal Route Output"
+          payload={task?.goal_route_output ?? (manifest?.goal_parse || manifest?.skill_route ? {
+            goal_parse: manifest?.goal_parse ?? null,
+            skill_route: manifest?.skill_route ?? null,
+          } : null)}
+          emptyText="No goal-route output available."
+        />
+        <h3>PassB Output</h3>
+        <PassBReadablePanel
+          payload={task?.passb_output ?? (manifest?.slot_bindings || manifest?.args_draft ? {
+            slot_bindings: manifest?.slot_bindings ?? [],
+            args_draft: manifest?.args_draft ?? null,
+          } : null)}
+        />
+        <StageOutputPanel
+          title="PassB Output"
+          payload={task?.passb_output ?? (manifest?.slot_bindings || manifest?.args_draft ? {
+            slot_bindings: manifest?.slot_bindings ?? [],
+            args_draft: manifest?.args_draft ?? null,
+          } : null)}
+          emptyText="No passb output available."
+        />
+        <h3>Repair Proposal Output</h3>
+        <RepairProposalReadablePanel
+          payload={task?.repair_proposal_output ?? (task?.repair_proposal ? task.repair_proposal as Record<string, unknown> : null)}
+        />
+        <StageOutputPanel
+          title="Repair Proposal Output"
+          payload={task?.repair_proposal_output ?? (task?.repair_proposal ? task.repair_proposal as Record<string, unknown> : null)}
+          emptyText="No repair proposal output available."
+        />
+        <h3>Final Explanation Output</h3>
+        <FinalExplanationReadablePanel payload={task?.final_explanation_output} />
+        <StageOutputPanel
+          title="Final Explanation Output"
+          payload={task?.final_explanation_output}
+          emptyText="No final explanation output available yet."
+        />
       </div>
 
       <div className="card">
@@ -1328,12 +1650,27 @@ export default function TaskDetailPage() {
           <ResumeTransactionPanel transaction={manifest.resume_transaction} />
           <h3>Manifest Corruption / Promotion</h3>
           <CorruptionStatePanel corruption={manifest.corruption_state} promotionStatus={manifest.promotion_status} />
+          <h3>Manifest Cognition Authority</h3>
+          <div className="kv-grid">
+            <div className="kv-item"><span className="kv-key">planning_intent_status</span><span className="kv-value">{manifest.planning_intent_status ?? "-"}</span></div>
+            <div className="kv-item"><span className="kv-key">binding_status</span><span className="kv-value">{manifest.binding_status ?? "-"}</span></div>
+            <div className="kv-item"><span className="kv-key">cognition_verdict</span><span className="kv-value">{manifest.cognition_verdict ?? "-"}</span></div>
+            <div className="kv-item"><span className="kv-key">assembly_blocked</span><span className="kv-value">{formatValue(manifest.assembly_blocked)}</span></div>
+          </div>
+          <h4>Overruled Fields</h4>
+          <StringList values={manifest.overruled_fields} emptyText="No overruled fields." />
+          <h4>Blocked Mutations</h4>
+          <StringList values={manifest.blocked_mutations} emptyText="No blocked mutations." />
           <h3>Manifest Planning Summary</h3>
           <DebugJsonPanel title="Manifest Planning Summary" payload={manifest.planning_summary ?? null} defaultExpanded={false} />
           <h3>Manifest Goal Parse</h3>
           <GoalParsePanel summary={manifest.goal_parse} />
+          <h3>Manifest Goal Route Cognition</h3>
+          <CognitionMetadataPanel metadata={manifest.goal_route_cognition} emptyText="No manifest goal-route cognition metadata." />
           <h3>Manifest Skill Route</h3>
           <SkillRoutePanel summary={manifest.skill_route} />
+          <h3>Manifest PassB Cognition</h3>
+          <CognitionMetadataPanel metadata={manifest.passb_cognition} emptyText="No manifest passb cognition metadata." />
           <h3>Capability Facts</h3>
           <ManifestCapabilityFactsPanel facts={manifest.capability_facts} />
           <h3>Capability Output Contract</h3>
@@ -1452,6 +1789,8 @@ export default function TaskDetailPage() {
         <ResultBundleSummaryPanel summary={task?.result_bundle_summary} />
         <h3>Final Explanation Summary</h3>
         <FinalExplanationSummaryPanel summary={task?.final_explanation_summary} />
+        <h3>Final Explanation Cognition</h3>
+        <CognitionMetadataPanel metadata={task?.final_explanation_cognition} emptyText="No final explanation cognition metadata." />
         <h3>Last Failure Summary</h3>
         <FailureSummaryPanel summary={task?.last_failure_summary} />
       </div>
@@ -1463,6 +1802,8 @@ export default function TaskDetailPage() {
           <WaitingContextPanel waitingContext={task.waiting_context} />
           <h3>Repair Proposal</h3>
           <RepairProposalPanel proposal={task.repair_proposal} />
+          <h3>Repair Proposal Cognition</h3>
+          <CognitionMetadataPanel metadata={task?.repair_proposal_cognition} emptyText="No repair proposal cognition metadata." />
           <div className="row" style={{ marginTop: 12 }}>
             <input
               placeholder="logical_slot"

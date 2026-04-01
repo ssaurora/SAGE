@@ -1,0 +1,29 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+ARG SAGE_INVEST_PIP_SPEC=natcap.invest
+
+ENV CPLUS_INCLUDE_PATH=/usr/include/gdal
+ENV C_INCLUDE_PATH=/usr/include/gdal
+
+COPY requirements.txt ./
+RUN apt-get update -o Acquire::Retries=5 && \
+    apt-get install -y --fix-missing -o Acquire::Retries=5 --no-install-recommends \
+      build-essential \
+      gdal-bin \
+      libgdal-dev && \
+    rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir -r requirements.txt
+RUN GDAL_VERSION="$(gdal-config --version)" && \
+    pip install --no-cache-dir "gdal==$GDAL_VERSION" && \
+    pip install --no-cache-dir "$SAGE_INVEST_PIP_SPEC"
+
+COPY app ./app
+
+ENV WORKSPACE_ROOT=/workspace
+RUN mkdir -p /workspace/input /workspace/output /workspace/logs
+
+EXPOSE 8001
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]

@@ -33,6 +33,7 @@ public class TaskState {
     private Integer planningRevision;
     private Integer checkpointVersion;
     private Integer inventoryVersion;
+    private String cognitionVerdict;
     private String corruptionReason;
     private String latestResultBundleId;
     private String latestWorkspaceId;
@@ -279,6 +280,14 @@ public class TaskState {
 
     public void setInventoryVersion(Integer inventoryVersion) {
         this.inventoryVersion = inventoryVersion;
+    }
+
+    public String getCognitionVerdict() {
+        return cognitionVerdict;
+    }
+
+    public void setCognitionVerdict(String cognitionVerdict) {
+        this.cognitionVerdict = cognitionVerdict;
     }
 
     public String getCorruptionReason() {

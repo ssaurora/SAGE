@@ -19,6 +19,7 @@ from app.schemas import (
     ArtifactMeta,
     CapabilityOutputItem,
     CancelJobResponse,
+    CognitionMetadata,
     CreateJobRequest,
     CreateJobResponse,
     DockerRuntimeEvidence,
@@ -350,6 +351,15 @@ class JobRuntimeManager:
             output_registry=output_registry,
         )
 
+        audit_artifact_names = list(dict.fromkeys([
+            *[
+                f"{item.logical_name}.json"
+                for item in skill.capability.output_contract.outputs
+                if item.artifact_role == "AUDIT_ARTIFACT"
+            ],
+            "runtime_request.json",
+        ]))
+
         result_bundle = ResultBundle(
             result_id=result_id,
             task_id=request.task_id,
@@ -359,29 +369,17 @@ class JobRuntimeManager:
             output_registry=output_registry,
             primary_output_refs=[OutputReference(output_id=ref["output_id"], path=ref["path"]) for ref in primary_output_refs],
             main_outputs=contract_primary_outputs + ["watershed_summary", *sorted(output_registry.keys())],
-            artifacts=[
+            artifacts=list(dict.fromkeys([
                 "result_bundle.json",
                 "runtime_result.json",
                 "metrics.json",
                 "watershed_summary.json",
                 *[f"{logical_name}.json" for logical_name in contract_primary_outputs],
-                *[
-                    f"{item.logical_name}.json"
-                    for item in skill.capability.output_contract.outputs
-                    if item.artifact_role == "AUDIT_ARTIFACT"
-                ],
-                "runtime_request.json",
-            ],
+                *audit_artifact_names,
+            ])),
             primary_outputs=["result_bundle.json", "runtime_result.json", *[f"{logical_name}.json" for logical_name in contract_primary_outputs]],
             intermediate_outputs=["metrics.json"],
-            audit_artifacts=[
-                *[
-                    f"{item.logical_name}.json"
-                    for item in skill.capability.output_contract.outputs
-                    if item.artifact_role == "AUDIT_ARTIFACT"
-                ],
-                "runtime_request.json",
-            ],
+            audit_artifacts=audit_artifact_names,
             derived_outputs=["watershed_summary.json"],
             created_at=datetime.now(UTC),
         )
@@ -396,10 +394,21 @@ class JobRuntimeManager:
         )
 
         final_explanation = FinalExplanation(
+            available=True,
             title="Water Yield Result Summary",
             highlights=highlights,
             narrative=narrative,
             generated_at=datetime.now(UTC),
+            cognition_metadata=CognitionMetadata(
+                source="runtime_template",
+                provider="deterministic",
+                model=None,
+                prompt_version="runtime_explanation_v1",
+                fallback_used=False,
+                schema_valid=True,
+                response_id=None,
+                status="DETERMINISTIC_BASELINE",
+            ),
         )
 
         result_file = context.work_dir / "result_bundle.json"
@@ -623,6 +632,8 @@ result = {
             if item.artifact_role != "AUDIT_ARTIFACT":
                 continue
             output_file = context.audit_dir / f"{item.logical_name}.json"
+            if item.logical_name == "runtime_request" and output_file.exists():
+                continue
             output_payload = {
                 "logical_name": item.logical_name,
                 "task_id": request.task_id,

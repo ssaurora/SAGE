@@ -1,6 +1,6 @@
 # Phase3-前置：真实 InVEST 案例验证计划
 
-更新日期：2026-03-27
+更新日期：2026-04-01
 
 ## 1. 文档定位
 
@@ -23,6 +23,25 @@
 - [Phase2-B-最终验收记录.md](/e:/paper_project/SAGE/Docs/开发计划/Phase2-B-最终验收记录.md)
 - [Phase2-B-冻结基线说明.md](/e:/paper_project/SAGE/Docs/开发计划/Phase2-B-冻结基线说明.md)
 - [渐进式实施路线图.md](/e:/paper_project/SAGE/Docs/开发计划/渐进式实施路线图.md)
+- [Phase3-受约束投影与受约束规划说明.md](/e:/paper_project/SAGE/Docs/开发计划/Phase3-受约束投影与受约束规划说明.md)
+- [真实案例-智能调用过程说明.md](/e:/paper_project/SAGE/Docs/架构设计/真实案例-智能调用过程说明.md)
+
+### 1.1 当前阶段统一口径
+
+本计划的验收目标不是证明“开放域自主规划”已经成立，而是证明：
+
+> 自然语言请求可以被映射到受治理的真实 InVEST 执行 contract，并稳定支撑真实执行、治理校验与审计闭环。
+
+因此，本计划中“认知入口”的实现允许经历两个连续阶段：
+
+- 历史阶段：以 deterministic canonical-case routing 为主，先证明真实执行闭环成立
+- 当前阶段：进入 `LLM-assisted governed case projection`，但 authority 仍保留在 control / planning / dispatcher 主链
+
+这意味着本计划当前最准确的能力边界是：
+
+- 已经摆脱“纯规则直连”的单薄形态
+- 但还不是“开放域自主规划”
+- 当前真正成立的是：**自然语言到真实执行 contract 的受治理映射能力**
 
 ---
 

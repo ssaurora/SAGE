@@ -81,6 +81,19 @@ export type CorruptionState = {
   corrupted_since?: string;
 };
 
+export type CognitionMetadataDto = {
+  provider?: string;
+  model?: string | null;
+  source?: string;
+  prompt_version?: string;
+  fallback_used?: boolean;
+  response_id?: string | null;
+  schema_valid?: boolean;
+  status?: string;
+  failure_code?: string | null;
+  failure_message?: string | null;
+};
+
 export function getMe(): Promise<MeResponse> {
   return apiFetch<MeResponse>("/auth/me", { method: "GET", withAuth: true });
 }
@@ -128,6 +141,20 @@ export type TaskDetailResponse = {
   promotion_status?: string;
   graph_digest?: string;
   planning_summary?: Record<string, unknown>;
+  planning_intent_status?: string;
+  binding_status?: string;
+  overruled_fields?: string[];
+  blocked_mutations?: string[];
+  assembly_blocked?: boolean;
+  cognition_verdict?: string;
+  goal_route_cognition?: CognitionMetadataDto;
+  goal_route_output?: Record<string, unknown>;
+  passb_cognition?: CognitionMetadataDto;
+  passb_output?: Record<string, unknown>;
+  repair_proposal_cognition?: CognitionMetadataDto;
+  repair_proposal_output?: Record<string, unknown>;
+  final_explanation_cognition?: CognitionMetadataDto;
+  final_explanation_output?: Record<string, unknown>;
   latest_result_bundle_id?: string;
   latest_workspace_id?: string;
   pass1_summary?: {
@@ -223,9 +250,12 @@ export type TaskDetailResponse = {
     created_at?: string;
   };
   final_explanation_summary?: {
+    available?: boolean;
     title?: string;
     highlight_count?: number;
     generated_at?: string;
+    failure_code?: string | null;
+    failure_message?: string | null;
   };
   last_failure_summary?: {
     failure_code?: string;
@@ -245,10 +275,13 @@ export type TaskDetailResponse = {
     can_resume?: boolean;
   };
   repair_proposal?: {
+    available?: boolean;
     user_facing_reason?: string;
     resume_hint?: string;
     action_explanations?: { key: string; message: string }[];
     notes?: string[];
+    failure_code?: string | null;
+    failure_message?: string | null;
   };
 };
 
@@ -291,6 +324,20 @@ export type TaskManifestResponse = {
   resume_transaction?: ResumeTransaction;
   corruption_state?: CorruptionState;
   promotion_status?: string;
+  planning_intent_status?: string;
+  binding_status?: string;
+  overruled_fields?: string[];
+  blocked_mutations?: string[];
+  assembly_blocked?: boolean;
+  cognition_verdict?: string;
+  goal_route_cognition?: CognitionMetadataDto;
+  goal_route_output?: Record<string, unknown>;
+  passb_cognition?: CognitionMetadataDto;
+  passb_output?: Record<string, unknown>;
+  repair_proposal_cognition?: CognitionMetadataDto;
+  repair_proposal_output?: Record<string, unknown>;
+  final_explanation_cognition?: CognitionMetadataDto;
+  final_explanation_output?: Record<string, unknown>;
   goal_parse?: {
     goal_type?: string;
     user_query?: string;
@@ -410,6 +457,20 @@ export type TaskResultResponse = {
   canonicalization_summary?: Record<string, unknown>;
   rewrite_summary?: Record<string, unknown>;
   promotion_status?: string;
+  planning_intent_status?: string;
+  binding_status?: string;
+  overruled_fields?: string[];
+  blocked_mutations?: string[];
+  assembly_blocked?: boolean;
+  cognition_verdict?: string;
+  goal_route_cognition?: CognitionMetadataDto;
+  goal_route_output?: Record<string, unknown>;
+  passb_cognition?: CognitionMetadataDto;
+  passb_output?: Record<string, unknown>;
+  repair_proposal_cognition?: CognitionMetadataDto;
+  repair_proposal_output?: Record<string, unknown>;
+  final_explanation_cognition?: CognitionMetadataDto;
+  final_explanation_output?: Record<string, unknown>;
   result_bundle?: {
     result_id?: string;
     task_id?: string;
@@ -430,10 +491,13 @@ export type TaskResultResponse = {
     created_at?: string;
   };
   final_explanation?: {
+    available?: boolean;
     title?: string;
     highlights?: string[];
     narrative?: string;
     generated_at?: string;
+    failure_code?: string | null;
+    failure_message?: string | null;
   };
   failure_summary?: {
     failure_code?: string;

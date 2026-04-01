@@ -16,6 +16,15 @@ public class CognitionPassBRequest {
     @JsonProperty("pass1_result")
     private JsonNode pass1Result;
 
+    @JsonProperty("goal_parse")
+    private JsonNode goalParse;
+
+    @JsonProperty("skill_route")
+    private JsonNode skillRoute;
+
+    @JsonProperty("user_note")
+    private String userNote;
+
     public String getTaskId() {
         return taskId;
     }
@@ -47,5 +56,28 @@ public class CognitionPassBRequest {
     public void setPass1Result(JsonNode pass1Result) {
         this.pass1Result = pass1Result;
     }
-}
 
+    public JsonNode getGoalParse() {
+        return goalParse;
+    }
+
+    public void setGoalParse(JsonNode goalParse) {
+        this.goalParse = goalParse;
+    }
+
+    public JsonNode getSkillRoute() {
+        return skillRoute;
+    }
+
+    public void setSkillRoute(JsonNode skillRoute) {
+        this.skillRoute = skillRoute;
+    }
+
+    public String getUserNote() {
+        return userNote;
+    }
+
+    public void setUserNote(String userNote) {
+        this.userNote = userNote;
+    }
+}

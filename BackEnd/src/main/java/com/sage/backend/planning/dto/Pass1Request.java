@@ -15,6 +15,9 @@ public class Pass1Request {
     @JsonProperty("capability_key")
     private String capabilityKey;
 
+    @JsonProperty("selected_template")
+    private String selectedTemplate;
+
     public String getTaskId() {
         return taskId;
     }
@@ -45,5 +48,13 @@ public class Pass1Request {
 
     public void setCapabilityKey(String capabilityKey) {
         this.capabilityKey = capabilityKey;
+    }
+
+    public String getSelectedTemplate() {
+        return selectedTemplate;
+    }
+
+    public void setSelectedTemplate(String selectedTemplate) {
+        this.selectedTemplate = selectedTemplate;
     }
 }

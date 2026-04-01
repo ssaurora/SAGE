@@ -7,6 +7,10 @@ spring:
     username: ${DB_USERNAME:postgres}
     password: ${DB_PASSWORD:postgres}
     driver-class-name: org.postgresql.Driver
+  servlet:
+    multipart:
+      max-file-size: ${SAGE_MAX_UPLOAD_FILE_SIZE:64MB}
+      max-request-size: ${SAGE_MAX_UPLOAD_REQUEST_SIZE:128MB}
   flyway:
     enabled: true
   jackson:

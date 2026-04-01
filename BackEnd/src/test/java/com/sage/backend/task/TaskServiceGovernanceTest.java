@@ -3,7 +3,10 @@ package com.sage.backend.task;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sage.backend.audit.AuditService;
+import com.sage.backend.cognition.CognitionFinalExplanationClient;
+import com.sage.backend.cognition.CognitionGoalRouteClient;
 import com.sage.backend.cognition.CognitionPassBClient;
+import com.sage.backend.cognition.dto.CognitionGoalRouteResponse;
 import com.sage.backend.cognition.dto.CognitionPassBResponse;
 import com.sage.backend.event.EventService;
 import com.sage.backend.execution.JobRuntimeClient;
@@ -20,6 +23,7 @@ import com.sage.backend.model.TaskState;
 import com.sage.backend.model.TaskStatus;
 import com.sage.backend.planning.Pass1Client;
 import com.sage.backend.planning.Pass2Client;
+import com.sage.backend.planning.dto.Pass1Response;
 import com.sage.backend.planning.dto.Pass2Response;
 import com.sage.backend.repair.RepairDecision;
 import com.sage.backend.repair.RepairDispatcherService;
@@ -87,9 +91,9 @@ class TaskServiceGovernanceTest {
                     return 1;
                 });
         when(harness.taskStateMapper.commitQueuedWithGovernance(
-                anyString(), anyInt(), anyString(), anyString(), anyString(), anyString(), anyInt(), anyInt(), anyInt(), anyInt(), anyString()
+                anyString(), anyInt(), anyString(), anyString(), anyString(), anyString(), anyInt(), anyInt(), anyInt(), anyInt(), anyString(), anyString()
         )).thenAnswer(invocation -> {
-            committedTxn.set(invocation.getArgument(10));
+            committedTxn.set(invocation.getArgument(11));
             return 1;
         });
 
@@ -127,7 +131,7 @@ class TaskServiceGovernanceTest {
         inOrder(harness.taskStateMapper, harness.analysisManifestMapper).verify(harness.analysisManifestMapper)
                 .updateFreezeStatus(anyString(), eq("CANDIDATE"), eq("FROZEN"));
         inOrder(harness.taskStateMapper, harness.analysisManifestMapper).verify(harness.taskStateMapper)
-                .commitQueuedWithGovernance(eq("task_resume"), eq(5), eq(TaskStatus.QUEUED.name()), anyString(), eq("job_resume_acked"), anyString(), eq(1), eq(4), eq(4), eq(8), anyString());
+                .commitQueuedWithGovernance(eq("task_resume"), eq(6), eq(TaskStatus.QUEUED.name()), anyString(), eq("job_resume_acked"), anyString(), eq(1), eq(4), eq(4), eq(8), anyString(), anyString());
     }
 
     @Test
@@ -191,7 +195,7 @@ class TaskServiceGovernanceTest {
         when(harness.jobRuntimeClient.createJob(any())).thenReturn(createJobResponse("job_resume_corrupted"));
         when(harness.taskStateMapper.updateResumeTransaction(eq("task_resume"), anyString())).thenReturn(1);
         when(harness.taskStateMapper.commitQueuedWithGovernance(
-                anyString(), anyInt(), anyString(), anyString(), anyString(), anyString(), anyInt(), anyInt(), anyInt(), anyInt(), anyString()
+                anyString(), anyInt(), anyString(), anyString(), anyString(), anyString(), anyInt(), anyInt(), anyInt(), anyInt(), anyString(), anyString()
         )).thenReturn(0);
         when(harness.taskStateMapper.markCorrupted(anyString(), anyInt(), anyString(), anyString(), any(), anyString()))
                 .thenAnswer(invocation -> {
@@ -379,6 +383,7 @@ class TaskServiceGovernanceTest {
 
     private CognitionPassBResponse passBResponse() {
         CognitionPassBResponse response = new CognitionPassBResponse();
+        response.setBindingStatus("resolved");
         response.setSlotBindings(List.of());
         response.setArgsDraft(Map.of(
                 "workspace_dir", "/tmp/workspace",
@@ -457,6 +462,8 @@ class TaskServiceGovernanceTest {
         private final TaskAttemptMapper taskAttemptMapper = mock(TaskAttemptMapper.class);
         private final EventService eventService = mock(EventService.class);
         private final AuditService auditService = mock(AuditService.class);
+        private final CognitionFinalExplanationClient cognitionFinalExplanationClient = mock(CognitionFinalExplanationClient.class);
+        private final CognitionGoalRouteClient cognitionGoalRouteClient = mock(CognitionGoalRouteClient.class);
         private final Pass1Client pass1Client = mock(Pass1Client.class);
         private final CognitionPassBClient cognitionPassBClient = mock(CognitionPassBClient.class);
         private final ValidationClient validationClient = mock(ValidationClient.class);
@@ -473,11 +480,17 @@ class TaskServiceGovernanceTest {
             when(taskAttemptMapper.updateSnapshotAndJob(anyString(), anyInt(), any(), anyString(), any())).thenReturn(1);
             when(taskAttemptMapper.insert(any())).thenReturn(1);
             when(jobRecordMapper.insert(any())).thenReturn(1);
+            when(taskStateMapper.updateStateAndPass1(anyString(), anyInt(), anyString(), anyString())).thenReturn(1);
+            when(taskStateMapper.updateGoalAndRoute(anyString(), anyString(), anyString())).thenReturn(1);
+            when(taskStateMapper.updateCognitionVerdict(anyString(), anyString())).thenReturn(1);
+            when(taskStateMapper.updateInputChainSnapshot(anyString(), anyString(), anyString(), anyString(), anyString(), anyString())).thenReturn(1);
             when(repairProposalService.generate(any(), any(), any(), any())).thenReturn(new RepairProposalResponse());
             when(taskStateMapper.updateResumeTransaction(anyString(), anyString())).thenReturn(1);
             when(taskStateMapper.markCorrupted(anyString(), anyInt(), anyString(), anyString(), any(), anyString())).thenReturn(1);
             when(registryService.resolve(any(), any(), any()))
                     .thenReturn(new RegistryService.ProviderResolution("water_yield", "planning-pass1-local", "docker-local"));
+            when(cognitionGoalRouteClient.route(any())).thenReturn(defaultGoalRouteResponse(objectMapper));
+            when(pass1Client.runPass1(any())).thenReturn(defaultPass1Response(objectMapper));
 
             service = new TaskService(
                     taskStateMapper,
@@ -488,6 +501,8 @@ class TaskServiceGovernanceTest {
                     taskAttemptMapper,
                     eventService,
                     auditService,
+                    cognitionFinalExplanationClient,
+                    cognitionGoalRouteClient,
                     pass1Client,
                     cognitionPassBClient,
                     validationClient,
@@ -497,11 +512,79 @@ class TaskServiceGovernanceTest {
                     repairProposalService,
                     new AssertionFailureMapper(),
                     new GoalRouteService(objectMapper),
+                    new ExecutionContractAssembler(objectMapper),
                     registryService,
                     workspaceTraceService,
                     objectMapper,
                     "BackEnd/runtime/test-uploads"
             );
+        }
+
+        private CognitionGoalRouteResponse defaultGoalRouteResponse(ObjectMapper objectMapper) {
+            try {
+                CognitionGoalRouteResponse response = new CognitionGoalRouteResponse();
+                response.setPlanningIntentStatus("resolved");
+                response.setGoalParse(objectMapper.readTree("""
+                        {
+                          "goal_type": "water_yield_analysis",
+                          "user_query": "resume task",
+                          "analysis_kind": "water_yield",
+                          "intent_mode": "cognition_test",
+                          "source": "cognition_goal_route",
+                          "entities": []
+                        }
+                        """));
+                response.setSkillRoute(objectMapper.readTree("""
+                        {
+                          "route_mode": "single_skill",
+                          "primary_skill": "water_yield",
+                          "capability_key": "water_yield",
+                          "route_source": "cognition_test",
+                          "selected_template": "water_yield_v1",
+                          "template_version": "1.0.0",
+                          "execution_mode": "governed_baseline"
+                        }
+                        """));
+                response.setConfidence(0.9);
+                response.setDecisionSummary(Map.of("strategy", "test"));
+                response.setCognitionMetadata(Map.of("fallback_used", false, "schema_valid", true, "source", "test"));
+                return response;
+            } catch (Exception exception) {
+                throw new IllegalStateException(exception);
+            }
+        }
+
+        private Pass1Response defaultPass1Response(ObjectMapper objectMapper) {
+            try {
+                return objectMapper.readValue(samplePass1Json(), Pass1Response.class);
+            } catch (Exception exception) {
+                throw new IllegalStateException(exception);
+            }
+        }
+
+        private String samplePass1Json() {
+            return """
+                    {
+                      "capability_key": "water_yield",
+                      "selected_template": "water_yield_v1",
+                      "template_version": "1.0.0",
+                      "capability_facts": {
+                        "runtime_profile_hint": "docker-local",
+                        "validation_hints": [],
+                        "repair_hints": []
+                      },
+                      "logical_input_roles": [],
+                      "role_arg_mappings": [],
+                      "slot_schema_view": {
+                        "slots": []
+                      },
+                      "graph_skeleton": {
+                        "nodes": [],
+                        "edges": []
+                      },
+                      "stable_defaults": {}
+                    }
+                    """;
         }
     }
 }
