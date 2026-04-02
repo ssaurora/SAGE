@@ -121,6 +121,40 @@ class TaskServiceCognitionFlowTest {
     }
 
     @Test
+    void createTaskRealCaseGoalRouteFallbackClarifyRequiredStillTransitionsToWaitingUser() throws Exception {
+        Harness harness = new Harness(objectMapper);
+        CognitionGoalRouteResponse response = goalRouteResponseWithCaseProjection(
+                "resolved",
+                "real_case_validation",
+                Map.of(
+                        "mode", "clarify_required",
+                        "candidate_case_ids", List.of("annual_water_yield_gura", "annual_water_yield_gtm_national"),
+                        "clarify_prompt", "Choose a governed annual water yield case."
+                )
+        );
+        response.setCognitionMetadata(Map.of(
+                "fallback_used", true,
+                "schema_valid", true,
+                "source", "glm_fallback_projection",
+                "provider", "glm",
+                "status", "LLM_FALLBACK",
+                "failure_code", "COGNITION_UNAVAILABLE"
+        ));
+        when(harness.cognitionGoalRouteClient.route(any())).thenReturn(response);
+        when(harness.taskStateMapper.findByTaskId(anyString())).thenReturn(taskStateForProjection());
+
+        CreateTaskRequest request = new CreateTaskRequest();
+        request.setUserQuery("run a real case invest annual water yield analysis");
+
+        CreateTaskResponse createResponse = harness.service.createTask(42L, request);
+
+        assertEquals(TaskStatus.WAITING_USER.name(), createResponse.getState());
+        verify(harness.pass1Client, never()).runPass1(any());
+        verify(harness.cognitionPassBClient, never()).runPassB(any());
+        verify(harness.taskStateMapper).updateStateWithWaitingContext(anyString(), anyInt(), anyString(), anyString(), anyString(), any());
+    }
+
+    @Test
     void createTaskRealCasePassBClarifyRequiredTransitionsToWaitingUser() throws Exception {
         Harness harness = new Harness(objectMapper);
         when(harness.cognitionGoalRouteClient.route(any())).thenReturn(goalRouteResponseWithCaseProjection(
@@ -141,6 +175,40 @@ class TaskServiceCognitionFlowTest {
         CreateTaskResponse response = harness.service.createTask(42L, request);
 
         assertEquals(TaskStatus.WAITING_USER.name(), response.getState());
+        verify(harness.validationClient, never()).validatePrimitive(any());
+        verify(harness.jobRuntimeClient, never()).createJob(any());
+    }
+
+    @Test
+    void createTaskRealCasePassBFallbackClarifyRequiredStillTransitionsToWaitingUser() throws Exception {
+        Harness harness = new Harness(objectMapper);
+        when(harness.cognitionGoalRouteClient.route(any())).thenReturn(goalRouteResponseWithCaseProjection(
+                "resolved",
+                "real_case_validation",
+                Map.of(
+                        "mode", "resolved",
+                        "selected_case_id", "annual_water_yield_gura",
+                        "candidate_case_ids", List.of("annual_water_yield_gura")
+                )
+        ));
+        when(harness.pass1Client.runPass1(any())).thenReturn(defaultPass1Response());
+        CognitionPassBResponse response = bindingClarifyRequiredPassBResponse();
+        response.setCognitionMetadata(Map.of(
+                "fallback_used", true,
+                "schema_valid", true,
+                "source", "glm_fallback_projection",
+                "provider", "glm",
+                "status", "LLM_FALLBACK",
+                "failure_code", "COGNITION_UNAVAILABLE"
+        ));
+        when(harness.cognitionPassBClient.runPassB(any())).thenReturn(response);
+
+        CreateTaskRequest request = new CreateTaskRequest();
+        request.setUserQuery("run a real case invest annual water yield analysis");
+
+        CreateTaskResponse createResponse = harness.service.createTask(42L, request);
+
+        assertEquals(TaskStatus.WAITING_USER.name(), createResponse.getState());
         verify(harness.validationClient, never()).validatePrimitive(any());
         verify(harness.jobRuntimeClient, never()).createJob(any());
     }

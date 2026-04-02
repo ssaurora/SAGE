@@ -40,18 +40,18 @@ def _build_glm_final_explanation_response(payload: CognitionFinalExplanationRequ
         "Use only the supplied result facts. Do not invent file paths, runtime controls, or policy decisions."
     )
     compact_payload = _build_compact_explanation_payload(payload)
-    parsed, metadata = call_glm_json(
-        system_prompt,
-        compact_payload,
-        temperature=0.1,
-        max_tokens=900,
-        timeout_ms=60000,
-    )
-    title = str(parsed.get("title") or "").strip()
-    narrative = str(parsed.get("narrative") or "").strip()
-    highlights = [str(item).strip() for item in (parsed.get("highlights") or []) if str(item).strip()]
-    if not title or not narrative:
-        raise ValueError("final explanation response missing required fields")
+    try:
+        parsed, metadata = call_glm_json(
+            system_prompt,
+            compact_payload,
+            temperature=0.1,
+            max_tokens=900,
+            timeout_ms=60000,
+        )
+        title, highlights, narrative = _normalize_explanation_fields(parsed)
+    except Exception:
+        parsed, metadata = _build_glm_final_explanation_retry(payload)
+        title, highlights, narrative = _normalize_explanation_fields(parsed)
     return FinalExplanation(
         available=True,
         title=title,
@@ -68,6 +68,25 @@ def _build_glm_final_explanation_response(payload: CognitionFinalExplanationRequ
             response_id=str(metadata.get("response_id") or "") or None,
             status="LLM_PRIMARY",
         ),
+    )
+
+
+def _build_glm_final_explanation_retry(
+    payload: CognitionFinalExplanationRequest,
+) -> tuple[dict[str, object], dict[str, object]]:
+    retry_prompt = (
+        "Return ONLY raw JSON. No markdown. No reasoning. "
+        "Required keys: title, highlights, narrative. "
+        "Keep title under 8 words, highlights to at most 3 items, and narrative to at most 2 sentences. "
+        "Use only supplied facts."
+    )
+    retry_payload = _build_minimal_retry_payload(payload)
+    return call_glm_json(
+        retry_prompt,
+        retry_payload,
+        temperature=0.0,
+        max_tokens=260,
+        timeout_ms=45000,
     )
 
 
@@ -201,6 +220,47 @@ def _build_compact_explanation_payload(payload: CognitionFinalExplanationRequest
             "input_binding_count": _list_count(runtime_evidence.get("input_bindings")),
         },
     }
+
+
+def _build_minimal_retry_payload(payload: CognitionFinalExplanationRequest) -> dict[str, object]:
+    result_bundle = payload.result_bundle if isinstance(payload.result_bundle, dict) else {}
+    metrics = result_bundle.get("metrics") if isinstance(result_bundle.get("metrics"), dict) else {}
+    main_outputs = result_bundle.get("main_outputs") if isinstance(result_bundle.get("main_outputs"), list) else []
+    return {
+        "task_id": payload.task_id,
+        "analysis_type": "Annual Water Yield",
+        "user_query": payload.user_query,
+        "case_id": payload.case_id,
+        "provider_key": payload.provider_key,
+        "runtime_profile": payload.runtime_profile,
+        "status": metrics.get("status"),
+        "used_real_invest": bool(metrics.get("used_real_invest", False)),
+        "output_file_count": metrics.get("output_file_count"),
+        "geotiff_count": metrics.get("geotiff_count"),
+        "vector_count": metrics.get("vector_count"),
+        "table_count": metrics.get("table_count"),
+        "seasonality_constant": metrics.get("seasonality_constant"),
+        "main_outputs": [str(item) for item in main_outputs[:5]],
+    }
+
+
+def _normalize_explanation_fields(parsed: dict[str, object]) -> tuple[str, list[str], str]:
+    title = str(parsed.get("title") or parsed.get("headline") or parsed.get("summary_title") or "").strip()
+    narrative = str(
+        parsed.get("narrative")
+        or parsed.get("summary")
+        or parsed.get("explanation")
+        or parsed.get("description")
+        or ""
+    ).strip()
+    raw_highlights = parsed.get("highlights")
+    if isinstance(raw_highlights, str):
+        highlights = [raw_highlights.strip()] if raw_highlights.strip() else []
+    else:
+        highlights = [str(item).strip() for item in (raw_highlights or []) if str(item).strip()]
+    if not title or not narrative:
+        raise ValueError("final explanation response missing required fields")
+    return title, highlights, narrative
 
 
 def _list_count(value: object) -> int:

@@ -1,0 +1,45 @@
+{
+  "cases": [
+    {
+      "case_id": "annual_water_yield_gtm_national",
+      "display_name": "Annual Water Yield - Guatemala National",
+      "aliases": [
+        "guatemala",
+        "gtm",
+        "guatemala annual water yield",
+        "gtm annual water yield",
+        "guatemala national"
+      ],
+      "intent_signals": [
+        "guatemala basin",
+        "guatemala watershed",
+        "gtm national lulc"
+      ],
+      "required_roles": [
+        "watersheds",
+        "lulc",
+        "biophysical_table",
+        "precipitation",
+        "eto"
+      ],
+      "provider_key": "planning-pass1-invest-local",
+      "runtime_profile": "docker-invest-real",
+      "sample_root": "/sample-data/IEEM-ES-GTM-main",
+      "default_args": {
+        "results_suffix": "gtm_national",
+        "seasonality_constant": 5.0,
+        "n_workers": 1,
+        "watersheds": "watersheds/gtm_watersheds.shp",
+        "sub_watersheds": "watersheds/gtm_subwatersheds.shp",
+        "lulc": "lulc_country/gtm_lulc_2012.tif",
+        "biophysical_table": "model_lookup_tables/annual_water_national_gtm.csv",
+        "precipitation": "annual_precipitation/gtm_annual_precipitation.tif",
+        "eto": "reference_evapotranspiration/gtm_reference_evapotranspiration.tif",
+        "depth_to_root_restricting_layer": "depth_to_root_restricting_layer/gtm_depth_to_root_restricting_layer.tif",
+        "plant_available_water_content": "plant_available_water_content/gtm_plant_available_water_content.tif"
+      },
+      "descriptor_version": "annual_water_yield_gtm_national_v1",
+      "executable": true
+    }
+  ]
+}

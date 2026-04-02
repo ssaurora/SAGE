@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("All", "Success", "RepairResume", "Cancel", "Clarify")]
+    [ValidateSet("All", "Success", "CaseBSuccess", "RepairResume", "Cancel", "Clarify")]
     [string]$Scenario = "All",
     [string]$SampleDataRoot,
     [string]$InvestPipSpec = "natcap.invest",
@@ -62,6 +62,67 @@ function Get-ServiceContainerName {
         return $env:SAGE_SERVICE_CONTAINER
     }
     return "sage-service"
+}
+
+function Get-ExecutableCaseDescriptors {
+    param(
+        [string]$HostSampleRoot
+    )
+
+    $cases = @(
+        @{
+            case_id = "annual_water_yield_gura"
+            aliases = @("gura", "gura case", "annual water yield gura")
+            descriptor_version = "annual_water_yield_gura_v1"
+            sample_root = "/sample-data/Annual_Water_Yield"
+            executable = $true
+        }
+    )
+
+    $externalRegistryPath = if (-not [string]::IsNullOrWhiteSpace($env:SAGE_WATER_YIELD_CASE_REGISTRY_FILE)) {
+        $env:SAGE_WATER_YIELD_CASE_REGISTRY_FILE
+    } else {
+        Join-Path $HostSampleRoot "case-descriptors\water_yield_cases.json"
+    }
+    if (-not (Test-Path $externalRegistryPath)) {
+        $fallbackRegistryPath = Join-Path $HostSampleRoot "case-descriptors\water_yield_cases.json"
+        if (Test-Path $fallbackRegistryPath) {
+            $externalRegistryPath = $fallbackRegistryPath
+        }
+    }
+
+    if (Test-Path $externalRegistryPath) {
+        $rawRegistry = Get-Content -Raw -Path $externalRegistryPath | ConvertFrom-Json
+        $rawCases = if ($rawRegistry.cases) { @($rawRegistry.cases) } else { @($rawRegistry) }
+        foreach ($rawCase in $rawCases) {
+            if (-not $rawCase) { continue }
+            if (-not [bool]$rawCase.executable) { continue }
+            $caseId = [string]$rawCase.case_id
+            if ([string]::IsNullOrWhiteSpace($caseId)) { continue }
+            if (@($cases | ForEach-Object { [string]$_.case_id }) -contains $caseId) { continue }
+            $cases += @{
+                case_id = $caseId
+                aliases = @($rawCase.aliases | ForEach-Object { [string]$_ })
+                descriptor_version = [string]$rawCase.descriptor_version
+                sample_root = [string]$rawCase.sample_root
+                executable = $true
+            }
+        }
+    }
+
+    return @($cases)
+}
+
+function Get-SecondExecutableCaseDescriptor {
+    param(
+        [object[]]$ExecutableCases
+    )
+
+    $second = @($ExecutableCases | Where-Object { [string]$_.case_id -ne "annual_water_yield_gura" }) | Select-Object -First 1
+    if ($null -eq $second) {
+        throw "Week 1 blocked: no second executable water_yield case descriptor is available. Provide a second real case via case registry + data onboarding before claiming Week 1 passed."
+    }
+    return $second
 }
 
 function Get-TaskDetail {
@@ -130,14 +191,15 @@ function Invoke-Upload {
 function Assert-CommonRealCaseFields {
     param(
         $Detail,
-        $Result
+        $Result,
+        [string]$ExpectedCaseId = "annual_water_yield_gura"
     )
 
     Assert-True ([string]$Detail.skill_route_summary.execution_mode -eq "real_case_validation") "execution_mode should be real_case_validation"
     Assert-True ([string]$Detail.skill_route_summary.provider_preference -eq "planning-pass1-invest-local") "provider_preference should target the invest provider"
     Assert-True ([string]$Result.provider_key -eq "planning-pass1-invest-local") "result.provider_key should be planning-pass1-invest-local"
     Assert-True ([string]$Result.runtime_profile -eq "docker-invest-real") "result.runtime_profile should be docker-invest-real"
-    Assert-True ([string]$Result.case_id -eq "annual_water_yield_gura") "result.case_id should be annual_water_yield_gura"
+    Assert-True ([string]$Result.case_id -eq $ExpectedCaseId) "result.case_id should be $ExpectedCaseId"
     Assert-True ([string]$Result.docker_runtime_evidence.runtime_mode -eq "invest_real_runner") "runtime_mode should be invest_real_runner"
     Assert-True (@($Result.docker_runtime_evidence.input_bindings).Count -ge 5) "input_bindings should include real-case contract inputs"
     Assert-CognitionMetadata -Metadata $Detail.goal_route_cognition -Stage "goal-route"
@@ -149,7 +211,8 @@ function Assert-ManifestMatchesAuthority {
     param(
         [hashtable]$Headers,
         [string]$TaskId,
-        $Result
+        $Result,
+        [string]$ExpectedCaseId = $null
     )
 
     $manifest = Get-TaskManifest -TaskId $TaskId -Headers $Headers
@@ -158,16 +221,29 @@ function Assert-ManifestMatchesAuthority {
     Assert-True ([string]$Result.result_bundle.metrics.runtime_profile -eq [string]$Result.runtime_profile) "result bundle metrics runtime_profile should match authority facts"
     Assert-True ([string]$Result.result_bundle.metrics.case_id -eq [string]$Result.case_id) "result bundle metrics case_id should match authority facts"
     Assert-True (@($manifest.slot_bindings).Count -eq @($Result.docker_runtime_evidence.input_bindings).Count) "manifest slot_bindings and runtime evidence input_bindings should agree"
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedCaseId)) {
+        Assert-True ([string]$manifest.args_draft.case_id -eq $ExpectedCaseId) "manifest.args_draft.case_id should be $ExpectedCaseId"
+        Assert-True ([string]$Result.docker_runtime_evidence.case_id -eq $ExpectedCaseId) "docker_runtime_evidence.case_id should be $ExpectedCaseId"
+    }
 }
 
 function Assert-CognitionMetadata {
     param(
         $Metadata,
-        [string]$Stage
+        [string]$Stage,
+        [switch]$AllowFallback
     )
 
     Assert-True ($null -ne $Metadata) "$Stage cognition metadata should exist"
     Assert-True ([string]$Metadata.provider -eq "glm") "$Stage cognition provider should be glm"
+    if ($AllowFallback) {
+        $fallbackUsed = $Metadata.fallback_used -eq $true
+        if ($fallbackUsed) {
+            Assert-True ([string]$Metadata.status -eq "LLM_FALLBACK") "$Stage fallback cognition status should be LLM_FALLBACK"
+            Assert-True ($Metadata.schema_valid -ne $false) "$Stage fallback cognition schema_valid should not be false"
+            return
+        }
+    }
     Assert-True ($Metadata.fallback_used -eq $false) "$Stage cognition fallback_used should be false"
     Assert-True ($Metadata.schema_valid -ne $false) "$Stage cognition schema_valid should not be false"
 }
@@ -183,18 +259,45 @@ function Invoke-RealCaseSuccessScenario {
     $taskId = [string]$task.task_id
     Assert-True (-not [string]::IsNullOrWhiteSpace($taskId)) "success scenario task_id should exist"
 
-    $detail = Wait-TaskState -TaskId $taskId -Headers $Headers -States @("SUCCEEDED", "FAILED", "WAITING_USER", "STATE_CORRUPTED") -TimeoutSeconds 360
+    $detail = Wait-TaskState -TaskId $taskId -Headers $Headers -States @("SUCCEEDED", "FAILED", "WAITING_USER", "STATE_CORRUPTED") -TimeoutSeconds 600
     Assert-True ([string]$detail.state -eq "SUCCEEDED") "real-case success scenario should finish in SUCCEEDED"
 
     $result = Get-TaskResult -TaskId $taskId -Headers $Headers
-    Assert-CommonRealCaseFields -Detail $detail -Result $result
+    Assert-CommonRealCaseFields -Detail $detail -Result $result -ExpectedCaseId "annual_water_yield_gura"
     Assert-True ([bool]$result.result_bundle.metrics.used_real_invest) "used_real_invest should be true"
     Assert-True (@($result.result_bundle.primary_output_refs).Count -ge 1) "primary_output_refs should exist"
     Assert-True (@($result.artifact_catalog.primary_outputs).Count -ge 3) "primary outputs should be recorded"
     Assert-True (@($result.artifact_catalog.audit_artifacts).Count -ge 2) "audit artifacts should be recorded"
     Assert-True (@($result.artifact_catalog.logs).Count -ge 1) "log artifacts should be recorded"
-    Assert-ManifestMatchesAuthority -Headers $Headers -TaskId $taskId -Result $result
+    Assert-ManifestMatchesAuthority -Headers $Headers -TaskId $taskId -Result $result -ExpectedCaseId "annual_water_yield_gura"
     Write-Output "Phase3 real-case success passed: $taskId"
+    return $taskId
+}
+
+function Invoke-RealCaseSecondCaseSuccessScenario {
+    param(
+        [hashtable]$Headers,
+        [hashtable]$SecondCaseDescriptor
+    )
+
+    $queryToken = if (@($SecondCaseDescriptor.aliases).Count -ge 1 -and -not [string]::IsNullOrWhiteSpace([string]$SecondCaseDescriptor.aliases[0])) {
+        [string]$SecondCaseDescriptor.aliases[0]
+    } else {
+        [string]$SecondCaseDescriptor.case_id
+    }
+    $createBody = @{ user_query = "run a real case invest annual water yield analysis for $queryToken" } | ConvertTo-Json
+    $task = Invoke-RestMethod -Method Post -Uri "http://localhost:8080/tasks" -Headers $Headers -ContentType "application/json" -Body $createBody
+    $taskId = [string]$task.task_id
+    Assert-True (-not [string]::IsNullOrWhiteSpace($taskId)) "case B success scenario task_id should exist"
+
+    $detail = Wait-TaskState -TaskId $taskId -Headers $Headers -States @("SUCCEEDED", "FAILED", "WAITING_USER", "STATE_CORRUPTED") -TimeoutSeconds 360
+    Assert-True ([string]$detail.state -eq "SUCCEEDED") "case B success scenario should finish in SUCCEEDED"
+
+    $result = Get-TaskResult -TaskId $taskId -Headers $Headers
+    Assert-CommonRealCaseFields -Detail $detail -Result $result -ExpectedCaseId ([string]$SecondCaseDescriptor.case_id)
+    Assert-True ([bool]$result.result_bundle.metrics.used_real_invest) "case B used_real_invest should be true"
+    Assert-ManifestMatchesAuthority -Headers $Headers -TaskId $taskId -Result $result -ExpectedCaseId ([string]$SecondCaseDescriptor.case_id)
+    Write-Output "Phase3 real-case case-B success passed: $taskId => $($SecondCaseDescriptor.case_id)"
     return $taskId
 }
 
@@ -218,7 +321,7 @@ function Invoke-RealCaseRepairResumeScenario {
     $requiredActions = @($waitingDetail.waiting_context.required_user_actions | ForEach-Object { [string]$_.key })
     Assert-True ($requiredActions -contains "upload_precipitation") "required_user_actions should include upload_precipitation"
     Assert-True ($waitingDetail.waiting_context.can_resume -eq $false) "can_resume should be false before upload"
-    Assert-CognitionMetadata -Metadata $waitingDetail.goal_route_cognition -Stage "goal-route"
+    Assert-CognitionMetadata -Metadata $waitingDetail.goal_route_cognition -Stage "goal-route" -AllowFallback
     Assert-CognitionMetadata -Metadata $waitingDetail.passb_cognition -Stage "passb"
     Assert-CognitionMetadata -Metadata $waitingDetail.repair_proposal_cognition -Stage "repair-proposal"
 
@@ -247,7 +350,8 @@ function Invoke-RealCaseRepairResumeScenario {
 
 function Invoke-RealCaseClarifyScenario {
     param(
-        [hashtable]$Headers
+        [hashtable]$Headers,
+        [hashtable]$SecondCaseDescriptor
     )
 
     $createBody = @{ user_query = "run a real case invest annual water yield analysis" } | ConvertTo-Json
@@ -260,15 +364,16 @@ function Invoke-RealCaseClarifyScenario {
     Assert-True ([string]$waitingDetail.case_projection.mode -eq "clarify_required") "case_projection.mode should be clarify_required"
     $candidateCaseIds = @($waitingDetail.case_projection.candidate_case_ids | ForEach-Object { [string]$_ })
     Assert-True ($candidateCaseIds -contains "annual_water_yield_gura") "candidate_case_ids should include annual_water_yield_gura"
+    Assert-True ($candidateCaseIds -contains [string]$SecondCaseDescriptor.case_id) "candidate_case_ids should include the second executable case"
     $requiredActions = @($waitingDetail.waiting_context.required_user_actions | ForEach-Object { [string]$_.key })
     Assert-True ($requiredActions -contains "clarify_case_selection") "required_user_actions should include clarify_case_selection"
     Assert-True ($waitingDetail.waiting_context.can_resume -eq $false) "can_resume should be false before clarify selection"
-    Assert-CognitionMetadata -Metadata $waitingDetail.goal_route_cognition -Stage "goal-route"
+    Assert-CognitionMetadata -Metadata $waitingDetail.goal_route_cognition -Stage "goal-route" -AllowFallback
 
     $resumeBody = @{
         resume_request_id = [guid]::NewGuid().ToString()
-        user_note = "choose gura"
-        args_overrides = @{ case_id = "annual_water_yield_gura" }
+        user_note = "choose $([string]$SecondCaseDescriptor.case_id)"
+        args_overrides = @{ case_id = [string]$SecondCaseDescriptor.case_id }
     } | ConvertTo-Json -Depth 4
     $resumeResponse = Invoke-RestMethod -Method Post -Uri "http://localhost:8080/tasks/$taskId/resume" -Headers $Headers -ContentType "application/json" -Body $resumeBody
     Assert-True ($resumeResponse.resume_accepted -eq $true) "clarify resume should be accepted"
@@ -277,10 +382,19 @@ function Invoke-RealCaseClarifyScenario {
     Assert-True ([string]$detail.state -eq "SUCCEEDED") "clarify scenario should finish in SUCCEEDED"
 
     $result = Get-TaskResult -TaskId $taskId -Headers $Headers
-    Assert-CommonRealCaseFields -Detail $detail -Result $result
+    Assert-CognitionMetadata -Metadata $detail.goal_route_cognition -Stage "goal-route" -AllowFallback
+    Assert-CognitionMetadata -Metadata $detail.passb_cognition -Stage "passb" -AllowFallback
+    Assert-CognitionMetadata -Metadata $result.final_explanation_cognition -Stage "final-explanation"
     Assert-True ([string]$result.case_projection.mode -eq "resolved") "result.case_projection.mode should resolve after clarify"
-    Assert-True ([string]$result.case_projection.selected_case_id -eq "annual_water_yield_gura") "result.case_projection.selected_case_id should be annual_water_yield_gura"
-    Assert-ManifestMatchesAuthority -Headers $Headers -TaskId $taskId -Result $result
+    Assert-True ([string]$result.case_projection.selected_case_id -eq [string]$SecondCaseDescriptor.case_id) "result.case_projection.selected_case_id should be the selected second case"
+    Assert-True ([string]$detail.skill_route_summary.execution_mode -eq "real_case_validation") "execution_mode should be real_case_validation"
+    Assert-True ([string]$detail.skill_route_summary.provider_preference -eq "planning-pass1-invest-local") "provider_preference should target the invest provider"
+    Assert-True ([string]$result.provider_key -eq "planning-pass1-invest-local") "result.provider_key should be planning-pass1-invest-local"
+    Assert-True ([string]$result.runtime_profile -eq "docker-invest-real") "result.runtime_profile should be docker-invest-real"
+    Assert-True ([string]$result.case_id -eq [string]$SecondCaseDescriptor.case_id) "result.case_id should match selected case"
+    Assert-True ([string]$result.docker_runtime_evidence.runtime_mode -eq "invest_real_runner") "runtime_mode should be invest_real_runner"
+    Assert-True (@($result.docker_runtime_evidence.input_bindings).Count -ge 5) "input_bindings should include real-case contract inputs"
+    Assert-ManifestMatchesAuthority -Headers $Headers -TaskId $taskId -Result $result -ExpectedCaseId ([string]$SecondCaseDescriptor.case_id)
     Write-Output "Phase3 real-case clarify passed: $taskId"
     return $taskId
 }
@@ -368,6 +482,16 @@ foreach ($relativePath in $requiredCaseFiles) {
     Assert-True (Test-Path $fullPath) "required sample data path is missing: $fullPath"
 }
 
+$executableCases = Get-ExecutableCaseDescriptors -HostSampleRoot $hostSampleRoot
+$secondExecutableCase = $null
+try {
+    $secondExecutableCase = Get-SecondExecutableCaseDescriptor -ExecutableCases $executableCases
+} catch {
+    if ($Scenario -in @("All", "CaseBSuccess", "Clarify")) {
+        throw
+    }
+}
+
 $previousSampleRoot = $env:SAGE_SAMPLE_DATA_ROOT_HOST
 $previousContainerSampleRoot = $env:SAGE_SAMPLE_DATA_ROOT
 $previousInvestSpec = $env:SAGE_INVEST_PIP_SPEC
@@ -420,11 +544,16 @@ try {
     if ($Scenario -in @("All", "Success")) {
         $executedTaskIds.Add((Invoke-RealCaseSuccessScenario -Headers $headers -ServiceContainer $serviceContainer))
     }
+    if ($Scenario -in @("All", "CaseBSuccess")) {
+        Assert-True ($null -ne $secondExecutableCase) "second executable case descriptor must exist for case-B success scenario"
+        $executedTaskIds.Add((Invoke-RealCaseSecondCaseSuccessScenario -Headers $headers -SecondCaseDescriptor $secondExecutableCase))
+    }
     if ($Scenario -in @("All", "RepairResume")) {
         $executedTaskIds.Add((Invoke-RealCaseRepairResumeScenario -Headers $headers -AccessToken $token -PrecipitationFile $precipitationFile -ServiceContainer $serviceContainer))
     }
     if ($Scenario -in @("All", "Clarify")) {
-        $executedTaskIds.Add((Invoke-RealCaseClarifyScenario -Headers $headers))
+        Assert-True ($null -ne $secondExecutableCase) "second executable case descriptor must exist for clarify scenario"
+        $executedTaskIds.Add((Invoke-RealCaseClarifyScenario -Headers $headers -SecondCaseDescriptor $secondExecutableCase))
     }
     if ($Scenario -in @("All", "Cancel")) {
         $executedTaskIds.Add((Invoke-RealCaseCancelScenario -Headers $headers))

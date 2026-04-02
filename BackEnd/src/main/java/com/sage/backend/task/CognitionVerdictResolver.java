@@ -39,9 +39,16 @@ final class CognitionVerdictResolver {
         String failureCode = metadata.path("failure_code").asText("");
         boolean fallbackUsed = metadata.path("fallback_used").asBoolean(false);
         boolean schemaValid = !metadata.path("schema_valid").isBoolean() || metadata.path("schema_valid").asBoolean(true);
+        boolean acceptableFallback = "glm".equalsIgnoreCase(provider)
+                && fallbackUsed
+                && schemaValid
+                && "LLM_FALLBACK".equalsIgnoreCase(status);
 
         if ("deterministic".equalsIgnoreCase(provider)) {
             return "DETERMINISTIC_BASELINE";
+        }
+        if (acceptableFallback) {
+            return "LLM_FALLBACK";
         }
         if (fallbackUsed || "COGNITION_POLICY_VIOLATION".equalsIgnoreCase(status)) {
             return "LLM_POLICY_VIOLATION";

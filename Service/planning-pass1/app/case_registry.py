@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 
 REGISTRY_VERSION = "water_yield_case_registry_v1"
+_EXTERNAL_REGISTRY_ENV = "SAGE_WATER_YIELD_CASE_REGISTRY_FILE"
+_DEFAULT_EXTERNAL_REGISTRY = "/sample-data/case-descriptors/water_yield_cases.json"
 
 
 @dataclass(frozen=True)
@@ -132,26 +136,103 @@ _WATER_YIELD_CASES: tuple[WaterYieldCaseDescriptor, ...] = (
 _CASE_BY_ID = {item.case_id: item for item in _WATER_YIELD_CASES}
 
 
+def _load_external_cases() -> list[WaterYieldCaseDescriptor]:
+    registry_path = os.getenv(_EXTERNAL_REGISTRY_ENV, _DEFAULT_EXTERNAL_REGISTRY).strip()
+    if not registry_path:
+        return []
+    candidate = Path(registry_path)
+    if not candidate.exists() or not candidate.is_file():
+        return []
+    try:
+        payload = json.loads(candidate.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    raw_cases = payload.get("cases") if isinstance(payload, dict) else payload
+    if not isinstance(raw_cases, list):
+        return []
+
+    cases: list[WaterYieldCaseDescriptor] = []
+    for item in raw_cases:
+        descriptor = _deserialize_case_descriptor(item)
+        if descriptor is not None:
+            cases.append(descriptor)
+    return cases
+
+
+def _deserialize_case_descriptor(raw: object) -> WaterYieldCaseDescriptor | None:
+    if not isinstance(raw, dict):
+        return None
+
+    case_id = str(raw.get("case_id") or "").strip()
+    display_name = str(raw.get("display_name") or case_id).strip()
+    provider_key = str(raw.get("provider_key") or "").strip()
+    runtime_profile = str(raw.get("runtime_profile") or "").strip()
+    sample_root = str(raw.get("sample_root") or "").strip()
+    descriptor_version = str(raw.get("descriptor_version") or "").strip()
+    if not all((case_id, display_name, provider_key, runtime_profile, sample_root, descriptor_version)):
+        return None
+
+    aliases = tuple(str(item).strip() for item in (raw.get("aliases") or []) if str(item).strip())
+    intent_signals = tuple(str(item).strip() for item in (raw.get("intent_signals") or []) if str(item).strip())
+    required_roles = tuple(str(item).strip() for item in (raw.get("required_roles") or []) if str(item).strip())
+    default_args = raw.get("default_args") or {}
+    if not isinstance(default_args, dict):
+        return None
+
+    executable = bool(raw.get("executable"))
+    return WaterYieldCaseDescriptor(
+        case_id=case_id,
+        display_name=display_name,
+        aliases=aliases,
+        intent_signals=intent_signals,
+        required_roles=required_roles,
+        provider_key=provider_key,
+        runtime_profile=runtime_profile,
+        sample_root=sample_root,
+        default_args=default_args,
+        descriptor_version=descriptor_version,
+        executable=executable,
+    )
+
+
+def _merged_cases(known_case_ids: list[str] | None = None) -> list[WaterYieldCaseDescriptor]:
+    merged: dict[str, WaterYieldCaseDescriptor] = {item.case_id: item for item in _WATER_YIELD_CASES}
+    for item in _load_external_cases():
+        merged[item.case_id] = item
+    ordered_cases = list(merged.values())
+    if not known_case_ids:
+        return ordered_cases
+    filtered: list[WaterYieldCaseDescriptor] = []
+    known_ids = {str(case_id).strip() for case_id in known_case_ids if str(case_id).strip()}
+    for descriptor in ordered_cases:
+        if descriptor.case_id in known_ids:
+            filtered.append(descriptor)
+    return filtered or ordered_cases
+
+
+def list_executable_cases(known_case_ids: list[str] | None = None) -> list[WaterYieldCaseDescriptor]:
+    return [descriptor for descriptor in list_cases(known_case_ids) if descriptor.executable]
+
+
 def list_case_ids(known_case_ids: list[str] | None = None) -> list[str]:
     cases = list_cases(known_case_ids)
     return [case.case_id for case in cases]
 
 
 def list_cases(known_case_ids: list[str] | None = None) -> list[WaterYieldCaseDescriptor]:
-    if not known_case_ids:
-        return list(_WATER_YIELD_CASES)
-    filtered: list[WaterYieldCaseDescriptor] = []
-    for case_id in known_case_ids:
-        descriptor = _CASE_BY_ID.get(str(case_id).strip())
-        if descriptor is not None:
-            filtered.append(descriptor)
-    return filtered or list(_WATER_YIELD_CASES)
+    return _merged_cases(known_case_ids)
 
 
 def get_case(case_id: str | None) -> WaterYieldCaseDescriptor | None:
     if case_id is None:
         return None
-    return _CASE_BY_ID.get(case_id.strip())
+    normalized = case_id.strip()
+    if not normalized:
+        return None
+    for descriptor in _merged_cases():
+        if descriptor.case_id == normalized:
+            return descriptor
+    return None
 
 
 def match_cases(lower_query: str, known_case_ids: list[str] | None = None) -> list[WaterYieldCaseDescriptor]:

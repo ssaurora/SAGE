@@ -2363,14 +2363,24 @@ public class TaskService {
         boolean schemaValid = !metadataNode.path("schema_valid").isBoolean() || metadataNode.path("schema_valid").asBoolean(true);
         String status = metadataNode.path("status").asText("");
         String failureCode = metadataNode.path("failure_code").asText("");
-        if (!"glm".equalsIgnoreCase(provider) || fallbackUsed) {
+        boolean acceptableFallback = "glm".equalsIgnoreCase(provider)
+                && fallbackUsed
+                && schemaValid
+                && "LLM_FALLBACK".equalsIgnoreCase(status);
+        if (!"glm".equalsIgnoreCase(provider)) {
             return "COGNITION_POLICY_VIOLATION";
         }
-        if (!failureCode.isBlank()) {
+        if (fallbackUsed && !acceptableFallback) {
+            return "COGNITION_POLICY_VIOLATION";
+        }
+        if (!failureCode.isBlank() && !acceptableFallback) {
             return failureCode;
         }
         if (!schemaValid) {
             return "COGNITION_SCHEMA_INVALID";
+        }
+        if (acceptableFallback) {
+            return null;
         }
         if ("COGNITION_TIMEOUT".equalsIgnoreCase(status)) {
             return "COGNITION_TIMEOUT";

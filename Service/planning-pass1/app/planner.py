@@ -11,6 +11,7 @@ from app.case_registry import (
     get_case,
     list_case_ids,
     list_cases,
+    list_executable_cases,
     match_cases,
 )
 from app.cognition_support import call_glm_json
@@ -90,7 +91,11 @@ def build_goal_route_response(payload: CognitionGoalRouteRequest) -> CognitionGo
         except Exception as exc:
             if llm_required:
                 failure_code, failure_message = _classify_cognition_failure(exc, "goal-route")
-                return _build_unavailable_goal_route_response(payload, provider="glm", failure_code=failure_code, failure_message=failure_message)
+                return _build_glm_goal_route_fallback_response(
+                    payload,
+                    failure_code=failure_code,
+                    failure_message=failure_message,
+                )
     elif llm_required:
         return _build_unavailable_goal_route_response(
             payload,
@@ -118,7 +123,11 @@ def build_passb_response(payload: CognitionPassBRequest) -> CognitionPassBRespon
         except Exception as exc:
             if llm_required:
                 failure_code, failure_message = _classify_cognition_failure(exc, "passb")
-                return _build_unavailable_passb_response(payload, provider="glm", failure_code=failure_code, failure_message=failure_message)
+                return _build_glm_passb_fallback_response(
+                    payload,
+                    failure_code=failure_code,
+                    failure_message=failure_message,
+                )
     elif llm_required:
         return _build_unavailable_passb_response(
             payload,
@@ -197,20 +206,24 @@ def _build_glm_goal_route_response(payload: CognitionGoalRouteRequest) -> Cognit
         "Only capability_key=water_yield and selected_template=water_yield_v1 are allowed when resolved. "
         "Never emit file paths, workspace arguments, or execution-only parameters."
     )
-    parsed, metadata = call_glm_json(
-        system_prompt,
-        {
-            "task_id": payload.task_id,
-            "user_query": payload.user_query,
-            "user_note": payload.user_note,
-            "allowed_capabilities": payload.allowed_capabilities or ["water_yield"],
-            "allowed_templates": payload.allowed_templates or ["water_yield_v1"],
-            "known_cases": payload.known_cases or list_case_ids(),
-        },
-        temperature=0.1,
-        max_tokens=1400,
-        timeout_ms=30000,
-    )
+    request_payload = {
+        "task_id": payload.task_id,
+        "user_query": payload.user_query,
+        "user_note": payload.user_note,
+        "allowed_capabilities": payload.allowed_capabilities or ["water_yield"],
+        "allowed_templates": payload.allowed_templates or ["water_yield_v1"],
+        "known_cases": payload.known_cases or list_case_ids(),
+    }
+    try:
+        parsed, metadata = call_glm_json(
+            system_prompt,
+            request_payload,
+            temperature=0.1,
+            max_tokens=1400,
+            timeout_ms=30000,
+        )
+    except Exception:
+        parsed, metadata = _build_glm_goal_route_retry_response(payload)
     status = str(parsed.get("planning_intent_status") or "").strip().lower()
     if status not in {"resolved", "ambiguous", "unsupported"}:
         raise ValueError("invalid planning_intent_status")
@@ -286,6 +299,32 @@ def _build_glm_goal_route_response(payload: CognitionGoalRouteRequest) -> Cognit
     )
 
 
+def _build_glm_goal_route_retry_response(
+    payload: CognitionGoalRouteRequest,
+) -> tuple[dict[str, object], dict[str, object]]:
+    retry_prompt = (
+        "Return ONLY raw JSON. No markdown. No reasoning. "
+        "Required keys: planning_intent_status, capability_key, selected_template, confidence, "
+        "goal_type, analysis_kind, entities, execution_mode, provider_preference, runtime_profile_preference, notes. "
+        "planning_intent_status must be one of resolved, ambiguous, unsupported. "
+        "Only capability_key=water_yield and selected_template=water_yield_v1 are allowed when resolved."
+    )
+    retry_payload = {
+        "user_query": payload.user_query,
+        "user_note": payload.user_note,
+        "allowed_capabilities": payload.allowed_capabilities or ["water_yield"],
+        "allowed_templates": payload.allowed_templates or ["water_yield_v1"],
+        "known_cases": payload.known_cases or list_case_ids(),
+    }
+    return call_glm_json(
+        retry_prompt,
+        retry_payload,
+        temperature=0.0,
+        max_tokens=320,
+        timeout_ms=30000,
+    )
+
+
 def _build_unavailable_goal_route_response(
     payload: CognitionGoalRouteRequest,
     *,
@@ -344,6 +383,32 @@ def _build_unavailable_goal_route_response(
             failure_message=failure_message,
         ),
     )
+
+
+def _build_glm_goal_route_fallback_response(
+    payload: CognitionGoalRouteRequest,
+    *,
+    failure_code: str,
+    failure_message: str,
+) -> CognitionGoalRouteResponse:
+    fallback = _build_deterministic_goal_route_response(payload, fallback_used=True)
+    fallback.cognition_metadata = CognitionMetadata(
+        source="glm_fallback_projection",
+        provider="glm",
+        model=os.getenv("SAGE_GLM_MODEL", "glm-4.7"),
+        prompt_version="goal_route_v1",
+        fallback_used=True,
+        schema_valid=True,
+        response_id=None,
+        status="LLM_FALLBACK",
+        failure_code=failure_code,
+        failure_message=failure_message,
+    )
+    summary = dict(fallback.decision_summary or {})
+    summary["strategy"] = "glm_fallback_projection"
+    summary["fallback_reason"] = failure_message
+    fallback.decision_summary = summary
+    return fallback
 
 
 def _build_deterministic_passb_response(
@@ -611,6 +676,35 @@ def _build_unavailable_passb_response(
     )
 
 
+def _build_glm_passb_fallback_response(
+    payload: CognitionPassBRequest,
+    *,
+    failure_code: str,
+    failure_message: str,
+) -> CognitionPassBResponse:
+    fallback = _build_deterministic_passb_response(payload, fallback_used=True)
+    fallback.cognition_metadata = CognitionMetadata(
+        source="glm_fallback_projection",
+        provider="glm",
+        model=os.getenv("SAGE_GLM_MODEL", "glm-4.7"),
+        prompt_version="passb_v1",
+        fallback_used=True,
+        schema_valid=True,
+        response_id=None,
+        status="LLM_FALLBACK",
+        failure_code=failure_code,
+        failure_message=failure_message,
+    )
+    fallback.decision_summary = DecisionSummary(
+        strategy="glm_fallback_projection",
+        assumptions=[
+            failure_message,
+            *fallback.case_projection.decision_basis,
+        ],
+    )
+    return fallback
+
+
 def _build_known_case_cached_passb_response(
     payload: CognitionPassBRequest,
     lower_query: str,
@@ -726,7 +820,9 @@ def _resolve_case_projection(
     force_mode: str | None = None,
 ) -> CaseProjection:
     cases = list_cases(known_case_ids)
-    candidate_case_ids = [descriptor.case_id for descriptor in cases]
+    executable_cases = list_executable_cases(known_case_ids)
+    candidate_pool = executable_cases or cases
+    candidate_case_ids = [descriptor.case_id for descriptor in candidate_pool]
     explicit_descriptor = get_case(explicit_case_id) if explicit_case_id else None
     matched_cases = match_cases(lower_query, known_case_ids)
     if force_mode == "unavailable":
@@ -780,10 +876,12 @@ def _resolve_case_projection(
             registry_version=REGISTRY_VERSION,
         )
     if len(matched_cases) > 1:
+        matched_executable_cases = [descriptor for descriptor in matched_cases if descriptor.executable]
+        ambiguity_candidates = matched_executable_cases or matched_cases
         return CaseProjection(
             mode="clarify_required",
             selected_case_id=None,
-            candidate_case_ids=[descriptor.case_id for descriptor in matched_cases],
+            candidate_case_ids=[descriptor.case_id for descriptor in ambiguity_candidates],
             clarify_prompt="Multiple registered annual water yield cases match this request. Choose one case to continue.",
             decision_basis=["The query matched more than one governed case alias or intent signal."],
             registry_version=REGISTRY_VERSION,
@@ -893,7 +991,7 @@ def _normalize_real_case_preference(
 def _is_real_case_requested(lower_query: str) -> bool:
     return any(
         token in lower_query
-        for token in ("real case", "real_case", "invest", "gura", "annual_water_yield_gura", "blue nile", "upper nile")
+        for token in ("real case", "real_case", "invest")
     )
 
 

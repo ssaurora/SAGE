@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 
@@ -97,6 +98,54 @@ def _materialize_args_draft(pass1_result: dict, passb_result: dict, task_id: str
             args_draft[value_arg_key] = mapping["default_value"]
 
     passb_result["args_draft"] = args_draft
+
+
+def _write_external_case_registry(tmp_path: Path) -> Path:
+    registry_path = tmp_path / "water_yield_cases.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "cases": [
+                    {
+                        "case_id": "annual_water_yield_upper_tana",
+                        "display_name": "Annual Water Yield - Upper Tana",
+                        "aliases": ["upper tana", "sagana", "annual water yield upper tana"],
+                        "intent_signals": ["kenya upper tana", "upper tana catchment"],
+                        "required_roles": [
+                            "watersheds",
+                            "lulc",
+                            "biophysical_table",
+                            "precipitation",
+                            "eto",
+                        ],
+                        "provider_key": "planning-pass1-invest-local",
+                        "runtime_profile": "docker-invest-real",
+                        "sample_root": "/sample-data/Annual_Water_Yield_Upper_Tana",
+                        "default_args": {
+                            "results_suffix": "upper_tana",
+                            "seasonality_constant": 7.0,
+                            "n_workers": 1,
+                            "watersheds": "watershed_upper_tana.shp",
+                            "sub_watersheds": "subwatersheds_upper_tana.shp",
+                            "lulc": "land_use_upper_tana.tif",
+                            "biophysical_table": "biophysical_table_upper_tana.csv",
+                            "precipitation": "precipitation_upper_tana.tif",
+                            "eto": "reference_ET_upper_tana.tif",
+                            "depth_to_root_restricting_layer": "depth_to_root_restricting_layer_upper_tana.tif",
+                            "plant_available_water_content": "plant_available_water_fraction_upper_tana.tif",
+                            "invest_datastack": "annual_water_yield_upper_tana.invs.json",
+                        },
+                        "descriptor_version": "annual_water_yield_upper_tana_v1",
+                        "executable": True,
+                    }
+                ]
+            },
+            ensure_ascii=True,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return registry_path
 
 
 def test_planning_pass1_response_schema(monkeypatch, tmp_path: Path) -> None:
@@ -529,7 +578,7 @@ def test_goal_route_real_case_query_requires_clarify_when_case_is_not_explicit(m
     assert body["planning_intent_status"] == "resolved"
     assert body["case_projection"]["mode"] == "clarify_required"
     assert "annual_water_yield_gura" in body["case_projection"]["candidate_case_ids"]
-    assert "annual_water_yield_blue_nile_fixture" in body["case_projection"]["candidate_case_ids"]
+    assert "annual_water_yield_blue_nile_fixture" not in body["case_projection"]["candidate_case_ids"]
 
 
 def test_passb_real_case_query_requires_clarify_without_executable_args(monkeypatch, tmp_path: Path) -> None:
@@ -571,6 +620,82 @@ def test_passb_real_case_query_requires_clarify_without_executable_args(monkeypa
     assert body["case_projection"]["mode"] == "clarify_required"
     assert body["args_draft"] == {}
     assert body["slot_bindings"] == []
+
+
+def test_goal_route_real_case_query_returns_two_executable_candidates_from_external_registry(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path / "workspace"))
+    monkeypatch.delenv("SAGE_COGNITION_GOAL_ROUTE_PROVIDER", raising=False)
+    monkeypatch.setenv("SAGE_WATER_YIELD_CASE_REGISTRY_FILE", str(_write_external_case_registry(tmp_path)))
+    from app.main import app
+
+    client = TestClient(app)
+    response = client.post(
+        "/cognition/goal-route",
+        json={
+            "task_id": "task_case_clarify_goal_route_two_exec",
+            "user_query": "run a real case invest annual water yield analysis for gura or upper tana",
+            "state_version": 1,
+            "allowed_capabilities": ["water_yield"],
+            "allowed_templates": ["water_yield_v1"],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["case_projection"]["mode"] == "clarify_required"
+    assert body["case_projection"]["candidate_case_ids"] == [
+        "annual_water_yield_gura",
+        "annual_water_yield_upper_tana",
+    ]
+
+
+def test_passb_real_case_query_resolves_external_executable_case_without_case_specific_branch(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path / "workspace"))
+    monkeypatch.delenv("SAGE_COGNITION_PASSB_PROVIDER", raising=False)
+    monkeypatch.setenv("SAGE_WATER_YIELD_CASE_REGISTRY_FILE", str(_write_external_case_registry(tmp_path)))
+    from app.main import app
+
+    client = TestClient(app)
+    pass1_result = client.post(
+        "/planning/pass1",
+        json={
+            "task_id": "task_upper_tana_resolve",
+            "user_query": "run a real case invest annual water yield analysis for upper tana",
+            "state_version": 1,
+        },
+    ).json()
+    goal_route_result = client.post(
+        "/cognition/goal-route",
+        json={
+            "task_id": "task_upper_tana_resolve",
+            "user_query": "run a real case invest annual water yield analysis for upper tana",
+            "state_version": 2,
+            "allowed_capabilities": ["water_yield"],
+            "allowed_templates": ["water_yield_v1"],
+        },
+    ).json()
+
+    response = client.post(
+        "/cognition/passb",
+        json={
+            "task_id": "task_upper_tana_resolve",
+            "user_query": "run a real case invest annual water yield analysis for upper tana",
+            "state_version": 3,
+            "pass1_result": pass1_result,
+            "goal_parse": goal_route_result["goal_parse"],
+            "skill_route": goal_route_result["skill_route"],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["binding_status"] == "resolved"
+    assert body["case_projection"]["mode"] == "resolved"
+    assert body["case_projection"]["selected_case_id"] == "annual_water_yield_upper_tana"
+    assert body["args_draft"]["case_id"] == "annual_water_yield_upper_tana"
+    assert body["args_draft"]["case_descriptor_version"] == "annual_water_yield_upper_tana_v1"
+    assert body["args_draft"]["watersheds_path"].endswith("/Annual_Water_Yield_Upper_Tana/watershed_upper_tana.shp")
+    assert body["args_draft"]["invest_datastack_path"].endswith("/Annual_Water_Yield_Upper_Tana/annual_water_yield_upper_tana.invs.json")
 
 
 def test_passb_real_case_query_accepts_case_override_for_clarify_resume(monkeypatch, tmp_path: Path) -> None:
@@ -615,6 +740,37 @@ def test_passb_real_case_query_accepts_case_override_for_clarify_resume(monkeypa
     assert body["case_projection"]["selected_case_id"] == "annual_water_yield_gura"
     assert body["args_draft"]["case_descriptor_version"] == "annual_water_yield_gura_v1"
     assert body["args_draft"]["runtime_mode"] == "invest_real_runner"
+
+
+def test_job_fails_with_case_fact_mismatch_before_success(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path / "workspace"))
+    from app.main import app
+
+    client = TestClient(app)
+    pass1_result, passb_result, _, pass2_result = _build_chain_payload(client, "task_case_fact_mismatch")
+    passb_result["args_draft"]["precipitation_path"] = "/sample-data/Annual_Water_Yield/not_the_governed_precipitation.tif"
+
+    create_job_response = client.post(
+        "/jobs",
+        json=_build_create_job_payload("task_case_fact_mismatch", pass1_result, passb_result, pass2_result),
+    )
+    assert create_job_response.status_code == 200
+    job_id = create_job_response.json()["job_id"]
+
+    final_status = None
+    for _ in range(40):
+        status_response = client.get(f"/jobs/{job_id}")
+        assert status_response.status_code == 200
+        final_status = status_response.json()
+        if final_status["job_state"] in ("SUCCEEDED", "FAILED", "CANCELLED"):
+            break
+        time.sleep(0.2)
+
+    assert final_status is not None
+    assert final_status["job_state"] == "FAILED"
+    assert final_status["failure_summary"] is not None
+    assert final_status["failure_summary"]["failure_code"] == "CASE_FACT_MISMATCH"
+    assert "precipitation_path" in final_status["failure_summary"]["failure_message"]
 
 
 def test_job_can_simulate_promotion_failure_artifact_catalog(monkeypatch, tmp_path: Path) -> None:

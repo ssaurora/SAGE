@@ -11,9 +11,10 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from app.redis_runtime import RedisRuntimeCoordinator
+from app.case_registry import get_case
 from app.schemas import (
     ArtifactCatalog,
     ArtifactMeta,
@@ -81,6 +82,7 @@ class RuntimeAssertionViolation(RuntimeError):
     message: str
     repairable: bool
     details: dict[str, str | int | float | bool | None]
+    failure_code: str = "ASSERTION_FAILED"
 
     def __str__(self) -> str:
         return self.message
@@ -200,6 +202,7 @@ class JobRuntimeManager:
             )
             self._attach_workspace(job_id, context)
             self._write_audit_input(context, request, job_id)
+            self._validate_case_contract_consistency(request)
             self._evaluate_runtime_assertions(request, context)
             self._launch_runtime_process(job_id, request, context)
 
@@ -235,9 +238,9 @@ class JobRuntimeManager:
             error_code = "JOB_RUNTIME_ERROR"
             failure = FailureSummary(failure_code="JOB_RUNTIME_ERROR", failure_message=str(exc), created_at=datetime.now(UTC))
             if isinstance(exc, RuntimeAssertionViolation):
-                error_code = "ASSERTION_FAILED"
+                error_code = exc.failure_code or "ASSERTION_FAILED"
                 failure = FailureSummary(
-                    failure_code="ASSERTION_FAILED",
+                    failure_code=exc.failure_code or "ASSERTION_FAILED",
                     failure_message=exc.message,
                     created_at=datetime.now(UTC),
                     assertion_id=exc.assertion_id,
@@ -247,6 +250,141 @@ class JobRuntimeManager:
                 )
             error = ErrorObject(error_code=error_code, message=str(exc), created_at=datetime.now(UTC))
             self._finish_failed(job_id, error, failure)
+
+    def _validate_case_contract_consistency(self, request: CreateJobRequest) -> None:
+        case_id = self._resolve_case_id(request)
+        if not case_id:
+            return
+        descriptor = get_case(case_id)
+        if descriptor is None or not descriptor.executable:
+            return
+
+        descriptor_version = str(request.args_draft.get("case_descriptor_version") or "").strip()
+        expected_version = descriptor.descriptor_version
+        if descriptor_version != expected_version:
+            raise RuntimeAssertionViolation(
+                assertion_id="assert_case_descriptor_version",
+                node_id="load_inputs",
+                message="case_descriptor_version does not match the selected governed case.",
+                repairable=False,
+                details={
+                    "case_id": case_id,
+                    "expected_case_descriptor_version": expected_version,
+                    "actual_case_descriptor_version": descriptor_version or None,
+                },
+                failure_code="CASE_FACT_MISMATCH",
+            )
+
+        sample_data_root = str(request.args_draft.get("sample_data_root") or "").strip()
+        if sample_data_root and sample_data_root != descriptor.sample_root:
+            raise RuntimeAssertionViolation(
+                assertion_id="assert_sample_data_root",
+                node_id="load_inputs",
+                message="sample_data_root does not match the selected governed case.",
+                repairable=False,
+                details={
+                    "case_id": case_id,
+                    "expected_sample_data_root": descriptor.sample_root,
+                    "actual_sample_data_root": sample_data_root,
+                },
+                failure_code="CASE_FACT_MISMATCH",
+            )
+
+        expected_paths = self._expected_case_paths(descriptor)
+        if str(request.case_id or "").strip() and str(request.case_id).strip() != case_id:
+            raise RuntimeAssertionViolation(
+                assertion_id="assert_request_case_id",
+                node_id="load_inputs",
+                message="request.case_id does not match args_draft.case_id.",
+                repairable=False,
+                details={
+                    "expected_case_id": case_id,
+                    "actual_case_id": str(request.case_id).strip(),
+                },
+                failure_code="CASE_FACT_MISMATCH",
+            )
+
+        for arg_key, expected_path in expected_paths.items():
+            actual_path = str(request.args_draft.get(arg_key) or "").strip()
+            if not actual_path:
+                continue
+            if actual_path != expected_path:
+                raise RuntimeAssertionViolation(
+                    assertion_id=f"assert_case_path_{arg_key}",
+                    node_id="load_inputs",
+                    message=f"{arg_key} does not match the selected governed case contract.",
+                    repairable=False,
+                    details={
+                        "case_id": case_id,
+                        "arg_key": arg_key,
+                        "expected_path": expected_path,
+                        "actual_path": actual_path,
+                    },
+                    failure_code="CASE_FACT_MISMATCH",
+                )
+
+        provider_input_bindings = self._build_provider_input_bindings(request)
+        expected_path_by_role = self._expected_case_paths_by_role(descriptor)
+        for binding in provider_input_bindings:
+            expected_path = expected_path_by_role.get(binding.role_name)
+            if not expected_path:
+                continue
+            actual_path = str(binding.provider_input_path or "").strip()
+            if not actual_path:
+                continue
+            if actual_path != expected_path:
+                raise RuntimeAssertionViolation(
+                    assertion_id=f"assert_provider_input_{binding.role_name}",
+                    node_id="load_inputs",
+                    message=f"provider input path for role '{binding.role_name}' does not match the selected governed case.",
+                    repairable=False,
+                    details={
+                        "case_id": case_id,
+                        "role_name": binding.role_name,
+                        "expected_provider_input_path": expected_path,
+                        "actual_provider_input_path": actual_path,
+                    },
+                    failure_code="CASE_FACT_MISMATCH",
+                )
+
+    def _expected_case_paths(self, descriptor) -> dict[str, str]:
+        path_map = {
+            "watersheds": "watersheds_path",
+            "sub_watersheds": "sub_watersheds_path",
+            "lulc": "lulc_path",
+            "biophysical_table": "biophysical_table_path",
+            "precipitation": "precipitation_path",
+            "eto": "eto_path",
+            "depth_to_root_restricting_layer": "depth_to_root_restricting_layer_path",
+            "plant_available_water_content": "plant_available_water_content_path",
+            "invest_datastack": "invest_datastack_path",
+            "demand_table": "demand_table_path",
+            "valuation_table": "valuation_table_path",
+        }
+        expected: dict[str, str] = {}
+        for logical_name, arg_key in path_map.items():
+            file_name = descriptor.default_args.get(logical_name)
+            if isinstance(file_name, str) and file_name.strip():
+                expected[arg_key] = str(PurePosixPath(descriptor.sample_root) / file_name)
+        return expected
+
+    def _expected_case_paths_by_role(self, descriptor) -> dict[str, str]:
+        role_to_arg = {
+            "watersheds": "watersheds_path",
+            "sub_watersheds": "sub_watersheds_path",
+            "lulc": "lulc_path",
+            "biophysical_table": "biophysical_table_path",
+            "precipitation": "precipitation_path",
+            "eto": "eto_path",
+            "depth_to_root_restricting_layer": "depth_to_root_restricting_layer_path",
+            "plant_available_water_content": "plant_available_water_content_path",
+        }
+        expected_paths = self._expected_case_paths(descriptor)
+        return {
+            role_name: expected_paths[arg_key]
+            for role_name, arg_key in role_to_arg.items()
+            if arg_key in expected_paths
+        }
 
     def _collect_runtime_outputs(
         self,
