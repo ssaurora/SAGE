@@ -94,6 +94,15 @@ export type CognitionMetadataDto = {
   failure_message?: string | null;
 };
 
+export type CaseProjectionDto = {
+  mode?: "resolved" | "clarify_required" | "unavailable" | string;
+  selected_case_id?: string | null;
+  candidate_case_ids?: string[];
+  clarify_prompt?: string | null;
+  decision_basis?: string[];
+  registry_version?: string;
+};
+
 export function getMe(): Promise<MeResponse> {
   return apiFetch<MeResponse>("/auth/me", { method: "GET", withAuth: true });
 }
@@ -147,6 +156,7 @@ export type TaskDetailResponse = {
   blocked_mutations?: string[];
   assembly_blocked?: boolean;
   cognition_verdict?: string;
+  case_projection?: CaseProjectionDto;
   goal_route_cognition?: CognitionMetadataDto;
   goal_route_output?: Record<string, unknown>;
   passb_cognition?: CognitionMetadataDto;
@@ -330,6 +340,7 @@ export type TaskManifestResponse = {
   blocked_mutations?: string[];
   assembly_blocked?: boolean;
   cognition_verdict?: string;
+  case_projection?: CaseProjectionDto;
   goal_route_cognition?: CognitionMetadataDto;
   goal_route_output?: Record<string, unknown>;
   passb_cognition?: CognitionMetadataDto;
@@ -463,6 +474,7 @@ export type TaskResultResponse = {
   blocked_mutations?: string[];
   assembly_blocked?: boolean;
   cognition_verdict?: string;
+  case_projection?: CaseProjectionDto;
   goal_route_cognition?: CognitionMetadataDto;
   goal_route_output?: Record<string, unknown>;
   passb_cognition?: CognitionMetadataDto;
@@ -516,6 +528,7 @@ export type TaskResultResponse = {
     provider_key?: string;
     runtime_profile?: string;
     case_id?: string;
+    case_descriptor_version?: string;
     contract_mode?: string;
     runtime_mode?: string;
     input_bindings?: {

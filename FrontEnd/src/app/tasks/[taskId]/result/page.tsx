@@ -104,6 +104,33 @@ function StringList({ values, emptyText }: { values?: string[]; emptyText: strin
   );
 }
 
+function CaseProjectionPanel({
+  projection,
+}: {
+  projection?: TaskResultResponse["case_projection"];
+}) {
+  if (!projection) {
+    return <p className="muted">No governed case projection available.</p>;
+  }
+
+  return (
+    <>
+      <div className="kv-grid">
+        <div className="kv-item"><span className="kv-key">mode</span><span className="kv-value">{projection.mode ?? "-"}</span></div>
+        <div className="kv-item"><span className="kv-key">selected_case_id</span><span className="kv-value">{projection.selected_case_id ?? "-"}</span></div>
+        <div className="kv-item"><span className="kv-key">candidate_count</span><span className="kv-value">{formatValue(projection.candidate_case_ids?.length ?? 0)}</span></div>
+        <div className="kv-item"><span className="kv-key">registry_version</span><span className="kv-value">{projection.registry_version ?? "-"}</span></div>
+      </div>
+      <h3>Clarify Prompt</h3>
+      <p>{projection.clarify_prompt ?? "-"}</p>
+      <h3>Candidate Cases</h3>
+      <StringList values={projection.candidate_case_ids} emptyText="No candidate cases." />
+      <h3>Decision Basis</h3>
+      <StringList values={projection.decision_basis} emptyText="No decision basis recorded." />
+    </>
+  );
+}
+
 function GoalRouteReadablePanel({ payload }: { payload?: Record<string, unknown> | null }) {
   const goalParse = asRecord(payload?.goal_parse);
   const skillRoute = asRecord(payload?.skill_route);
@@ -640,16 +667,20 @@ export default function TaskResultPage() {
   const isFailure = result?.task_state === "FAILED" || result?.task_state === "CANCELLED";
 
   return (
-    <main className="container">
-      <div className="card">
+    <main className="container page-shell">
+      <div className="card hero-card">
         <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
+            <span className="hero-eyebrow">Execution Outcome</span>
             <h1>Task Result</h1>
-            <p className="muted">task_id: {taskId}</p>
-            <p className="muted">job_id: {result?.job_id ?? "-"}</p>
-            <p className="muted">provider_key: {result?.provider_key ?? runtimeEvidence?.provider_key ?? "-"}</p>
-            <p className="muted">runtime_profile: {result?.runtime_profile ?? runtimeEvidence?.runtime_profile ?? "-"}</p>
-            <p className="muted">case_id: {result?.case_id ?? runtimeEvidence?.case_id ?? "-"}</p>
+            <p className="muted">Review the governed case projection, runtime evidence, outputs, and user-facing explanation for this execution.</p>
+            <div className="hero-meta">
+              <span className="meta-chip"><strong>task_id</strong>{taskId}</span>
+              <span className="meta-chip"><strong>job_id</strong>{result?.job_id ?? "-"}</span>
+              <span className="meta-chip"><strong>provider</strong>{result?.provider_key ?? runtimeEvidence?.provider_key ?? "-"}</span>
+              <span className="meta-chip"><strong>runtime</strong>{result?.runtime_profile ?? runtimeEvidence?.runtime_profile ?? "-"}</span>
+              <span className="meta-chip"><strong>case_id</strong>{result?.case_id ?? runtimeEvidence?.case_id ?? "-"}</span>
+            </div>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <span className="status">task {result?.task_state ?? "-"}</span>
@@ -657,7 +688,7 @@ export default function TaskResultPage() {
           </div>
         </div>
 
-        <div className="row" style={{ marginTop: 12 }}>
+        <div className="action-row">
           <Link href={`/tasks/${taskId}`}>
             <button>Back to Detail</button>
           </Link>
@@ -673,34 +704,32 @@ export default function TaskResultPage() {
         ) : null}
       </div>
 
+      <div className="page-grid">
+        <div className="section-stack">
+          <div className="section-banner">
+            <p className="muted">Primary trail: read execution outcome, user-facing explanation, grouped outputs, runtime evidence, and the structured LLM trace together.</p>
+            <div className="pill-row">
+              <span className="soft-pill"><strong>result</strong>{isSuccess ? "succeeded" : isFailure ? "failed" : "pending"}</span>
+              <span className="soft-pill"><strong>runtime</strong>{result?.runtime_profile ?? runtimeEvidence?.runtime_profile ?? "-"}</span>
+            </div>
+          </div>
+
       <div className="card">
         <h2>Execution Summary</h2>
         <ExecutionSummaryPanel resultBundle={resultBundle} failureSummary={failureSummary} />
       </div>
 
       <div className="card">
-        <h2>Metrics</h2>
-        {isSuccess ? <ResultMetricList metrics={metrics} /> : <p className="muted">Metrics are only available for successful runs.</p>}
-      </div>
-
-      <div className="card">
         <h2>Explanation</h2>
+        <p className="muted card-intro">The user-facing narrative layer built on top of the governed result, plus the cognition metadata that produced it.</p>
         <FinalExplanationPanel explanation={finalExplanation} />
         <h3>Final Explanation Cognition</h3>
         <CognitionMetadataPanel metadata={result?.final_explanation_cognition} emptyText="No final explanation cognition metadata." />
       </div>
 
       <div className="card">
-        <h2>Artifacts</h2>
-        <ArtifactList artifacts={resultBundle?.artifacts} />
-        <h3>Primary Output Refs</h3>
-        <OutputReferenceList items={resultBundle?.primary_output_refs} />
-        <h3>Input Bindings</h3>
-        <InputBindingList items={runtimeEvidence?.input_bindings} />
-      </div>
-
-      <div className="card">
         <h2>Grouped Outputs</h2>
+        <p className="muted card-intro">Primary, intermediate, audit, derived, and log artifacts grouped the same way the backend promotes them.</p>
         <h3>Primary Outputs</h3>
         {artifactCatalog?.primary_outputs?.length ? (
           <ArtifactMetaList items={artifactCatalog.primary_outputs} />
@@ -736,50 +765,15 @@ export default function TaskResultPage() {
 
       <div className="card">
         <h2>Runtime Evidence</h2>
+        <p className="muted card-intro">Execution-facing facts from the runtime layer, including provider inputs, workspace state, and container-level evidence.</p>
         <RuntimeEvidencePanel evidence={runtimeEvidence} />
         <h3>Provider Input Bindings</h3>
         <InputBindingList items={runtimeEvidence?.input_bindings} />
       </div>
 
       <div className="card">
-        <h2>Planning Compiler</h2>
-        <div className="kv-grid">
-          <div className="kv-item">
-            <span className="kv-key">planning_intent_status</span>
-            <span className="kv-value">{result?.planning_intent_status ?? "-"}</span>
-          </div>
-          <div className="kv-item">
-            <span className="kv-key">binding_status</span>
-            <span className="kv-value">{result?.binding_status ?? "-"}</span>
-          </div>
-          <div className="kv-item">
-            <span className="kv-key">cognition_verdict</span>
-            <span className="kv-value">{result?.cognition_verdict ?? "-"}</span>
-          </div>
-          <div className="kv-item">
-            <span className="kv-key">assembly_blocked</span>
-            <span className="kv-value">{formatValue(result?.assembly_blocked)}</span>
-          </div>
-        </div>
-        <h3>Overruled Fields</h3>
-        <ArtifactNameList items={result?.overruled_fields} />
-        <h3>Blocked Mutations</h3>
-        <ArtifactNameList items={result?.blocked_mutations} />
-        <h3>Goal Route Cognition</h3>
-        <CognitionMetadataPanel metadata={result?.goal_route_cognition} emptyText="No goal-route cognition metadata." />
-        <h3>PassB Cognition</h3>
-        <CognitionMetadataPanel metadata={result?.passb_cognition} emptyText="No passb cognition metadata." />
-        <h3>Repair Proposal Cognition</h3>
-        <CognitionMetadataPanel metadata={result?.repair_proposal_cognition} emptyText="No repair proposal cognition metadata." />
-        <DebugJsonPanel title="Planning Summary" payload={result?.planning_summary ?? null} defaultExpanded={false} />
-        <DebugJsonPanel title="Canonicalization Summary" payload={result?.canonicalization_summary ?? null} defaultExpanded={false} />
-        <DebugJsonPanel title="Rewrite Summary" payload={result?.rewrite_summary ?? null} defaultExpanded={false} />
-        <DebugJsonPanel title="Output Registry" payload={resultBundle?.output_registry ?? null} defaultExpanded={false} />
-      </div>
-
-      <div className="card">
         <h2>LLM Trace</h2>
-        <p className="muted">
+        <p className="muted card-intro">
           These are the structured outputs that the cognition layer produced across the task lifecycle.
         </p>
         <h3>Goal Route Output</h3>
@@ -810,6 +804,67 @@ export default function TaskResultPage() {
           payload={result?.final_explanation_output ?? (result?.final_explanation ? result.final_explanation as Record<string, unknown> : null)}
           emptyText="No final explanation output available."
         />
+      </div>
+
+        </div>
+
+        <aside className="side-rail">
+          <div className="card rail-card">
+            <h2>Case Projection</h2>
+            <p className="muted card-intro">The final governed case decision that framed this execution and any clarify context attached to it.</p>
+            <CaseProjectionPanel projection={result?.case_projection} />
+          </div>
+
+          <div className="card rail-card">
+            <h2>Metrics</h2>
+            {isSuccess ? <ResultMetricList metrics={metrics} /> : <p className="muted">Metrics are only available for successful runs.</p>}
+          </div>
+
+          <div className="card rail-card">
+            <h2>Artifacts</h2>
+            <ArtifactList artifacts={resultBundle?.artifacts} />
+            <h3>Primary Output Refs</h3>
+            <OutputReferenceList items={resultBundle?.primary_output_refs} />
+            <h3>Input Bindings</h3>
+            <InputBindingList items={runtimeEvidence?.input_bindings} />
+          </div>
+
+          <div className="card rail-card">
+            <h2>Planning Compiler</h2>
+            <div className="kv-grid">
+              <div className="kv-item">
+                <span className="kv-key">planning_intent_status</span>
+                <span className="kv-value">{result?.planning_intent_status ?? "-"}</span>
+              </div>
+              <div className="kv-item">
+                <span className="kv-key">binding_status</span>
+                <span className="kv-value">{result?.binding_status ?? "-"}</span>
+              </div>
+              <div className="kv-item">
+                <span className="kv-key">cognition_verdict</span>
+                <span className="kv-value">{result?.cognition_verdict ?? "-"}</span>
+              </div>
+              <div className="kv-item">
+                <span className="kv-key">assembly_blocked</span>
+                <span className="kv-value">{formatValue(result?.assembly_blocked)}</span>
+              </div>
+            </div>
+            <h3>Overruled Fields</h3>
+            <ArtifactNameList items={result?.overruled_fields} />
+            <h3>Blocked Mutations</h3>
+            <ArtifactNameList items={result?.blocked_mutations} />
+            <h3>Goal Route Cognition</h3>
+            <CognitionMetadataPanel metadata={result?.goal_route_cognition} emptyText="No goal-route cognition metadata." />
+            <h3>PassB Cognition</h3>
+            <CognitionMetadataPanel metadata={result?.passb_cognition} emptyText="No passb cognition metadata." />
+            <h3>Repair Proposal Cognition</h3>
+            <CognitionMetadataPanel metadata={result?.repair_proposal_cognition} emptyText="No repair proposal cognition metadata." />
+            <DebugJsonPanel title="Planning Summary" payload={result?.planning_summary ?? null} defaultExpanded={false} />
+            <DebugJsonPanel title="Canonicalization Summary" payload={result?.canonicalization_summary ?? null} defaultExpanded={false} />
+            <DebugJsonPanel title="Rewrite Summary" payload={result?.rewrite_summary ?? null} defaultExpanded={false} />
+            <DebugJsonPanel title="Output Registry" payload={resultBundle?.output_registry ?? null} defaultExpanded={false} />
+          </div>
+        </aside>
       </div>
 
       {isFailure ? (

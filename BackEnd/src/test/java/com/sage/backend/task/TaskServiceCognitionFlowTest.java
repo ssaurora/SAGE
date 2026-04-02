@@ -96,6 +96,56 @@ class TaskServiceCognitionFlowTest {
     }
 
     @Test
+    void createTaskRealCaseGoalRouteClarifyRequiredTransitionsToWaitingUser() throws Exception {
+        Harness harness = new Harness(objectMapper);
+        when(harness.cognitionGoalRouteClient.route(any())).thenReturn(goalRouteResponseWithCaseProjection(
+                "resolved",
+                "real_case_validation",
+                Map.of(
+                        "mode", "clarify_required",
+                        "candidate_case_ids", List.of("annual_water_yield_gura", "annual_water_yield_blue_nile_fixture"),
+                        "clarify_prompt", "Choose a governed annual water yield case."
+                )
+        ));
+        when(harness.taskStateMapper.findByTaskId(anyString())).thenReturn(taskStateForProjection());
+
+        CreateTaskRequest request = new CreateTaskRequest();
+        request.setUserQuery("run a real case invest annual water yield analysis");
+
+        CreateTaskResponse response = harness.service.createTask(42L, request);
+
+        assertEquals(TaskStatus.WAITING_USER.name(), response.getState());
+        verify(harness.pass1Client, never()).runPass1(any());
+        verify(harness.cognitionPassBClient, never()).runPassB(any());
+        verify(harness.taskStateMapper).updateStateWithWaitingContext(anyString(), anyInt(), anyString(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void createTaskRealCasePassBClarifyRequiredTransitionsToWaitingUser() throws Exception {
+        Harness harness = new Harness(objectMapper);
+        when(harness.cognitionGoalRouteClient.route(any())).thenReturn(goalRouteResponseWithCaseProjection(
+                "resolved",
+                "real_case_validation",
+                Map.of(
+                        "mode", "resolved",
+                        "selected_case_id", "annual_water_yield_gura",
+                        "candidate_case_ids", List.of("annual_water_yield_gura")
+                )
+        ));
+        when(harness.pass1Client.runPass1(any())).thenReturn(defaultPass1Response());
+        when(harness.cognitionPassBClient.runPassB(any())).thenReturn(bindingClarifyRequiredPassBResponse());
+
+        CreateTaskRequest request = new CreateTaskRequest();
+        request.setUserQuery("run a real case invest annual water yield analysis");
+
+        CreateTaskResponse response = harness.service.createTask(42L, request);
+
+        assertEquals(TaskStatus.WAITING_USER.name(), response.getState());
+        verify(harness.validationClient, never()).validatePrimitive(any());
+        verify(harness.jobRuntimeClient, never()).createJob(any());
+    }
+
+    @Test
     void getTaskProjectsCognitionAuthorityFacts() {
         Harness harness = new Harness(objectMapper);
         TaskState taskState = taskStateForProjection();
@@ -109,9 +159,18 @@ class TaskServiceCognitionFlowTest {
         assertEquals(List.of("case_id"), response.getBlockedMutations());
         assertTrue(Boolean.TRUE.equals(response.getAssemblyBlocked()));
         assertEquals("PRIMARY_OVERRULED", response.getCognitionVerdict());
+        assertEquals("clarify_required", response.getCaseProjection().get("mode"));
     }
 
     private CognitionGoalRouteResponse goalRouteResponse(String status) throws Exception {
+        return goalRouteResponseWithCaseProjection(status, "governed_baseline", Map.of());
+    }
+
+    private CognitionGoalRouteResponse goalRouteResponseWithCaseProjection(
+            String status,
+            String executionMode,
+            Map<String, Object> caseProjection
+    ) throws Exception {
         CognitionGoalRouteResponse response = new CognitionGoalRouteResponse();
         response.setPlanningIntentStatus(status);
         response.setGoalParse(objectMapper.readTree("""
@@ -132,12 +191,13 @@ class TaskServiceCognitionFlowTest {
                   "route_source": "cognition_test",
                   "selected_template": "water_yield_v1",
                   "template_version": "1.0.0",
-                  "execution_mode": "governed_baseline"
+                  "execution_mode": "%s"
                 }
-                """));
+                """.formatted(executionMode)));
         response.setConfidence(0.9);
         response.setDecisionSummary(Map.of("strategy", "test"));
-        response.setCognitionMetadata(Map.of("fallback_used", false, "schema_valid", true, "source", "test"));
+        response.setCognitionMetadata(Map.of("fallback_used", false, "schema_valid", true, "source", "test", "provider", "glm"));
+        response.setCaseProjection(caseProjection);
         return response;
     }
 
@@ -153,7 +213,24 @@ class TaskServiceCognitionFlowTest {
         response.setInferredSemanticArgs(Map.of());
         response.setArgsDraft(Map.of());
         response.setDecisionSummary(Map.of("strategy", "ambiguous"));
-        response.setCognitionMetadata(Map.of("fallback_used", false, "schema_valid", true, "source", "test"));
+        response.setCognitionMetadata(Map.of("fallback_used", false, "schema_valid", true, "source", "test", "provider", "glm"));
+        return response;
+    }
+
+    private CognitionPassBResponse bindingClarifyRequiredPassBResponse() {
+        CognitionPassBResponse response = new CognitionPassBResponse();
+        response.setBindingStatus("ambiguous");
+        response.setSlotBindings(List.of());
+        response.setUserSemanticArgs(Map.of());
+        response.setInferredSemanticArgs(Map.of());
+        response.setArgsDraft(Map.of());
+        response.setCaseProjection(Map.of(
+                "mode", "clarify_required",
+                "candidate_case_ids", List.of("annual_water_yield_gura", "annual_water_yield_blue_nile_fixture"),
+                "clarify_prompt", "Choose a governed annual water yield case."
+        ));
+        response.setDecisionSummary(Map.of("strategy", "clarify"));
+        response.setCognitionMetadata(Map.of("fallback_used", false, "schema_valid", true, "source", "test", "provider", "glm"));
         return response;
     }
 
@@ -170,7 +247,12 @@ class TaskServiceCognitionFlowTest {
                 {
                   "planning_intent_status": "resolved",
                   "goal_type": "water_yield_analysis",
-                  "analysis_kind": "water_yield"
+                  "analysis_kind": "water_yield",
+                  "case_projection": {
+                    "mode": "clarify_required",
+                    "candidate_case_ids": ["annual_water_yield_gura", "annual_water_yield_blue_nile_fixture"],
+                    "clarify_prompt": "Choose a governed annual water yield case."
+                  }
                 }
                 """);
         taskState.setSkillRouteJson("""
@@ -185,6 +267,11 @@ class TaskServiceCognitionFlowTest {
                   "overruled_fields": ["case_id"],
                   "blocked_mutations": ["case_id"],
                   "assembly_blocked": true,
+                  "case_projection": {
+                    "mode": "clarify_required",
+                    "candidate_case_ids": ["annual_water_yield_gura", "annual_water_yield_blue_nile_fixture"],
+                    "clarify_prompt": "Choose a governed annual water yield case."
+                  },
                   "slot_bindings": [],
                   "args_draft": {}
                 }

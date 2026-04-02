@@ -2,6 +2,7 @@ package com.sage.backend.cognition.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 
 public class CognitionPassBRequest {
     @JsonProperty("task_id")
@@ -24,6 +25,15 @@ public class CognitionPassBRequest {
 
     @JsonProperty("user_note")
     private String userNote;
+
+    @JsonProperty("attachment_facts")
+    private JsonNode attachmentFacts;
+
+    @JsonProperty("accepted_overrides")
+    private JsonNode acceptedOverrides;
+
+    @JsonProperty("resume_context")
+    private JsonNode resumeContext;
 
     public String getTaskId() {
         return taskId;
@@ -79,5 +89,29 @@ public class CognitionPassBRequest {
 
     public void setUserNote(String userNote) {
         this.userNote = userNote;
+    }
+
+    public JsonNode getAttachmentFacts() {
+        return attachmentFacts == null ? JsonNodeFactory.instance.arrayNode() : attachmentFacts;
+    }
+
+    public void setAttachmentFacts(JsonNode attachmentFacts) {
+        this.attachmentFacts = attachmentFacts;
+    }
+
+    public JsonNode getAcceptedOverrides() {
+        return acceptedOverrides == null ? JsonNodeFactory.instance.objectNode() : acceptedOverrides;
+    }
+
+    public void setAcceptedOverrides(JsonNode acceptedOverrides) {
+        this.acceptedOverrides = acceptedOverrides;
+    }
+
+    public JsonNode getResumeContext() {
+        return resumeContext == null ? JsonNodeFactory.instance.objectNode() : resumeContext;
+    }
+
+    public void setResumeContext(JsonNode resumeContext) {
+        this.resumeContext = resumeContext;
     }
 }

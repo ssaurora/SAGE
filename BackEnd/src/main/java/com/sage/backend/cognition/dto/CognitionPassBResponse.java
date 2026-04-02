@@ -24,6 +24,9 @@ public class CognitionPassBResponse {
     @JsonProperty("args_draft")
     private Map<String, Object> argsDraft;
 
+    @JsonProperty("case_projection")
+    private Map<String, Object> caseProjection;
+
     @JsonProperty("decision_summary")
     private Map<String, Object> decisionSummary;
 
@@ -70,6 +73,14 @@ public class CognitionPassBResponse {
 
     public void setArgsDraft(Map<String, Object> argsDraft) {
         this.argsDraft = argsDraft;
+    }
+
+    public Map<String, Object> getCaseProjection() {
+        return caseProjection;
+    }
+
+    public void setCaseProjection(Map<String, Object> caseProjection) {
+        this.caseProjection = caseProjection;
     }
 
     public Map<String, Object> getDecisionSummary() {

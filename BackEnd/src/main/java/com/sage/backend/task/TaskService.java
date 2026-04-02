@@ -270,6 +270,27 @@ public class TaskService {
                             goalParseNode
                     );
                 }
+                if (isClarifyRequiredCaseProjection(goalParseNode)) {
+                    WaitingStateSnapshot waitingState = buildClarifyWaitingState(
+                            taskId,
+                            resolveCaseProjectionWaitingReason(goalParseNode, "CLARIFY_CASE_SELECTION"),
+                            resolveCaseProjectionPrompt(goalParseNode, "Choose a governed case before resuming."),
+                            null,
+                            goalParseNode.path("case_projection")
+                    );
+                    taskStateMapper.updateCognitionVerdict(taskId, "LLM_AMBIGUOUS");
+                    ensureUpdated(taskStateMapper.updateStateWithWaitingContext(
+                            taskId,
+                            currentVersion,
+                            TaskStatus.WAITING_USER.name(),
+                            waitingState.waitingContextJson(),
+                            waitingState.decision().waitingContext().getWaitingReasonType(),
+                            OffsetDateTime.now(ZoneOffset.UTC)
+                    ));
+                    appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.WAITING_USER.name(), currentVersion + 1, null);
+                    recordWaitingUserEntry(taskId, resolveActiveAttemptNo(taskState), waitingState, null, currentVersion + 1);
+                    return buildCreateTaskResponse(taskId, null, TaskStatus.WAITING_USER.name(), currentVersion + 1);
+                }
             }
 
             appendEvent(taskId, EventType.PLANNING_PASS1_STARTED.name(), null, null, currentVersion, null);
@@ -307,6 +328,7 @@ public class TaskService {
                     goalParseNode,
                     skillRouteNode,
                     pass1Node,
+                    null,
                     null
             );
             String passBJson = passBStage.passBJson();
@@ -326,6 +348,26 @@ public class TaskService {
                             cognitionFailureCode,
                             passBNode
                     );
+                }
+                if (isClarifyRequiredCaseProjection(passBNode)) {
+                    WaitingStateSnapshot waitingState = buildClarifyWaitingState(
+                            taskId,
+                            resolveCaseProjectionWaitingReason(passBNode, "CLARIFY_CASE_SELECTION"),
+                            resolveCaseProjectionPrompt(passBNode, "Choose a governed case before resuming."),
+                            null,
+                            passBNode.path("case_projection")
+                    );
+                    ensureUpdated(taskStateMapper.updateStateWithWaitingContext(
+                            taskId,
+                            currentVersion,
+                            TaskStatus.WAITING_USER.name(),
+                            waitingState.waitingContextJson(),
+                            waitingState.decision().waitingContext().getWaitingReasonType(),
+                            OffsetDateTime.now(ZoneOffset.UTC)
+                    ));
+                    appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.WAITING_USER.name(), currentVersion + 1, null);
+                    recordWaitingUserEntry(taskId, resolveActiveAttemptNo(taskState), waitingState, null, currentVersion + 1);
+                    return buildCreateTaskResponse(taskId, null, TaskStatus.WAITING_USER.name(), currentVersion + 1);
                 }
             }
 
@@ -523,6 +565,7 @@ public class TaskService {
         response.setOverruledFields(TaskProjectionBuilder.jsonArrayToStrings(passBRoot.path("overruled_fields")));
         response.setBlockedMutations(TaskProjectionBuilder.jsonArrayToStrings(passBRoot.path("blocked_mutations")));
         response.setAssemblyBlocked(passBRoot.path("assembly_blocked").isBoolean() ? passBRoot.path("assembly_blocked").asBoolean() : null);
+        response.setCaseProjection(TaskProjectionBuilder.buildCaseProjection(routeProjection.goalParse(), passBRoot, objectMapper));
         response.setGoalRouteCognition(TaskProjectionBuilder.buildCognitionView(routeProjection.goalParse(), objectMapper));
         response.setGoalRouteOutput(TaskProjectionBuilder.buildGoalRouteOutput(routeProjection.goalParse(), routeProjection.skillRoute(), objectMapper));
         response.setPassbCognition(TaskProjectionBuilder.buildCognitionView(passBRoot, objectMapper));
@@ -581,6 +624,7 @@ public class TaskService {
         response.setAssemblyBlocked(passBRoot.path("assembly_blocked").isBoolean() ? passBRoot.path("assembly_blocked").asBoolean() : null);
         JsonNode goalParseRoot = readJsonNode(taskState.getGoalParseJson());
         JsonNode skillRouteRoot = readJsonNode(taskState.getSkillRouteJson());
+        response.setCaseProjection(TaskProjectionBuilder.buildCaseProjection(goalParseRoot, passBRoot, objectMapper));
         response.setGoalRouteCognition(TaskProjectionBuilder.buildCognitionView(goalParseRoot, objectMapper));
         response.setGoalRouteOutput(TaskProjectionBuilder.buildGoalRouteOutput(goalParseRoot, skillRouteRoot, objectMapper));
         response.setPassbCognition(TaskProjectionBuilder.buildCognitionView(passBRoot, objectMapper));
@@ -740,6 +784,7 @@ public class TaskService {
         response.setOverruledFields(TaskProjectionBuilder.jsonArrayToStrings(passBRoot.path("overruled_fields")));
         response.setBlockedMutations(TaskProjectionBuilder.jsonArrayToStrings(passBRoot.path("blocked_mutations")));
         response.setAssemblyBlocked(passBRoot.path("assembly_blocked").isBoolean() ? passBRoot.path("assembly_blocked").asBoolean() : null);
+        response.setCaseProjection(TaskProjectionBuilder.buildCaseProjection(goalParseRoot, passBRoot, objectMapper));
         response.setGoalRouteCognition(TaskProjectionBuilder.buildCognitionView(goalParseRoot, objectMapper));
         response.setGoalRouteOutput(TaskProjectionBuilder.buildGoalRouteOutput(goalParseRoot, skillRouteRoot, objectMapper));
         response.setPassbCognition(TaskProjectionBuilder.buildCognitionView(passBRoot, objectMapper));
@@ -1395,6 +1440,24 @@ public class TaskService {
                 passBJson = writeJson(passBNode);
                 cognitionVerdict = CognitionVerdictResolver.resolve(goalParseNode, passBNode, assemblyResult);
                 taskStateMapper.updateCognitionVerdict(taskId, cognitionVerdict);
+            } else if (canReuseGoalAndPass1ForClarifyResume(taskState, request)) {
+                goalParseNode = requireObjectNode(readJsonNode(taskState.getGoalParseJson()));
+                skillRouteNode = requireObjectNode(readJsonNode(taskState.getSkillRouteJson()));
+                pass1Node = readJsonNode(taskState.getPass1ResultJson());
+                PassBStageResult passBStage = runPassBStage(
+                        taskId,
+                        safeString(taskState.getUserQuery()),
+                        currentVersion,
+                        goalParseNode,
+                        skillRouteNode,
+                        pass1Node,
+                        request,
+                        readJsonNode(taskState.getWaitingContextJson())
+                );
+                passBNode = passBStage.passBNode();
+                passBJson = passBStage.passBJson();
+                cognitionVerdict = CognitionVerdictResolver.resolve(goalParseNode, passBNode, passBStage.assemblyResult());
+                taskStateMapper.updateCognitionVerdict(taskId, cognitionVerdict);
             } else {
                 CognitionGoalRouteResponse goalRouteResponse = runGoalRoute(
                         taskId,
@@ -1477,6 +1540,39 @@ public class TaskService {
                                 goalParseNode
                         );
                     }
+                    if (isClarifyRequiredCaseProjection(goalParseNode)) {
+                        WaitingStateSnapshot waitingState = buildClarifyWaitingState(
+                                taskId,
+                                resolveCaseProjectionWaitingReason(goalParseNode, "CLARIFY_CASE_SELECTION"),
+                                resolveCaseProjectionPrompt(goalParseNode, "Choose a governed case before resuming."),
+                                request.getUserNote(),
+                                goalParseNode.path("case_projection")
+                        );
+                        String rolledBackTxn = writeJson(buildResumeTransactionPayload(
+                                request.getResumeRequestId(),
+                                "ROLLED_BACK",
+                                baseCheckpointVersion,
+                                candidateCheckpointVersion,
+                                candidateInventoryVersion,
+                                null,
+                                resolveActiveAttemptNo(taskState),
+                                null,
+                                "CLARIFY_CASE_SELECTION"
+                        ));
+                        taskStateMapper.updateCognitionVerdict(taskId, "LLM_AMBIGUOUS");
+                        ensureUpdated(taskStateMapper.rollbackResumeToWaiting(
+                                taskId,
+                                currentVersion,
+                                TaskStatus.WAITING_USER.name(),
+                                waitingState.waitingContextJson(),
+                                waitingState.decision().waitingContext().getWaitingReasonType(),
+                                OffsetDateTime.now(ZoneOffset.UTC),
+                                rolledBackTxn
+                        ));
+                        appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.WAITING_USER.name(), currentVersion + 1, null);
+                        recordWaitingUserEntry(taskId, resolveActiveAttemptNo(taskState), waitingState, writeJson(request), currentVersion + 1);
+                        return buildResumeTaskResponse(taskId, TaskStatus.WAITING_USER.name(), currentVersion + 1, true, taskState.getActiveAttemptNo());
+                    }
                 }
 
                 appendEvent(taskId, EventType.PLANNING_PASS1_STARTED.name(), null, null, currentVersion, null);
@@ -1510,7 +1606,8 @@ public class TaskService {
                         goalParseNode,
                         skillRouteNode,
                         pass1Node,
-                        request
+                        request,
+                        readJsonNode(taskState.getWaitingContextJson())
                 );
                 passBNode = passBStage.passBNode();
                 passBJson = passBStage.passBJson();
@@ -1551,6 +1648,39 @@ public class TaskService {
                             cognitionFailureCode,
                             passBNode
                     );
+                }
+                if (isClarifyRequiredCaseProjection(passBNode)) {
+                    WaitingStateSnapshot waitingState = buildClarifyWaitingState(
+                            taskId,
+                            resolveCaseProjectionWaitingReason(passBNode, "CLARIFY_CASE_SELECTION"),
+                            resolveCaseProjectionPrompt(passBNode, "Choose a governed case before resuming."),
+                            request.getUserNote(),
+                            passBNode.path("case_projection")
+                    );
+                    String rolledBackTxn = writeJson(buildResumeTransactionPayload(
+                            request.getResumeRequestId(),
+                            "ROLLED_BACK",
+                            baseCheckpointVersion,
+                            candidateCheckpointVersion,
+                            candidateInventoryVersion,
+                            null,
+                            resolveActiveAttemptNo(taskState),
+                            null,
+                            "CLARIFY_CASE_SELECTION"
+                    ));
+                    taskStateMapper.updateCognitionVerdict(taskId, "LLM_AMBIGUOUS");
+                    ensureUpdated(taskStateMapper.rollbackResumeToWaiting(
+                            taskId,
+                            currentVersion,
+                            TaskStatus.WAITING_USER.name(),
+                            waitingState.waitingContextJson(),
+                            waitingState.decision().waitingContext().getWaitingReasonType(),
+                            OffsetDateTime.now(ZoneOffset.UTC),
+                            rolledBackTxn
+                    ));
+                    appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.WAITING_USER.name(), currentVersion + 1, null);
+                    recordWaitingUserEntry(taskId, resolveActiveAttemptNo(taskState), waitingState, writeJson(request), currentVersion + 1);
+                    return buildResumeTaskResponse(taskId, TaskStatus.WAITING_USER.name(), currentVersion + 1, true, taskState.getActiveAttemptNo());
                 }
             }
 
@@ -1802,11 +1932,47 @@ public class TaskService {
                 && !taskState.getPassbResultJson().isBlank();
     }
 
+    private boolean canReuseGoalAndPass1ForClarifyResume(TaskState taskState, ResumeTaskRequest request) {
+        if (taskState == null || request == null) {
+            return false;
+        }
+        JsonNode waitingContext = readJsonNode(taskState.getWaitingContextJson());
+        String waitingReasonType = safeString(waitingContext.path("waiting_reason_type").asText(null));
+        if (!waitingReasonType.startsWith("CLARIFY")) {
+            return false;
+        }
+        Object selectedCaseValue = request.getArgsOverrides() == null ? null : request.getArgsOverrides().get("case_id");
+        String selectedCaseId = selectedCaseValue == null ? "" : safeString(String.valueOf(selectedCaseValue));
+        if (selectedCaseId.isBlank()) {
+            return false;
+        }
+        return taskState.getGoalParseJson() != null
+                && !taskState.getGoalParseJson().isBlank()
+                && taskState.getSkillRouteJson() != null
+                && !taskState.getSkillRouteJson().isBlank()
+                && taskState.getPass1ResultJson() != null
+                && !taskState.getPass1ResultJson().isBlank();
+    }
+
     private ObjectNode requireObjectNode(JsonNode node) {
         if (node instanceof ObjectNode objectNode) {
             return objectNode.deepCopy();
         }
         throw new IllegalStateException("Expected object node for resume planning reuse");
+    }
+
+    private ObjectNode buildAcceptedOverrides(ResumeTaskRequest request) {
+        ObjectNode overrides = objectMapper.createObjectNode();
+        if (request == null) {
+            return overrides;
+        }
+        if (request.getArgsOverrides() != null) {
+            request.getArgsOverrides().forEach((key, value) -> overrides.set(key, objectMapper.valueToTree(value)));
+        }
+        if (request.getSlotOverrides() != null && !request.getSlotOverrides().isEmpty()) {
+            overrides.set("slot_overrides", objectMapper.valueToTree(request.getSlotOverrides()));
+        }
+        return overrides;
     }
 
     private void applyResumeInputs(JsonNode pass1Result, ObjectNode passBNode, ResumeTaskRequest request, String taskId) {
@@ -2022,12 +2188,43 @@ public class TaskService {
         return false;
     }
 
+    private boolean isClarifyRequiredCaseProjection(JsonNode stageNode) {
+        return "clarify_required".equalsIgnoreCase(stageNode.path("case_projection").path("mode").asText(""));
+    }
+
+    private String resolveCaseProjectionWaitingReason(JsonNode stageNode, String fallbackReasonType) {
+        if (!isClarifyRequiredCaseProjection(stageNode)) {
+            return fallbackReasonType;
+        }
+        return "CLARIFY_CASE_SELECTION";
+    }
+
+    private String resolveCaseProjectionPrompt(JsonNode stageNode, String fallbackLabel) {
+        if (!isClarifyRequiredCaseProjection(stageNode)) {
+            return fallbackLabel;
+        }
+        String prompt = stageNode.path("case_projection").path("clarify_prompt").asText("");
+        return prompt.isBlank() ? fallbackLabel : prompt;
+    }
+
     private WaitingStateSnapshot buildClarifyWaitingState(
             String taskId,
             String waitingReasonType,
             String actionLabel,
             String userNote
     ) {
+        return buildClarifyWaitingState(taskId, waitingReasonType, actionLabel, userNote, null);
+    }
+
+    private WaitingStateSnapshot buildClarifyWaitingState(
+            String taskId,
+            String waitingReasonType,
+            String actionLabel,
+            String userNote,
+            JsonNode caseProjectionNode
+    ) {
+        boolean caseSelectionClarify = "CLARIFY_CASE_SELECTION".equalsIgnoreCase(waitingReasonType)
+                || (caseProjectionNode != null && caseProjectionNode.path("mode").asText("").equalsIgnoreCase("clarify_required"));
         com.sage.backend.repair.dto.RepairProposalRequest.WaitingContext waitingContext =
                 new com.sage.backend.repair.dto.RepairProposalRequest.WaitingContext();
         waitingContext.setWaitingReasonType(waitingReasonType);
@@ -2037,11 +2234,13 @@ public class TaskService {
         com.sage.backend.repair.dto.RepairProposalRequest.RequiredUserAction clarifyAction =
                 new com.sage.backend.repair.dto.RepairProposalRequest.RequiredUserAction();
         clarifyAction.setActionType("clarify");
-        clarifyAction.setKey("clarify_" + safeString(waitingReasonType).toLowerCase());
+        clarifyAction.setKey(caseSelectionClarify ? "clarify_case_selection" : "clarify_" + safeString(waitingReasonType).toLowerCase());
         clarifyAction.setLabel(actionLabel);
         clarifyAction.setRequired(true);
         waitingContext.setRequiredUserActions(List.of(clarifyAction));
-        waitingContext.setResumeHint("Provide clarification in user_note before resuming.");
+        waitingContext.setResumeHint(caseSelectionClarify
+                ? "Select a governed case and then resume."
+                : "Provide clarification in user_note before resuming.");
         waitingContext.setCanResume(false);
 
         RepairDecision decision = new RepairDecision("RECOVERABLE", "WAITING_USER", waitingContext);
@@ -2085,7 +2284,7 @@ public class TaskService {
         request.setUserNote(safeString(userNote));
         request.setAllowedCapabilities(List.of("water_yield"));
         request.setAllowedTemplates(List.of("water_yield_v1"));
-        request.setKnownCases(List.of("annual_water_yield_gura"));
+        request.setKnownCases(List.of());
         return cognitionGoalRouteClient.route(request);
     }
 
@@ -2100,6 +2299,9 @@ public class TaskService {
         }
         if (response.getDecisionSummary() != null && !response.getDecisionSummary().isEmpty()) {
             node.set("decision_summary", objectMapper.valueToTree(response.getDecisionSummary()));
+        }
+        if (response.getCaseProjection() != null && !response.getCaseProjection().isEmpty()) {
+            node.set("case_projection", objectMapper.valueToTree(response.getCaseProjection()));
         }
         if (response.getCognitionMetadata() != null && !response.getCognitionMetadata().isEmpty()) {
             node.set("cognition_metadata", objectMapper.valueToTree(response.getCognitionMetadata()));
@@ -2117,6 +2319,9 @@ public class TaskService {
         }
         if (response.getDecisionSummary() != null && !response.getDecisionSummary().isEmpty()) {
             node.set("decision_summary", objectMapper.valueToTree(response.getDecisionSummary()));
+        }
+        if (response.getCaseProjection() != null && !response.getCaseProjection().isEmpty()) {
+            node.set("case_projection", objectMapper.valueToTree(response.getCaseProjection()));
         }
         if (response.getCognitionMetadata() != null && !response.getCognitionMetadata().isEmpty()) {
             node.set("cognition_metadata", objectMapper.valueToTree(response.getCognitionMetadata()));
@@ -2397,7 +2602,9 @@ public class TaskService {
             JsonNode pass1Result,
             JsonNode goalParse,
             JsonNode skillRoute,
-            String userNote
+            String userNote,
+            ResumeTaskRequest resumeRequest,
+            JsonNode resumeContext
     ) {
         CognitionPassBRequest req = new CognitionPassBRequest();
         req.setTaskId(taskId);
@@ -2407,6 +2614,15 @@ public class TaskService {
         req.setGoalParse(goalParse);
         req.setSkillRoute(skillRoute);
         req.setUserNote(safeString(userNote));
+        req.setAttachmentFacts(objectMapper.createArrayNode());
+        req.setAcceptedOverrides(objectMapper.createObjectNode());
+        req.setResumeContext(objectMapper.createObjectNode());
+        if (resumeRequest != null) {
+            req.setAcceptedOverrides(buildAcceptedOverrides(resumeRequest));
+        }
+        if (resumeContext != null && !resumeContext.isMissingNode() && !resumeContext.isNull()) {
+            req.setResumeContext(resumeContext);
+        }
         return cognitionPassBClient.runPassB(req);
     }
 
@@ -2417,7 +2633,8 @@ public class TaskService {
             JsonNode goalParseNode,
             JsonNode skillRouteNode,
             JsonNode pass1Node,
-            ResumeTaskRequest resumeRequest
+            ResumeTaskRequest resumeRequest,
+            JsonNode resumeContext
     ) throws Exception {
         appendEvent(taskId, EventType.COGNITION_PASSB_STARTED.name(), null, null, stateVersion, null);
         CognitionPassBResponse passBResponse = runPassB(
@@ -2427,7 +2644,9 @@ public class TaskService {
                 pass1Node,
                 goalParseNode,
                 skillRouteNode,
-                resumeRequest == null ? null : resumeRequest.getUserNote()
+                resumeRequest == null ? null : resumeRequest.getUserNote(),
+                resumeRequest,
+                resumeContext
         );
         String passBJson = objectMapper.writeValueAsString(passBResponse);
         ObjectNode passBNode = (ObjectNode) objectMapper.readTree(passBJson);

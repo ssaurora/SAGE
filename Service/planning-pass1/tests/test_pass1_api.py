@@ -507,6 +507,116 @@ def test_passb_marks_real_invest_runtime_mode_for_real_case_queries(monkeypatch,
     assert assertion_by_name["arg:watersheds_path"]["required"] is True
 
 
+def test_goal_route_real_case_query_requires_clarify_when_case_is_not_explicit(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path / "workspace"))
+    monkeypatch.delenv("SAGE_COGNITION_GOAL_ROUTE_PROVIDER", raising=False)
+    from app.main import app
+
+    client = TestClient(app)
+    response = client.post(
+        "/cognition/goal-route",
+        json={
+            "task_id": "task_case_clarify_goal_route",
+            "user_query": "run a real case invest annual water yield analysis",
+            "state_version": 1,
+            "allowed_capabilities": ["water_yield"],
+            "allowed_templates": ["water_yield_v1"],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["planning_intent_status"] == "resolved"
+    assert body["case_projection"]["mode"] == "clarify_required"
+    assert "annual_water_yield_gura" in body["case_projection"]["candidate_case_ids"]
+    assert "annual_water_yield_blue_nile_fixture" in body["case_projection"]["candidate_case_ids"]
+
+
+def test_passb_real_case_query_requires_clarify_without_executable_args(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path / "workspace"))
+    monkeypatch.delenv("SAGE_COGNITION_PASSB_PROVIDER", raising=False)
+    from app.main import app
+
+    client = TestClient(app)
+    pass1_result = client.post(
+        "/planning/pass1",
+        json={"task_id": "task_case_clarify_passb", "user_query": "run a real case invest annual water yield analysis", "state_version": 1},
+    ).json()
+    goal_route_result = client.post(
+        "/cognition/goal-route",
+        json={
+            "task_id": "task_case_clarify_passb",
+            "user_query": "run a real case invest annual water yield analysis",
+            "state_version": 2,
+            "allowed_capabilities": ["water_yield"],
+            "allowed_templates": ["water_yield_v1"],
+        },
+    ).json()
+
+    response = client.post(
+        "/cognition/passb",
+        json={
+            "task_id": "task_case_clarify_passb",
+            "user_query": "run a real case invest annual water yield analysis",
+            "state_version": 3,
+            "pass1_result": pass1_result,
+            "goal_parse": goal_route_result["goal_parse"],
+            "skill_route": goal_route_result["skill_route"],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["binding_status"] == "ambiguous"
+    assert body["case_projection"]["mode"] == "clarify_required"
+    assert body["args_draft"] == {}
+    assert body["slot_bindings"] == []
+
+
+def test_passb_real_case_query_accepts_case_override_for_clarify_resume(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path / "workspace"))
+    monkeypatch.delenv("SAGE_COGNITION_PASSB_PROVIDER", raising=False)
+    from app.main import app
+
+    client = TestClient(app)
+    pass1_result = client.post(
+        "/planning/pass1",
+        json={"task_id": "task_case_clarify_resume", "user_query": "run a real case invest annual water yield analysis", "state_version": 1},
+    ).json()
+    goal_route_result = client.post(
+        "/cognition/goal-route",
+        json={
+            "task_id": "task_case_clarify_resume",
+            "user_query": "run a real case invest annual water yield analysis",
+            "state_version": 2,
+            "allowed_capabilities": ["water_yield"],
+            "allowed_templates": ["water_yield_v1"],
+        },
+    ).json()
+
+    response = client.post(
+        "/cognition/passb",
+        json={
+            "task_id": "task_case_clarify_resume",
+            "user_query": "run a real case invest annual water yield analysis",
+            "state_version": 3,
+            "pass1_result": pass1_result,
+            "goal_parse": goal_route_result["goal_parse"],
+            "skill_route": goal_route_result["skill_route"],
+            "accepted_overrides": {"case_id": "annual_water_yield_gura"},
+            "resume_context": {"selected_case_id": "annual_water_yield_gura"},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["binding_status"] == "resolved"
+    assert body["case_projection"]["mode"] == "resolved"
+    assert body["case_projection"]["selected_case_id"] == "annual_water_yield_gura"
+    assert body["args_draft"]["case_descriptor_version"] == "annual_water_yield_gura_v1"
+    assert body["args_draft"]["runtime_mode"] == "invest_real_runner"
+
+
 def test_job_can_simulate_promotion_failure_artifact_catalog(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path / "workspace"))
     from app.main import app

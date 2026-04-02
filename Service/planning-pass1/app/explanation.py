@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 import httpx
 
+from app.case_registry import get_case
 from app.cognition_support import call_glm_json
 from app.schemas import CognitionFinalExplanationRequest, CognitionMetadata, FinalExplanation
 
@@ -140,7 +141,7 @@ def _is_real_case_request(payload: CognitionFinalExplanationRequest) -> bool:
     return (
         runtime_profile == "docker-invest-real"
         or provider_key == "planning-pass1-invest-local"
-        or case_id == "annual_water_yield_gura"
+        or get_case(case_id) is not None
     )
 
 

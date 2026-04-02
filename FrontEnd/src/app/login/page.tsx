@@ -29,10 +29,11 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="container">
-      <div className="card" style={{ maxWidth: 420, margin: "60px auto" }}>
+    <main className="container page-shell center-shell">
+      <div className="card hero-card" style={{ maxWidth: 520, width: "100%" }}>
+        <span className="hero-eyebrow">SAGE Access</span>
         <h1>登录</h1>
-        <p className="muted">使用 Week1 演示账号登录系统。</p>
+        <p className="muted">使用演示账号进入受治理的任务编排、真实案例验证和运行证据查看界面。</p>
         <form onSubmit={handleSubmit}>
           <label className="label" htmlFor="username">
             用户名
@@ -64,4 +65,3 @@ export default function LoginPage() {
     </main>
   );
 }
-

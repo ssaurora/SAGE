@@ -105,6 +105,30 @@ class MinReadyEvaluatorTest {
     }
 
     @Test
+    void acceptsClarifyCaseSelectionWhenCaseIdOverrideIsPresent() {
+        RepairProposalRequest.WaitingContext waitingContext = waitingContext(
+                List.of(),
+                List.of(requiredAction("clarify", "clarify_case_selection"))
+        );
+        ResumeTaskRequest request = new ResumeTaskRequest();
+        request.setArgsOverrides(Map.of("case_id", "annual_water_yield_gura"));
+
+        assertTrue(MinReadyEvaluator.isReady(waitingContext, List.of(), request));
+    }
+
+    @Test
+    void rejectsClarifyCaseSelectionWhenCaseIdOverrideIsMissing() {
+        RepairProposalRequest.WaitingContext waitingContext = waitingContext(
+                List.of(),
+                List.of(requiredAction("clarify", "clarify_case_selection"))
+        );
+        ResumeTaskRequest request = new ResumeTaskRequest();
+        request.setUserNote("choose gura");
+
+        assertFalse(MinReadyEvaluator.isReady(waitingContext, List.of(), request));
+    }
+
+    @Test
     void rejectsUnknownRequiredActionTypes() {
         RepairProposalRequest.WaitingContext waitingContext = waitingContext(
                 List.of(),

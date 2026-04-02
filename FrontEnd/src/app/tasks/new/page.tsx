@@ -8,7 +8,7 @@ import { getAccessToken } from "@/lib/auth";
 
 export default function TaskCreatePage() {
   const router = useRouter();
-  const [userQuery, setUserQuery] = useState("请帮我做一个 water yield 分析");
+  const [userQuery, setUserQuery] = useState("run a real case invest annual water yield analysis for gura");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,10 +33,11 @@ export default function TaskCreatePage() {
   }
 
   return (
-    <main className="container">
-      <div className="card">
+    <main className="container page-shell">
+      <div className="card hero-card">
+        <span className="hero-eyebrow">New Task</span>
         <h1>创建任务</h1>
-        <p className="muted">输入自然语言后提交，系统将触发 Week1 的 Pass1 主链路。</p>
+        <p className="muted">输入自然语言目标，系统会进入受治理的认知、规划、验证和执行主链。</p>
         <form onSubmit={handleSubmit}>
           <label className="label" htmlFor="userQuery">
             用户输入
@@ -56,4 +57,3 @@ export default function TaskCreatePage() {
     </main>
   );
 }
-

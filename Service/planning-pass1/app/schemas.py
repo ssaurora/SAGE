@@ -50,6 +50,15 @@ class SkillRouteOutput(BaseModel):
     source: str = ""
 
 
+class CaseProjection(BaseModel):
+    mode: str = "unavailable"
+    selected_case_id: str | None = None
+    candidate_case_ids: list[str] = Field(default_factory=list)
+    clarify_prompt: str | None = None
+    decision_basis: list[str] = Field(default_factory=list)
+    registry_version: str = ""
+
+
 class CognitionGoalRouteRequest(BaseModel):
     task_id: str = Field(min_length=1)
     user_query: str = Field(min_length=1)
@@ -64,6 +73,7 @@ class CognitionGoalRouteResponse(BaseModel):
     planning_intent_status: str
     goal_parse: GoalParseOutput = Field(default_factory=GoalParseOutput)
     skill_route: SkillRouteOutput = Field(default_factory=SkillRouteOutput)
+    case_projection: CaseProjection = Field(default_factory=CaseProjection)
     confidence: float | None = None
     decision_summary: dict[str, str | int | float | bool | list[str]] = Field(default_factory=dict)
     cognition_metadata: CognitionMetadata = Field(default_factory=CognitionMetadata)
@@ -192,6 +202,7 @@ class CognitionPassBResponse(BaseModel):
     user_semantic_args: dict[str, str | int | float | bool] = Field(default_factory=dict)
     inferred_semantic_args: dict[str, InferredSemanticArg] = Field(default_factory=dict)
     args_draft: dict[str, str | int | float | bool] = Field(default_factory=dict)
+    case_projection: CaseProjection = Field(default_factory=CaseProjection)
     decision_summary: DecisionSummary
     confidence: float | None = None
     cognition_metadata: CognitionMetadata = Field(default_factory=CognitionMetadata)
@@ -431,6 +442,7 @@ class DockerRuntimeEvidence(BaseModel):
     provider_key: str | None = None
     runtime_profile: str | None = None
     case_id: str | None = None
+    case_descriptor_version: str | None = None
     contract_mode: str | None = None
     runtime_mode: str | None = None
     input_bindings: list[ProviderInputBinding] = Field(default_factory=list)

@@ -4,15 +4,13 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 final class SemanticDefaultResolver {
-    private static final String DEFAULT_CASE_ID = "annual_water_yield_gura";
-
     private SemanticDefaultResolver() {
     }
 
     static ObjectNode buildSemanticDefaults(ObjectNode passBNode) {
         ObjectNode defaults = passBNode.objectNode();
         String caseId = resolveCaseId(passBNode);
-        if (DEFAULT_CASE_ID.equals(caseId) && !hasSemanticValue(passBNode, "seasonality_constant")) {
+        if (!caseId.isBlank() && !hasSemanticValue(passBNode, "seasonality_constant")) {
             defaults.put("seasonality_constant", 5.0);
         }
         return defaults;
@@ -27,7 +25,11 @@ final class SemanticDefaultResolver {
         if (!fromInference.isBlank()) {
             return fromInference;
         }
-        return DEFAULT_CASE_ID;
+        String fromArgsDraft = passBNode.path("args_draft").path("case_id").asText("");
+        if (!fromArgsDraft.isBlank()) {
+            return fromArgsDraft;
+        }
+        return "";
     }
 
     private static boolean hasSemanticValue(JsonNode passBNode, String key) {

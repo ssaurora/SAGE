@@ -6,8 +6,16 @@ import os
 
 import httpx
 
+from app.case_registry import (
+    REGISTRY_VERSION,
+    get_case,
+    list_case_ids,
+    list_cases,
+    match_cases,
+)
 from app.cognition_support import call_glm_json
 from app.schemas import (
+    CaseProjection,
     CognitionGoalRouteRequest,
     CognitionGoalRouteResponse,
     CognitionMetadata,
@@ -32,28 +40,6 @@ from app.schemas import (
     SlotSchemaView,
 )
 from app.skill_catalog import get_skill_definition
-
-
-DEFAULT_WATER_YIELD_CASE_ID = "annual_water_yield_gura"
-DEFAULT_WATER_YIELD_SAMPLE_ROOT = "/sample-data/Annual_Water_Yield"
-WATER_YIELD_CASE_CONFIGS = {
-    "annual_water_yield_gura": {
-        "sample_root": DEFAULT_WATER_YIELD_SAMPLE_ROOT,
-        "results_suffix": "gura",
-        "seasonality_constant": 5.0,
-        "inputs": {
-            "watersheds": "watershed_gura.shp",
-            "sub_watersheds": "subwatersheds_gura.shp",
-            "lulc": "land_use_gura.tif",
-            "biophysical_table": "biophysical_table_gura.csv",
-            "precipitation": "precipitation_gura.tif",
-            "eto": "reference_ET_gura.tif",
-            "depth_to_root_restricting_layer": "depth_to_root_restricting_layer_gura.tif",
-            "plant_available_water_content": "plant_available_water_fraction_gura.tif",
-            "invest_datastack": "annual_water_yield_gura.invs.json",
-        },
-    }
-}
 
 
 def build_pass1_response(payload: PlanningPass1Request) -> PlanningPass1Response:
@@ -154,6 +140,11 @@ def _build_deterministic_goal_route_response(
     capability_key = "water_yield" if planning_intent_status == "resolved" else ""
     selected_template = "water_yield_v1" if planning_intent_status == "resolved" else ""
     confidence = 0.92 if planning_intent_status == "resolved" else 0.45
+    case_projection = _resolve_case_projection(
+        normalized,
+        real_case_requested=real_case_requested and planning_intent_status == "resolved",
+        known_case_ids=payload.known_cases,
+    )
 
     return CognitionGoalRouteResponse(
         planning_intent_status=planning_intent_status,
@@ -178,6 +169,7 @@ def _build_deterministic_goal_route_response(
             runtime_profile_preference="docker-invest-real" if real_case_requested and planning_intent_status == "resolved" else None,
             source="cognition_goal_route",
         ),
+        case_projection=case_projection,
         confidence=confidence,
         decision_summary={
             "strategy": "deterministic_cognition_fallback",
@@ -213,7 +205,7 @@ def _build_glm_goal_route_response(payload: CognitionGoalRouteRequest) -> Cognit
             "user_note": payload.user_note,
             "allowed_capabilities": payload.allowed_capabilities or ["water_yield"],
             "allowed_templates": payload.allowed_templates or ["water_yield_v1"],
-            "known_cases": payload.known_cases or [DEFAULT_WATER_YIELD_CASE_ID],
+            "known_cases": payload.known_cases or list_case_ids(),
         },
         temperature=0.1,
         max_tokens=1400,
@@ -247,6 +239,11 @@ def _build_glm_goal_route_response(payload: CognitionGoalRouteRequest) -> Cognit
         default_value="docker-invest-real",
         real_case_requested=real_case_requested,
     )
+    case_projection = _resolve_case_projection(
+        normalized_query,
+        real_case_requested=real_case_requested and status == "resolved",
+        known_case_ids=payload.known_cases,
+    )
     return CognitionGoalRouteResponse(
         planning_intent_status=status,
         goal_parse=GoalParseOutput(
@@ -270,6 +267,7 @@ def _build_glm_goal_route_response(payload: CognitionGoalRouteRequest) -> Cognit
             runtime_profile_preference=runtime_profile_preference,
             source="cognition_goal_route",
         ),
+        case_projection=case_projection,
         confidence=confidence,
         decision_summary={
             "strategy": "glm_goal_route",
@@ -297,6 +295,12 @@ def _build_unavailable_goal_route_response(
 ) -> CognitionGoalRouteResponse:
     normalized = _normalize_query(payload.user_query, payload.user_note)
     real_case_requested = _is_real_case_requested(normalized)
+    case_projection = _resolve_case_projection(
+        normalized,
+        real_case_requested=real_case_requested,
+        known_case_ids=payload.known_cases,
+        force_mode="unavailable" if real_case_requested else None,
+    )
     return CognitionGoalRouteResponse(
         planning_intent_status="resolved",
         goal_parse=GoalParseOutput(
@@ -320,6 +324,7 @@ def _build_unavailable_goal_route_response(
             runtime_profile_preference="docker-invest-real" if real_case_requested else None,
             source="cognition_goal_route",
         ),
+        case_projection=case_projection,
         confidence=None,
         decision_summary={
             "strategy": "glm_goal_route_unavailable",
@@ -348,42 +353,61 @@ def _build_deterministic_passb_response(
 ) -> CognitionPassBResponse:
     slot_names = {slot.slot_name for slot in payload.pass1_result.slot_schema_view.slots}
     lower_query = _normalize_query(payload.user_query, payload.user_note)
-    case_id = _derive_case_id(lower_query)
+    real_case_requested = (
+        str(payload.skill_route.get("execution_mode") or "").strip().lower() == "real_case_validation"
+        or _is_real_case_requested(lower_query)
+    )
+    explicit_case_id = _extract_case_override(payload)
+    case_projection = _resolve_case_projection(
+        lower_query,
+        real_case_requested=real_case_requested,
+        known_case_ids=_known_case_ids_from_payload(payload),
+        explicit_case_id=explicit_case_id,
+    )
+    missing_roles = _extract_explicitly_missing_roles(lower_query)
 
     fallback_slot = "watersheds" if "watersheds" in slot_names else next(iter(slot_names), "workspace")
     bindings: list[SlotBinding] = []
-    for role in payload.pass1_result.logical_input_roles:
-        if "missing" in lower_query and role.role_name == "precipitation":
-            continue
-        if "invalidbinding" in lower_query and role.role_name == "eto":
-            bindings.append(
-                SlotBinding(role_name=role.role_name, slot_name="__invalid_slot__", source="test_invalid_binding")
-            )
-            continue
-        if role.role_name in slot_names:
-            bindings.append(
-                SlotBinding(role_name=role.role_name, slot_name=role.role_name, source="template_direct")
-            )
-            continue
-        if role.required:
-            bindings.append(
-                SlotBinding(role_name=role.role_name, slot_name=fallback_slot, source="template_fallback")
-            )
-
+    args_draft: dict[str, str | int | float | bool] = {}
     binding_status = "ambiguous" if _binding_is_ambiguous(lower_query) else "resolved"
+    if case_projection.mode == "resolved" and case_projection.selected_case_id:
+        bindings = _build_case_projection_bindings(payload, missing_roles, source="case_contract_projection")
+        args_draft = _build_real_case_args_draft(payload, case_projection.selected_case_id, missing_roles)
+        binding_status = "resolved"
+    elif case_projection.mode == "clarify_required":
+        binding_status = "ambiguous"
+    else:
+        for role in payload.pass1_result.logical_input_roles:
+            if role.role_name in missing_roles:
+                continue
+            if "invalidbinding" in lower_query and role.role_name == "eto":
+                bindings.append(
+                    SlotBinding(role_name=role.role_name, slot_name="__invalid_slot__", source="test_invalid_binding")
+                )
+                continue
+            if role.role_name in slot_names:
+                bindings.append(
+                    SlotBinding(role_name=role.role_name, slot_name=role.role_name, source="template_direct")
+                )
+                continue
+            if role.required:
+                bindings.append(
+                    SlotBinding(role_name=role.role_name, slot_name=fallback_slot, source="template_fallback")
+                )
+
     user_semantic_args: dict[str, str | int | float | bool] = {}
-    if case_id:
-        user_semantic_args["case_id"] = case_id
+    if case_projection.mode == "resolved" and case_projection.selected_case_id:
+        user_semantic_args["case_id"] = case_projection.selected_case_id
     if "promotionfailure" in lower_query:
         user_semantic_args["simulate_promotion_failure"] = True
     if "assertionfailure" in lower_query:
         user_semantic_args["simulate_assertion_failure"] = True
 
     inferred_semantic_args: dict[str, InferredSemanticArg] = {}
-    if _is_real_case_requested(lower_query):
+    if case_projection.mode == "resolved" and case_projection.selected_case_id:
         inferred_semantic_args["case_id"] = InferredSemanticArg(
-            value=case_id,
-            reason="The query requested a real annual water yield run for the canonical Gura case.",
+            value=case_projection.selected_case_id,
+            reason="The query resolved to a registered governed annual water yield case.",
             source="model_inference",
         )
 
@@ -392,12 +416,14 @@ def _build_deterministic_passb_response(
         slot_bindings=bindings,
         user_semantic_args=user_semantic_args,
         inferred_semantic_args=inferred_semantic_args,
+        args_draft=args_draft,
+        case_projection=case_projection,
         decision_summary=DecisionSummary(
-            strategy="semantic_binding_candidate",
+            strategy="case_registry_projection" if case_projection.mode == "resolved" else "semantic_binding_candidate",
             assumptions=[
                 "PassB only generates semantic candidates",
-                "Execution-only args are assembled later by the control layer",
-                f"water_yield case_id remains constrained to {case_id} in the current single-case phase",
+                "Execution-only args for real cases come from the governed case registry",
+                *case_projection.decision_basis,
             ],
         ),
         confidence=0.9 if binding_status == "resolved" else 0.45,
@@ -418,7 +444,7 @@ def _build_glm_passb_response(payload: CognitionPassBRequest) -> CognitionPassBR
         "You are a governed binding planner for a single-skill annual water yield workflow. "
         "Return ONLY strict JSON with keys: binding_status, slot_bindings, user_semantic_args, inferred_semantic_args, confidence, notes. "
         "binding_status must be resolved or ambiguous. "
-        "If the query references a known canonical real case and the slot schema already contains matching role-aligned slots, "
+        "If the query clearly references a known governed case and the slot schema already contains matching role-aligned slots, "
         "return binding_status=resolved and bind each required role to the matching slot name instead of asking the user to upload files. "
         "Never emit file paths, workspace settings, worker counts, provider execution arguments, or artifact registry data. "
         "Each inferred_semantic_args item must be an object with keys value, reason, source where source is model_inference."
@@ -433,13 +459,18 @@ def _build_glm_passb_response(payload: CognitionPassBRequest) -> CognitionPassBR
             "skill_route": payload.skill_route,
             "required_roles": [role.role_name for role in payload.pass1_result.logical_input_roles if role.required],
             "slot_schema": [slot.model_dump() for slot in payload.pass1_result.slot_schema_view.slots],
-            "known_case_binding_contract": {
-                "annual_water_yield_gura": {
-                    "intent_signal": ["gura", "annual_water_yield_gura", "real case invest annual water yield"],
-                    "binding_strategy": "bind each logical role to the same-named slot when present",
-                    "default_case_id": DEFAULT_WATER_YIELD_CASE_ID,
+            "accepted_overrides": payload.accepted_overrides,
+            "resume_context": payload.resume_context,
+            "known_case_binding_contract": [
+                {
+                    "case_id": item.case_id,
+                    "aliases": list(item.aliases),
+                    "intent_signals": list(item.intent_signals),
+                    "required_roles": list(item.required_roles),
+                    "executable": item.executable,
                 }
-            },
+                for item in list_cases(_known_case_ids_from_payload(payload))
+            ],
         },
         temperature=0.1,
         max_tokens=1600,
@@ -485,17 +516,32 @@ def _build_glm_passb_response(payload: CognitionPassBRequest) -> CognitionPassBR
         str(payload.skill_route.get("execution_mode") or "").strip().lower() == "real_case_validation"
         or _is_real_case_requested(_normalize_query(payload.user_query, payload.user_note))
     )
+    lower_query = _normalize_query(payload.user_query, payload.user_note)
+    explicit_case_id = _extract_case_override(payload)
     case_id = _extract_case_id_from_llm_passb(payload, user_semantic_args, inferred_semantic_args)
-    if real_case_requested and case_id == DEFAULT_WATER_YIELD_CASE_ID:
-        bindings, binding_status = _normalize_known_case_bindings(payload, bindings, binding_status)
+    case_projection = _resolve_case_projection(
+        lower_query,
+        real_case_requested=real_case_requested,
+        known_case_ids=_known_case_ids_from_payload(payload),
+        explicit_case_id=explicit_case_id or case_id,
+    )
+    missing_roles = _extract_explicitly_missing_roles(lower_query)
+    args_draft: dict[str, str | int | float | bool] = {}
+    if case_projection.mode == "resolved" and case_projection.selected_case_id:
+        bindings = _build_case_projection_bindings(payload, missing_roles, source="glm_case_contract_projection")
+        binding_status = "resolved"
         if "case_id" not in user_semantic_args:
-            user_semantic_args["case_id"] = case_id
+            user_semantic_args["case_id"] = case_projection.selected_case_id
         if "case_id" not in inferred_semantic_args:
             inferred_semantic_args["case_id"] = InferredSemanticArg(
-                value=case_id,
-                reason="The query references the canonical Gura real-case profile.",
+                value=case_projection.selected_case_id,
+                reason="The query resolved to a registered governed annual water yield case.",
                 source="model_inference",
             )
+        args_draft = _build_real_case_args_draft(payload, case_projection.selected_case_id, missing_roles)
+    elif case_projection.mode == "clarify_required":
+        binding_status = "ambiguous"
+        bindings = []
     _reject_execution_fields(user_semantic_args, inferred_semantic_args)
     confidence_value = parsed.get("confidence")
     confidence = float(confidence_value) if isinstance(confidence_value, (int, float)) else None
@@ -504,9 +550,11 @@ def _build_glm_passb_response(payload: CognitionPassBRequest) -> CognitionPassBR
         slot_bindings=bindings,
         user_semantic_args=user_semantic_args,
         inferred_semantic_args=inferred_semantic_args,
+        args_draft=args_draft,
+        case_projection=case_projection,
         decision_summary=DecisionSummary(
-            strategy="glm_semantic_binding",
-            assumptions=_normalize_notes(parsed.get("notes")),
+            strategy="glm_case_projection" if case_projection.mode == "resolved" else "glm_semantic_binding",
+            assumptions=[*_normalize_notes(parsed.get("notes")), *case_projection.decision_basis],
         ),
         confidence=confidence,
         cognition_metadata=CognitionMetadata(
@@ -528,12 +576,21 @@ def _build_unavailable_passb_response(
     failure_code: str,
     failure_message: str,
 ) -> CognitionPassBResponse:
+    lower_query = _normalize_query(payload.user_query, payload.user_note)
+    case_projection = _resolve_case_projection(
+        lower_query,
+        real_case_requested=_is_real_case_requested(lower_query),
+        known_case_ids=_known_case_ids_from_payload(payload),
+        explicit_case_id=_extract_case_override(payload),
+        force_mode="unavailable",
+    )
     return CognitionPassBResponse(
         binding_status="resolved",
         slot_bindings=[],
         user_semantic_args={},
         inferred_semantic_args={},
         args_draft={},
+        case_projection=case_projection,
         decision_summary=DecisionSummary(
             strategy="glm_passb_unavailable",
             assumptions=[failure_message],
@@ -561,11 +618,26 @@ def _build_known_case_cached_passb_response(
 ) -> CognitionPassBResponse | None:
     if not real_case_requested:
         return None
-    if _derive_case_id(lower_query) != DEFAULT_WATER_YIELD_CASE_ID:
+    explicit_case_id = _extract_case_override(payload)
+    case_projection = _resolve_case_projection(
+        lower_query,
+        real_case_requested=True,
+        known_case_ids=_known_case_ids_from_payload(payload),
+        explicit_case_id=explicit_case_id,
+    )
+    if case_projection.mode != "resolved" or not case_projection.selected_case_id:
         return None
-    if "gura" not in lower_query and DEFAULT_WATER_YIELD_CASE_ID not in lower_query:
+    if explicit_case_id and explicit_case_id != case_projection.selected_case_id:
         return None
-    bindings, binding_status = _normalize_known_case_bindings(payload, [], "resolved")
+    selected_case = get_case(case_projection.selected_case_id)
+    if selected_case is None or not selected_case.executable:
+        return None
+    bindings = _build_case_projection_bindings(
+        payload,
+        _extract_explicitly_missing_roles(lower_query),
+        source="glm_case_contract_projection",
+    )
+    binding_status = "resolved" if bindings else "ambiguous"
     if not bindings:
         return None
     return CognitionPassBResponse(
@@ -573,19 +645,24 @@ def _build_known_case_cached_passb_response(
         slot_bindings=bindings,
         user_semantic_args={
             "analysis_type": "annual_water_yield",
-            "location": "gura",
-            "case_id": DEFAULT_WATER_YIELD_CASE_ID,
+            "case_id": selected_case.case_id,
         },
         inferred_semantic_args={
             "case_id": InferredSemanticArg(
-                value=DEFAULT_WATER_YIELD_CASE_ID,
-                reason="The canonical Gura real-case profile has already been validated for this governed workflow.",
+                value=selected_case.case_id,
+                reason="The requested real-case query matches a registered governed case.",
                 source="model_inference",
             )
         },
+        args_draft=_build_real_case_args_draft(
+            payload,
+            selected_case.case_id,
+            _extract_explicitly_missing_roles(lower_query),
+        ),
+        case_projection=case_projection,
         decision_summary=DecisionSummary(
             strategy="glm_known_case_projection",
-            assumptions=["Direct match to known case 'annual_water_yield_gura'"],
+            assumptions=[f"Direct match to known case '{selected_case.case_id}'", *case_projection.decision_basis],
         ),
         confidence=0.95,
         cognition_metadata=CognitionMetadata(
@@ -605,6 +682,9 @@ def _extract_case_id_from_llm_passb(
     user_semantic_args: dict[str, str | int | float | bool],
     inferred_semantic_args: dict[str, InferredSemanticArg],
 ) -> str:
+    override_case_id = _extract_case_override(payload)
+    if override_case_id:
+        return override_case_id
     direct_case_id = str(user_semantic_args.get("case_id") or "").strip()
     if direct_case_id:
         return direct_case_id
@@ -614,40 +694,148 @@ def _extract_case_id_from_llm_passb(
         if value:
             return value
     lower_query = _normalize_query(payload.user_query, payload.user_note)
-    if "gura" in lower_query:
-        return DEFAULT_WATER_YIELD_CASE_ID
-    location = str(user_semantic_args.get("location") or "").strip().lower()
-    if location == "gura":
-        return DEFAULT_WATER_YIELD_CASE_ID
+    matches = match_cases(lower_query, _known_case_ids_from_payload(payload))
+    if matches:
+        return matches[0].case_id
     return ""
 
 
-def _normalize_known_case_bindings(
+def _known_case_ids_from_payload(payload: CognitionGoalRouteRequest | CognitionPassBRequest) -> list[str]:
+    known_cases = getattr(payload, "known_cases", None)
+    if isinstance(known_cases, list) and known_cases:
+        return [str(item).strip() for item in known_cases if str(item).strip()]
+    return list_case_ids()
+
+
+def _extract_case_override(payload: CognitionPassBRequest) -> str:
+    accepted_overrides = payload.accepted_overrides or {}
+    case_id = str(accepted_overrides.get("case_id") or "").strip()
+    if case_id:
+        return case_id
+    resume_context = payload.resume_context or {}
+    case_id = str(resume_context.get("selected_case_id") or "").strip()
+    return case_id
+
+
+def _resolve_case_projection(
+    lower_query: str,
+    *,
+    real_case_requested: bool,
+    known_case_ids: list[str] | None,
+    explicit_case_id: str | None = None,
+    force_mode: str | None = None,
+) -> CaseProjection:
+    cases = list_cases(known_case_ids)
+    candidate_case_ids = [descriptor.case_id for descriptor in cases]
+    explicit_descriptor = get_case(explicit_case_id) if explicit_case_id else None
+    matched_cases = match_cases(lower_query, known_case_ids)
+    if force_mode == "unavailable":
+        return CaseProjection(
+            mode="unavailable",
+            selected_case_id=None,
+            candidate_case_ids=candidate_case_ids,
+            clarify_prompt="The cognition service could not safely resolve a governed case.",
+            decision_basis=["The real-case path requires a valid cognition result before execution can continue."],
+            registry_version=REGISTRY_VERSION,
+        )
+    if not real_case_requested:
+        return CaseProjection(
+            mode="resolved",
+            selected_case_id=None,
+            candidate_case_ids=[],
+            clarify_prompt=None,
+            decision_basis=["The query did not request a real-case execution contract."],
+            registry_version=REGISTRY_VERSION,
+        )
+    if explicit_descriptor is not None:
+        if explicit_descriptor.executable:
+            return CaseProjection(
+                mode="resolved",
+                selected_case_id=explicit_descriptor.case_id,
+                candidate_case_ids=[explicit_descriptor.case_id],
+                clarify_prompt=None,
+                decision_basis=[f"Selected case override '{explicit_descriptor.case_id}' matched the governed registry."],
+                registry_version=REGISTRY_VERSION,
+            )
+        return CaseProjection(
+            mode="clarify_required",
+            selected_case_id=None,
+            candidate_case_ids=candidate_case_ids,
+            clarify_prompt=(
+                f"The selected case '{explicit_descriptor.case_id}' is registered but not executable yet. "
+                "Choose an executable case to continue."
+            ),
+            decision_basis=[f"Override '{explicit_descriptor.case_id}' matched a metadata-only fixture case."],
+            registry_version=REGISTRY_VERSION,
+        )
+    executable_matches = [descriptor for descriptor in matched_cases if descriptor.executable]
+    if len(executable_matches) == 1:
+        descriptor = executable_matches[0]
+        return CaseProjection(
+            mode="resolved",
+            selected_case_id=descriptor.case_id,
+            candidate_case_ids=[descriptor.case_id],
+            clarify_prompt=None,
+            decision_basis=[f"Matched known executable case '{descriptor.case_id}' from the governed registry."],
+            registry_version=REGISTRY_VERSION,
+        )
+    if len(matched_cases) > 1:
+        return CaseProjection(
+            mode="clarify_required",
+            selected_case_id=None,
+            candidate_case_ids=[descriptor.case_id for descriptor in matched_cases],
+            clarify_prompt="Multiple registered annual water yield cases match this request. Choose one case to continue.",
+            decision_basis=["The query matched more than one governed case alias or intent signal."],
+            registry_version=REGISTRY_VERSION,
+        )
+    return CaseProjection(
+        mode="clarify_required",
+        selected_case_id=None,
+        candidate_case_ids=candidate_case_ids,
+        clarify_prompt="Choose a registered annual water yield case before the real-case run can continue.",
+        decision_basis=["The query requested a real case but did not uniquely identify a governed case."],
+        registry_version=REGISTRY_VERSION,
+    )
+
+
+def _build_case_projection_bindings(
     payload: CognitionPassBRequest,
-    bindings: list[SlotBinding],
-    binding_status: str,
-) -> tuple[list[SlotBinding], str]:
-    if bindings:
-        return bindings, binding_status
-    lower_query = _normalize_query(payload.user_query, payload.user_note)
-    explicitly_missing_roles = _extract_explicitly_missing_roles(lower_query)
+    missing_roles: set[str],
+    *,
+    source: str,
+) -> list[SlotBinding]:
     slot_names = {slot.slot_name for slot in payload.pass1_result.slot_schema_view.slots}
-    normalized_bindings: list[SlotBinding] = []
+    bindings: list[SlotBinding] = []
     for role in payload.pass1_result.logical_input_roles:
-        if role.role_name in explicitly_missing_roles:
+        if role.role_name in missing_roles:
             continue
         if role.role_name not in slot_names:
             continue
-        normalized_bindings.append(
+        bindings.append(
             SlotBinding(
                 role_name=role.role_name,
                 slot_name=role.role_name,
-                source="glm_case_contract_projection",
+                source=source,
             )
         )
-    if not normalized_bindings:
-        return bindings, binding_status
-    return normalized_bindings, "resolved"
+    return bindings
+
+
+def _build_real_case_args_draft(
+    payload: CognitionPassBRequest,
+    case_id: str,
+    missing_roles: set[str],
+) -> dict[str, str | int | float | bool]:
+    descriptor = get_case(case_id)
+    if descriptor is None or not descriptor.executable:
+        return {}
+    return descriptor.build_args_draft(
+        task_id=payload.task_id,
+        analysis_template=payload.pass1_result.selected_template or "water_yield_v1",
+        runtime_mode="invest_real_runner",
+        contract_mode="invest_real_case_v1",
+        missing_roles=missing_roles,
+    )
 
 
 def _normalize_notes(raw_notes: object) -> list[str]:
@@ -702,16 +890,10 @@ def _normalize_real_case_preference(
     return value
 
 
-def _derive_case_id(lower_query: str) -> str:
-    if any(token in lower_query for token in ("gura", "case_b", "annual_water_yield_gura")):
-        return "annual_water_yield_gura"
-    return DEFAULT_WATER_YIELD_CASE_ID
-
-
 def _is_real_case_requested(lower_query: str) -> bool:
     return any(
         token in lower_query
-        for token in ("real case", "real_case", "invest", "gura", "annual_water_yield_gura")
+        for token in ("real case", "real_case", "invest", "gura", "annual_water_yield_gura", "blue nile", "upper nile")
     )
 
 
@@ -731,6 +913,8 @@ def _extract_entities(lower_query: str) -> list[str]:
         entities.append("eto")
     if "gura" in lower_query:
         entities.append("gura")
+    if "blue nile" in lower_query or "upper nile" in lower_query:
+        entities.append("blue_nile")
     return entities
 
 
@@ -742,6 +926,8 @@ def _route_signals(lower_query: str) -> list[str]:
         signals.append("invest")
     if "gura" in lower_query:
         signals.append("gura")
+    if "blue nile" in lower_query or "upper nile" in lower_query:
+        signals.append("blue_nile")
     return signals
 
 

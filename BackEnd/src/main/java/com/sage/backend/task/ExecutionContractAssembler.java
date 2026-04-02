@@ -12,9 +12,6 @@ import java.util.List;
 
 @Component
 class ExecutionContractAssembler {
-    private static final String DEFAULT_CASE_ID = "annual_water_yield_gura";
-    private static final String DEFAULT_SAMPLE_ROOT = "/sample-data/Annual_Water_Yield";
-
     private final ObjectMapper objectMapper;
 
     ExecutionContractAssembler(ObjectMapper objectMapper) {
@@ -41,37 +38,37 @@ class ExecutionContractAssembler {
         }
 
         String caseId = SemanticDefaultResolver.resolveCaseId(passBNode);
-        if (!DEFAULT_CASE_ID.equals(caseId)) {
+        if (caseId.isBlank()) {
             blockedMutations.add("case_id");
-            overruledFields.add("case_id");
-            caseId = DEFAULT_CASE_ID;
             assemblyBlocked = true;
         }
 
         String executionMode = safeText(skillRouteNode.path("execution_mode"));
         boolean realCase = "real_case_validation".equalsIgnoreCase(executionMode);
+        ObjectNode argsDraft = ensureObjectNode(passBNode, "args_draft");
 
-        ObjectNode argsDraft = objectMapper.createObjectNode();
-        argsDraft.put("analysis_template", Pass1FactHelper.resolveAnalysisTemplate(pass1Node));
-        argsDraft.put("case_id", caseId);
-        argsDraft.put("case_profile_version", "water_yield_case_contract_v1");
-        argsDraft.put("contract_mode", realCase ? "invest_real_case_v1" : "real_case_prep_v1");
-        argsDraft.put("runtime_mode", realCase ? "invest_real_runner" : "deterministic_stub");
-        argsDraft.put("workspace_dir", "/workspace/output/" + taskId.replace("/", "_"));
-        argsDraft.put("results_suffix", realCase ? "gura" : "week3");
-        argsDraft.put("n_workers", 1);
-        argsDraft.put("sample_data_root", DEFAULT_SAMPLE_ROOT);
-        argsDraft.put("watersheds_path", DEFAULT_SAMPLE_ROOT + "/watershed_gura.shp");
-        argsDraft.put("sub_watersheds_path", DEFAULT_SAMPLE_ROOT + "/subwatersheds_gura.shp");
-        argsDraft.put("lulc_path", DEFAULT_SAMPLE_ROOT + "/land_use_gura.tif");
-        argsDraft.put("biophysical_table_path", DEFAULT_SAMPLE_ROOT + "/biophysical_table_gura.csv");
-        argsDraft.put("precipitation_path", DEFAULT_SAMPLE_ROOT + "/precipitation_gura.tif");
-        argsDraft.put("eto_path", DEFAULT_SAMPLE_ROOT + "/reference_ET_gura.tif");
-        argsDraft.put("depth_to_root_restricting_layer_path", DEFAULT_SAMPLE_ROOT + "/depth_to_root_restricting_layer_gura.tif");
-        argsDraft.put("plant_available_water_content_path", DEFAULT_SAMPLE_ROOT + "/plant_available_water_fraction_gura.tif");
-        argsDraft.put("invest_datastack_path", DEFAULT_SAMPLE_ROOT + "/annual_water_yield_gura.invs.json");
+        if (!argsDraft.has("analysis_template")) {
+            argsDraft.put("analysis_template", Pass1FactHelper.resolveAnalysisTemplate(pass1Node));
+        }
+        if (!caseId.isBlank()) {
+            argsDraft.put("case_id", caseId);
+        }
+        if (!argsDraft.has("contract_mode")) {
+            argsDraft.put("contract_mode", realCase ? "invest_real_case_v1" : "governed_baseline_v1");
+        }
+        if (!argsDraft.has("runtime_mode")) {
+            argsDraft.put("runtime_mode", realCase ? "invest_real_runner" : "deterministic_stub");
+        }
+        if (!argsDraft.has("workspace_dir")) {
+            argsDraft.put("workspace_dir", "/workspace/output/" + taskId.replace("/", "_"));
+        }
+        if (!argsDraft.has("results_suffix")) {
+            argsDraft.put("results_suffix", caseId.isBlank() ? "baseline" : caseId);
+        }
+        if (!argsDraft.has("n_workers")) {
+            argsDraft.put("n_workers", 1);
+        }
 
-        argsDraft.put("case_id", caseId);
         copyScalarIfPresent(userSemanticArgs, argsDraft, "simulate_promotion_failure");
         copyScalarIfPresent(userSemanticArgs, argsDraft, "simulate_assertion_failure");
         copyScalarIfPresent(userSemanticArgs, argsDraft, "seasonality_constant");
@@ -100,7 +97,7 @@ class ExecutionContractAssembler {
             if (!mapping.slotArgKey().isBlank()) {
                 argsDraft.put(mapping.slotArgKey(), slotName);
             }
-            if (!mapping.valueArgKey().isBlank() && mapping.defaultValue() != null) {
+            if (!mapping.valueArgKey().isBlank() && mapping.defaultValue() != null && !argsDraft.has(mapping.valueArgKey())) {
                 argsDraft.set(mapping.valueArgKey(), mapping.defaultValue().deepCopy());
             }
         }

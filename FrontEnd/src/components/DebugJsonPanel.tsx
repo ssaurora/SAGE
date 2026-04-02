@@ -14,7 +14,7 @@ export default function DebugJsonPanel({
   const [open, setOpen] = useState(defaultExpanded);
 
   return (
-    <div className="card">
+    <div className="card debug-panel">
       <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
         <h2>{title}</h2>
         <button onClick={() => setOpen((current) => !current)}>

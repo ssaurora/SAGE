@@ -32,6 +32,9 @@ type MissingSlotDto = NonNullable<WaitingContextDto["missing_slots"]>[number];
 type RequiredUserActionDto = NonNullable<WaitingContextDto["required_user_actions"]>[number];
 type RepairProposalDto = NonNullable<TaskDetailResponse["repair_proposal"]>;
 type RepairActionExplanationDto = NonNullable<RepairProposalDto["action_explanations"]>[number];
+type CaseProjectionView =
+  | NonNullable<TaskDetailResponse["case_projection"]>
+  | NonNullable<TaskManifestResponse["case_projection"]>;
 type GoalParseView =
   | NonNullable<TaskDetailResponse["goal_parse_summary"]>
   | NonNullable<TaskManifestResponse["goal_parse"]>;
@@ -299,6 +302,37 @@ function StringList({ values, emptyText }: { values?: string[]; emptyText: strin
       ))}
     </ul>
   );
+}
+
+function CaseProjectionPanel({
+  projection,
+}: {
+  projection?: CaseProjectionView;
+}) {
+  if (!projection) {
+    return <p className="muted">No governed case projection available.</p>;
+  }
+
+  return (
+    <>
+      <div className="kv-grid">
+        <div className="kv-item"><span className="kv-key">mode</span><span className="kv-value">{projection.mode ?? "-"}</span></div>
+        <div className="kv-item"><span className="kv-key">selected_case_id</span><span className="kv-value">{projection.selected_case_id ?? "-"}</span></div>
+        <div className="kv-item"><span className="kv-key">candidate_count</span><span className="kv-value">{formatValue(projection.candidate_case_ids?.length ?? 0)}</span></div>
+        <div className="kv-item"><span className="kv-key">registry_version</span><span className="kv-value">{projection.registry_version ?? "-"}</span></div>
+      </div>
+      <h3>Clarify Prompt</h3>
+      <p>{projection.clarify_prompt ?? "-"}</p>
+      <h3>Candidate Cases</h3>
+      <StringList values={projection.candidate_case_ids} emptyText="No candidate cases." />
+      <h3>Decision Basis</h3>
+      <StringList values={projection.decision_basis} emptyText="No decision basis recorded." />
+    </>
+  );
+}
+
+function hasClarifyCaseSelectionAction(waitingContext?: TaskDetailResponse["waiting_context"]): boolean {
+  return Boolean(waitingContext?.required_user_actions?.some((action) => action.key === "clarify_case_selection"));
 }
 
 function GoalParsePanel({
@@ -1236,6 +1270,7 @@ export default function TaskDetailPage() {
   const [forceReverting, setForceReverting] = useState(false);
   const [logicalSlot, setLogicalSlot] = useState("");
   const [userNote, setUserNote] = useState("");
+  const [selectedCaseId, setSelectedCaseId] = useState("");
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
   const [targetCheckpointVersion, setTargetCheckpointVersion] = useState("");
 
@@ -1254,7 +1289,10 @@ export default function TaskDetailPage() {
     if (!logicalSlot && taskResponse.waiting_context?.missing_slots?.length) {
       setLogicalSlot(taskResponse.waiting_context.missing_slots[0].slot_name);
     }
-  }, [logicalSlot, taskId]);
+    if (!selectedCaseId && taskResponse.case_projection?.selected_case_id) {
+      setSelectedCaseId(taskResponse.case_projection.selected_case_id);
+    }
+  }, [logicalSlot, selectedCaseId, taskId]);
 
   useEffect(() => {
     if (!getAccessToken()) {
@@ -1357,7 +1395,10 @@ export default function TaskDetailPage() {
   }, [taskId]);
 
   const canCancel = task?.state === "QUEUED" || task?.state === "RUNNING";
+  const clarifyCaseSelection = hasClarifyCaseSelectionAction(task?.waiting_context);
   const canResume = task?.waiting_context?.can_resume === true;
+  const canSubmitClarify = clarifyCaseSelection && selectedCaseId.trim().length > 0;
+  const canSubmitResume = canResume || canSubmitClarify;
   const canForceRevert = task?.state === "STATE_CORRUPTED" && currentUserRole === "ADMIN";
 
   useEffect(() => {
@@ -1414,6 +1455,7 @@ export default function TaskDetailPage() {
     try {
       await resumeTask(taskId, {
         resume_request_id: crypto.randomUUID(),
+        args_overrides: selectedCaseId.trim() ? { case_id: selectedCaseId.trim() } : undefined,
         user_note: userNote,
       });
       await loadData();
@@ -1451,25 +1493,29 @@ export default function TaskDetailPage() {
   }
 
   return (
-    <main className="container">
-      <div className="card">
+    <main className="container page-shell">
+      <div className="card hero-card">
+        <span className="hero-eyebrow">Governed Task Trace</span>
         <h1>Task Detail</h1>
-        <p className="muted">task_id: {taskId}</p>
-        <p className="muted">update_mode: {streamMode}</p>
-        <p className="muted">latest_result_bundle_id: {task?.latest_result_bundle_id ?? "-"}</p>
-        <p className="muted">latest_workspace_id: {task?.latest_workspace_id ?? "-"}</p>
+        <p className="muted">Inspect orchestration, cognition, contract projection, repair state, and execution readiness from one place.</p>
+        <div className="hero-meta">
+          <span className="meta-chip"><strong>task_id</strong>{taskId}</span>
+          <span className="meta-chip"><strong>update_mode</strong>{streamMode}</span>
+          <span className="meta-chip"><strong>result_bundle</strong>{task?.latest_result_bundle_id ?? "-"}</span>
+          <span className="meta-chip"><strong>workspace</strong>{task?.latest_workspace_id ?? "-"}</span>
+        </div>
         {loading ? <p>Loading...</p> : null}
         {error ? <p className="error">{error}</p> : null}
 
         {task ? (
-          <div className="row" style={{ marginTop: 12 }}>
+          <div className="hero-status-row">
             <span className="status">{task.state}</span>
-            <span className="muted">state_version: {task.state_version}</span>
-            <span className="muted">input_chain_status: {task.input_chain_status ?? "-"}</span>
+            <span className="meta-chip"><strong>state_version</strong>{task.state_version}</span>
+            <span className="meta-chip"><strong>input_chain_status</strong>{task.input_chain_status ?? "-"}</span>
           </div>
         ) : null}
 
-        <div className="row" style={{ marginTop: 12 }}>
+      <div className="action-row">
           <button disabled={!canCancel || canceling} onClick={handleCancel}>
             {canceling ? "Canceling..." : "Cancel Task"}
           </button>
@@ -1482,8 +1528,19 @@ export default function TaskDetailPage() {
         </div>
       </div>
 
+      <div className="page-grid">
+        <div className="section-stack">
+          <div className="section-banner">
+            <p className="muted">Primary trail: follow authority, projection, trace, and manifest freeze in the order they affect execution.</p>
+            <div className="pill-row">
+              <span className="soft-pill"><strong>focus</strong>governed path</span>
+              <span className="soft-pill"><strong>repair</strong>{task?.state === "WAITING_USER" ? "active" : "idle"}</span>
+            </div>
+          </div>
+
       <div className="card">
         <h2>Governance</h2>
+        <p className="muted card-intro">Authority and orchestration facts that determine whether the task can keep moving, wait for the user, or stay blocked.</p>
         {task ? (
           <>
             <div className="kv-grid">
@@ -1512,7 +1569,7 @@ export default function TaskDetailPage() {
                 <p className="muted">
                   Force-revert realigns authority to a frozen checkpoint after `STATE_CORRUPTED`.
                 </p>
-                <div className="row" style={{ marginTop: 12 }}>
+                <div className="action-row">
                   <input
                     type="number"
                     min={0}
@@ -1539,13 +1596,21 @@ export default function TaskDetailPage() {
 
       <div className="card">
         <h2>Goal Parse</h2>
+        <p className="muted card-intro">The normalized user intent and extracted entities before the system commits to a governed case contract.</p>
         <GoalParsePanel summary={task?.goal_parse_summary} />
         <h3>Goal Route Cognition</h3>
         <CognitionMetadataPanel metadata={task?.goal_route_cognition} emptyText="No goal-route cognition metadata." />
       </div>
 
       <div className="card">
+        <h2>Case Projection</h2>
+        <p className="muted card-intro">The governed case-level projection that either resolves the request or asks for clarification before execution.</p>
+        <CaseProjectionPanel projection={task?.case_projection} />
+      </div>
+
+      <div className="card">
         <h2>Skill Route</h2>
+        <p className="muted card-intro">Skill and template selection after the request has been interpreted into capability space.</p>
         <SkillRoutePanel summary={task?.skill_route_summary} />
         <h3>PassB Cognition</h3>
         <CognitionMetadataPanel metadata={task?.passb_cognition} emptyText="No passb cognition metadata." />
@@ -1553,7 +1618,7 @@ export default function TaskDetailPage() {
 
       <div className="card">
         <h2>LLM Trace</h2>
-        <p className="muted">
+        <p className="muted card-intro">
           These panels show the structured outputs produced by the cognition layer at each stage, not just the provider summary.
         </p>
         <h3>Goal Route Output</h3>
@@ -1606,6 +1671,7 @@ export default function TaskDetailPage() {
 
       <div className="card">
         <h2>Manifest</h2>
+        <p className="muted card-intro">Frozen execution contract, capability facts, bindings, and runtime assertions that are promoted into the runtime layer.</p>
         {manifest ? (
           <>
             <div className="kv-grid">
@@ -1663,6 +1729,8 @@ export default function TaskDetailPage() {
           <StringList values={manifest.blocked_mutations} emptyText="No blocked mutations." />
           <h3>Manifest Planning Summary</h3>
           <DebugJsonPanel title="Manifest Planning Summary" payload={manifest.planning_summary ?? null} defaultExpanded={false} />
+          <h3>Manifest Case Projection</h3>
+          <CaseProjectionPanel projection={manifest.case_projection} />
           <h3>Manifest Goal Parse</h3>
           <GoalParsePanel summary={manifest.goal_parse} />
           <h3>Manifest Goal Route Cognition</h3>
@@ -1703,7 +1771,10 @@ export default function TaskDetailPage() {
         )}
       </div>
 
-      <div className="card">
+        </div>
+
+        <aside className="side-rail">
+      <div className="card rail-card">
         <h2>Job</h2>
         {task?.job ? (
           <div className="kv-grid">
@@ -1741,7 +1812,7 @@ export default function TaskDetailPage() {
         )}
       </div>
 
-      <div className="card">
+      <div className="card rail-card">
         <h2>Run History</h2>
         {runs.length === 0 ? (
           <p className="muted">No run history yet.</p>
@@ -1756,32 +1827,32 @@ export default function TaskDetailPage() {
         )}
       </div>
 
-      <div className="card">
+      <div className="card rail-card">
         <h2>Pass1 Summary</h2>
         <Pass1SummaryPanel summary={task?.pass1_summary} />
       </div>
 
-      <div className="card">
+      <div className="card rail-card">
         <h2>Bindings</h2>
         <SlotBindingsSummaryPanel summary={task?.slot_bindings_summary} />
       </div>
 
-      <div className="card">
+      <div className="card rail-card">
         <h2>Args Draft</h2>
         <ArgsDraftSummaryPanel summary={task?.args_draft_summary} />
       </div>
 
-      <div className="card">
+      <div className="card rail-card">
         <h2>Validation</h2>
         <ValidationSummaryPanel summary={task?.validation_summary} />
       </div>
 
-      <div className="card">
+      <div className="card rail-card">
         <h2>Pass2 Summary</h2>
         <Pass2SummaryPanel summary={task?.pass2_summary} />
       </div>
 
-      <div className="card">
+      <div className="card rail-card">
         <h2>Result Summaries</h2>
         <h3>Result Object Summary</h3>
         <ResultObjectSummaryPanel summary={task?.result_object_summary} />
@@ -1795,6 +1866,9 @@ export default function TaskDetailPage() {
         <FailureSummaryPanel summary={task?.last_failure_summary} />
       </div>
 
+        </aside>
+      </div>
+
       {task?.state === "WAITING_USER" ? (
         <div className="card">
           <h2>Repair Panel</h2>
@@ -1804,7 +1878,7 @@ export default function TaskDetailPage() {
           <RepairProposalPanel proposal={task.repair_proposal} />
           <h3>Repair Proposal Cognition</h3>
           <CognitionMetadataPanel metadata={task?.repair_proposal_cognition} emptyText="No repair proposal cognition metadata." />
-          <div className="row" style={{ marginTop: 12 }}>
+          <div className="action-row">
             <input
               placeholder="logical_slot"
               value={logicalSlot}
@@ -1812,14 +1886,22 @@ export default function TaskDetailPage() {
             />
             <input type="file" onChange={(event) => void handleUpload(event.target.files?.[0] ?? null)} />
           </div>
-          <div className="row" style={{ marginTop: 12 }}>
+          <div className="action-row">
             <input
               placeholder="user note"
               value={userNote}
               onChange={(event) => setUserNote(event.target.value)}
             />
-            <button disabled={!canResume || resuming} onClick={handleResume}>
-              {resuming ? "Resuming..." : canResume ? "Resume" : "Resume Blocked"}
+            {clarifyCaseSelection ? (
+              <select value={selectedCaseId} onChange={(event) => setSelectedCaseId(event.target.value)}>
+                <option value="">Select governed case</option>
+                {(task.case_projection?.candidate_case_ids ?? []).map((caseId) => (
+                  <option key={caseId} value={caseId}>{caseId}</option>
+                ))}
+              </select>
+            ) : null}
+            <button disabled={!canSubmitResume || resuming} onClick={handleResume}>
+              {resuming ? "Resuming..." : clarifyCaseSelection ? "Submit Clarification" : canResume ? "Resume" : "Resume Blocked"}
             </button>
           </div>
         </div>

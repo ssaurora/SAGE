@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("All", "Success", "RepairResume", "Cancel")]
+    [ValidateSet("All", "Success", "RepairResume", "Cancel", "Clarify")]
     [string]$Scenario = "All",
     [string]$SampleDataRoot,
     [string]$InvestPipSpec = "natcap.invest",
@@ -245,6 +245,46 @@ function Invoke-RealCaseRepairResumeScenario {
     return $taskId
 }
 
+function Invoke-RealCaseClarifyScenario {
+    param(
+        [hashtable]$Headers
+    )
+
+    $createBody = @{ user_query = "run a real case invest annual water yield analysis" } | ConvertTo-Json
+    $task = Invoke-RestMethod -Method Post -Uri "http://localhost:8080/tasks" -Headers $Headers -ContentType "application/json" -Body $createBody
+    $taskId = [string]$task.task_id
+    Assert-True (-not [string]::IsNullOrWhiteSpace($taskId)) "clarify scenario task_id should exist"
+
+    $waitingDetail = Wait-TaskState -TaskId $taskId -Headers $Headers -States @("WAITING_USER", "FAILED", "SUCCEEDED") -TimeoutSeconds 180
+    Assert-True ([string]$waitingDetail.state -eq "WAITING_USER") "clarify scenario should enter WAITING_USER"
+    Assert-True ([string]$waitingDetail.case_projection.mode -eq "clarify_required") "case_projection.mode should be clarify_required"
+    $candidateCaseIds = @($waitingDetail.case_projection.candidate_case_ids | ForEach-Object { [string]$_ })
+    Assert-True ($candidateCaseIds -contains "annual_water_yield_gura") "candidate_case_ids should include annual_water_yield_gura"
+    $requiredActions = @($waitingDetail.waiting_context.required_user_actions | ForEach-Object { [string]$_.key })
+    Assert-True ($requiredActions -contains "clarify_case_selection") "required_user_actions should include clarify_case_selection"
+    Assert-True ($waitingDetail.waiting_context.can_resume -eq $false) "can_resume should be false before clarify selection"
+    Assert-CognitionMetadata -Metadata $waitingDetail.goal_route_cognition -Stage "goal-route"
+
+    $resumeBody = @{
+        resume_request_id = [guid]::NewGuid().ToString()
+        user_note = "choose gura"
+        args_overrides = @{ case_id = "annual_water_yield_gura" }
+    } | ConvertTo-Json -Depth 4
+    $resumeResponse = Invoke-RestMethod -Method Post -Uri "http://localhost:8080/tasks/$taskId/resume" -Headers $Headers -ContentType "application/json" -Body $resumeBody
+    Assert-True ($resumeResponse.resume_accepted -eq $true) "clarify resume should be accepted"
+
+    $detail = Wait-TaskState -TaskId $taskId -Headers $Headers -States @("SUCCEEDED", "FAILED", "WAITING_USER", "STATE_CORRUPTED") -TimeoutSeconds 360
+    Assert-True ([string]$detail.state -eq "SUCCEEDED") "clarify scenario should finish in SUCCEEDED"
+
+    $result = Get-TaskResult -TaskId $taskId -Headers $Headers
+    Assert-CommonRealCaseFields -Detail $detail -Result $result
+    Assert-True ([string]$result.case_projection.mode -eq "resolved") "result.case_projection.mode should resolve after clarify"
+    Assert-True ([string]$result.case_projection.selected_case_id -eq "annual_water_yield_gura") "result.case_projection.selected_case_id should be annual_water_yield_gura"
+    Assert-ManifestMatchesAuthority -Headers $Headers -TaskId $taskId -Result $result
+    Write-Output "Phase3 real-case clarify passed: $taskId"
+    return $taskId
+}
+
 function Invoke-RealCaseCancelScenario {
     param(
         [hashtable]$Headers
@@ -382,6 +422,9 @@ try {
     }
     if ($Scenario -in @("All", "RepairResume")) {
         $executedTaskIds.Add((Invoke-RealCaseRepairResumeScenario -Headers $headers -AccessToken $token -PrecipitationFile $precipitationFile -ServiceContainer $serviceContainer))
+    }
+    if ($Scenario -in @("All", "Clarify")) {
+        $executedTaskIds.Add((Invoke-RealCaseClarifyScenario -Headers $headers))
     }
     if ($Scenario -in @("All", "Cancel")) {
         $executedTaskIds.Add((Invoke-RealCaseCancelScenario -Headers $headers))

@@ -65,7 +65,12 @@ final class MinReadyEvaluator {
                     continue;
                 }
                 if ("clarify".equalsIgnoreCase(actionType)) {
-                    if (request.getUserNote() == null || request.getUserNote().isBlank()) {
+                    String actionKey = safeString(action.getKey());
+                    if ("clarify_case_selection".equalsIgnoreCase(actionKey)) {
+                        if (!hasAcceptedOverride(argOverrides, "case_id")) {
+                            return false;
+                        }
+                    } else if (request.getUserNote() == null || request.getUserNote().isBlank()) {
                         return false;
                     }
                     continue;

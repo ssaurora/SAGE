@@ -20,6 +20,9 @@ public class CognitionGoalRouteResponse {
     @JsonProperty("decision_summary")
     private Map<String, Object> decisionSummary;
 
+    @JsonProperty("case_projection")
+    private Map<String, Object> caseProjection;
+
     @JsonProperty("cognition_metadata")
     private Map<String, Object> cognitionMetadata;
 
@@ -61,6 +64,14 @@ public class CognitionGoalRouteResponse {
 
     public void setDecisionSummary(Map<String, Object> decisionSummary) {
         this.decisionSummary = decisionSummary;
+    }
+
+    public Map<String, Object> getCaseProjection() {
+        return caseProjection;
+    }
+
+    public void setCaseProjection(Map<String, Object> caseProjection) {
+        this.caseProjection = caseProjection;
     }
 
     public Map<String, Object> getCognitionMetadata() {

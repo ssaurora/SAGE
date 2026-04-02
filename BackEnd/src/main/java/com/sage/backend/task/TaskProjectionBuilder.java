@@ -167,6 +167,10 @@ final class TaskProjectionBuilder {
             if (decisionSummary != null && !decisionSummary.isEmpty()) {
                 output.put("decision_summary", decisionSummary);
             }
+            Map<String, Object> caseProjection = buildJsonObjectView(goalParseRoot.path("case_projection"), objectMapper);
+            if (caseProjection != null && !caseProjection.isEmpty()) {
+                output.put("case_projection", caseProjection);
+            }
             output.put("goal_parse", buildJsonObjectView(goalParseRoot, objectMapper));
         }
         if (skillRouteRoot != null && !skillRouteRoot.isNull() && !skillRouteRoot.isMissingNode()) {
@@ -188,6 +192,17 @@ final class TaskProjectionBuilder {
             output.put("skill_route", buildJsonObjectView(skillRouteRoot, objectMapper));
         }
         return output.isEmpty() ? null : output;
+    }
+
+    static Map<String, Object> buildCaseProjection(JsonNode goalParseRoot, JsonNode passBRoot, ObjectMapper objectMapper) {
+        JsonNode source = passBRoot == null ? null : passBRoot.path("case_projection");
+        if (source == null || source.isNull() || source.isMissingNode() || !source.isObject()) {
+            source = goalParseRoot == null ? null : goalParseRoot.path("case_projection");
+        }
+        if (source == null || source.isNull() || source.isMissingNode() || !source.isObject()) {
+            return null;
+        }
+        return buildJsonObjectView(source, objectMapper);
     }
 
     static Map<String, Object> buildStageOutput(JsonNode root, ObjectMapper objectMapper) {
@@ -468,6 +483,7 @@ final class TaskProjectionBuilder {
         evidence.setProviderKey(root.path("provider_key").asText(null));
         evidence.setRuntimeProfile(root.path("runtime_profile").asText(null));
         evidence.setCaseId(root.path("case_id").asText(null));
+        evidence.setCaseDescriptorVersion(root.path("case_descriptor_version").asText(null));
         evidence.setContractMode(root.path("contract_mode").asText(null));
         evidence.setRuntimeMode(root.path("runtime_mode").asText(null));
         evidence.setInputBindings(buildInputBindingList(root.path("input_bindings")));

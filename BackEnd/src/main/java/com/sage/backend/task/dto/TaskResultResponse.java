@@ -75,6 +75,9 @@ public class TaskResultResponse {
     @JsonProperty("cognition_verdict")
     private String cognitionVerdict;
 
+    @JsonProperty("case_projection")
+    private Map<String, Object> caseProjection;
+
     @JsonProperty("goal_route_cognition")
     private Map<String, Object> goalRouteCognition;
 
@@ -299,6 +302,14 @@ public class TaskResultResponse {
 
     public void setCognitionVerdict(String cognitionVerdict) {
         this.cognitionVerdict = cognitionVerdict;
+    }
+
+    public Map<String, Object> getCaseProjection() {
+        return caseProjection;
+    }
+
+    public void setCaseProjection(Map<String, Object> caseProjection) {
+        this.caseProjection = caseProjection;
     }
 
     public Map<String, Object> getGoalRouteCognition() {
@@ -762,6 +773,9 @@ public class TaskResultResponse {
         @JsonProperty("case_id")
         private String caseId;
 
+        @JsonProperty("case_descriptor_version")
+        private String caseDescriptorVersion;
+
         @JsonProperty("contract_mode")
         private String contractMode;
 
@@ -828,6 +842,14 @@ public class TaskResultResponse {
 
         public void setCaseId(String caseId) {
             this.caseId = caseId;
+        }
+
+        public String getCaseDescriptorVersion() {
+            return caseDescriptorVersion;
+        }
+
+        public void setCaseDescriptorVersion(String caseDescriptorVersion) {
+            this.caseDescriptorVersion = caseDescriptorVersion;
         }
 
         public String getContractMode() {

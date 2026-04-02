@@ -102,6 +102,9 @@ public class TaskDetailResponse {
     @JsonProperty("cognition_verdict")
     private String cognitionVerdict;
 
+    @JsonProperty("case_projection")
+    private Map<String, Object> caseProjection;
+
     @JsonProperty("goal_route_cognition")
     private Map<String, Object> goalRouteCognition;
 
@@ -388,6 +391,14 @@ public class TaskDetailResponse {
 
     public void setCognitionVerdict(String cognitionVerdict) {
         this.cognitionVerdict = cognitionVerdict;
+    }
+
+    public Map<String, Object> getCaseProjection() {
+        return caseProjection;
+    }
+
+    public void setCaseProjection(Map<String, Object> caseProjection) {
+        this.caseProjection = caseProjection;
     }
 
     public Map<String, Object> getGoalRouteCognition() {

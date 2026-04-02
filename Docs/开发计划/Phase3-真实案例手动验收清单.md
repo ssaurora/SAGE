@@ -199,6 +199,43 @@ $resume = Invoke-RestMethod -Method Post -Uri "http://localhost:8080/tasks/$repa
 - `result_bundle.metrics.used_real_invest = true`
 - `provider_key / runtime_profile / case_id` 与 success 场景一致
 
+## 6A. Clarify / Case Selection 场景
+
+创建一个刻意模糊的 real-case 请求：
+
+```powershell
+$body = @{ user_query = "run a real case invest annual water yield analysis" } | ConvertTo-Json
+$task = Invoke-RestMethod -Method Post -Uri "http://localhost:8080/tasks" -Headers $headers -ContentType "application/json" -Body $body
+$clarifyTaskId = [string]$task.task_id
+```
+
+等待进入 `WAITING_USER`，然后核对：
+
+- `state = WAITING_USER`
+- `case_projection.mode = clarify_required`
+- `case_projection.candidate_case_ids` 包含 `annual_water_yield_gura`
+- `waiting_context.required_user_actions` 包含 `clarify_case_selection`
+- `waiting_context.can_resume = false`
+
+通过现有 `/resume` 提交 case 选择：
+
+```powershell
+$resumeBody = @{
+  resume_request_id = [guid]::NewGuid().ToString()
+  user_note = "choose gura"
+  args_overrides = @{ case_id = "annual_water_yield_gura" }
+} | ConvertTo-Json -Depth 4
+$resume = Invoke-RestMethod -Method Post -Uri "http://localhost:8080/tasks/$clarifyTaskId/resume" -Headers $headers -ContentType "application/json" -Body $resumeBody
+```
+
+验收点：
+
+- `resume_accepted = true`
+- 最终 `state = SUCCEEDED`
+- `result.case_projection.mode = resolved`
+- `result.case_projection.selected_case_id = annual_water_yield_gura`
+- `provider_key / runtime_profile / case_id` 与 manifest、runtime evidence 一致
+
 ## 7. Cancel 场景
 
 创建任务：

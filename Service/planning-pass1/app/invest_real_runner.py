@@ -118,6 +118,7 @@ def _write_runtime_result(payload: dict, args: dict[str, object], output_registr
             "provider_key": str(payload["provider_key"]),
             "runtime_profile": str(payload["runtime_profile"]),
             "case_id": str(payload.get("case_id") or ""),
+            "case_descriptor_version": str(payload["args_draft"].get("case_descriptor_version", "")),
             "analysis_template": str(payload["args_draft"].get("analysis_template", "water_yield_v1")),
             "contract_mode": str(payload["args_draft"].get("contract_mode", "invest_real_case_v1")),
             "runtime_mode": str(payload["args_draft"].get("runtime_mode", "invest_real_runner")),

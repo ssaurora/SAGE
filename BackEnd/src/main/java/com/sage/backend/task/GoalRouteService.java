@@ -154,7 +154,9 @@ public class GoalRouteService {
                 || normalized.contains("precipitation")
                 || normalized.contains("eto")
                 || normalized.contains("yield")
-                || normalized.contains("gura")) {
+                || normalized.contains("gura")
+                || normalized.contains("blue nile")
+                || normalized.contains("upper nile")) {
             return "water_yield";
         }
         return "generic_analysis";
@@ -183,7 +185,8 @@ public class GoalRouteService {
                 || normalized.contains("real_case")
                 || normalized.contains("invest")
                 || normalized.contains("gura")
-                || normalized.contains("annual_water_yield_gura")
+                || normalized.contains("blue nile")
+                || normalized.contains("upper nile")
                 || normalized.contains("真实");
     }
 
