@@ -37,6 +37,16 @@ class GoalRouteServiceTest {
     }
 
     @Test
+    void deriveDoesNotTreatCaseNamesAsDeterministicSkillSignals() {
+        GoalRouteService.GoalRouteDecision decision = service.derive("run gura analysis");
+
+        assertEquals("generic_analysis_request", decision.goalParse().path("goal_type").asText());
+        assertEquals("generic_analysis", decision.goalParse().path("analysis_kind").asText());
+        assertEquals("governed_baseline", decision.goalParse().path("execution_mode").asText());
+        assertEquals("generic_analysis", decision.skillRoute().path("primary_skill").asText());
+    }
+
+    @Test
     void deriveFallbackUsesPass1FactsInsteadOfSelectedTemplateAsGoalType() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
         JsonNode pass1Result = objectMapper.readTree("""

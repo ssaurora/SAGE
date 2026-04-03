@@ -22,7 +22,7 @@ class ExecutionContractAssembler {
         ArrayNode slotBindings = passBNode.withArray("slot_bindings");
         ObjectNode userSemanticArgs = ensureObjectNode(passBNode, "user_semantic_args");
         ObjectNode inferredSemanticArgs = ensureObjectNode(passBNode, "inferred_semantic_args");
-        ObjectNode semanticDefaults = SemanticDefaultResolver.buildSemanticDefaults(passBNode);
+        ObjectNode semanticDefaults = SemanticDefaultResolver.buildSemanticDefaults(passBNode, pass1Node);
         passBNode.set("semantic_defaults", semanticDefaults);
 
         List<String> blockedMutations = new ArrayList<>();
@@ -76,8 +76,6 @@ class ExecutionContractAssembler {
 
         if (!argsDraft.has("seasonality_constant") && semanticDefaults.has("seasonality_constant")) {
             argsDraft.set("seasonality_constant", semanticDefaults.get("seasonality_constant"));
-        } else if (!argsDraft.has("seasonality_constant")) {
-            argsDraft.put("seasonality_constant", 5.0);
         }
 
         boolean simulateAssertionFailure = userSemanticArgs.path("simulate_assertion_failure").asBoolean(false);
@@ -102,12 +100,8 @@ class ExecutionContractAssembler {
             }
         }
 
-        if (!argsDraft.has("root_depth_factor")) {
-            argsDraft.put("root_depth_factor", Pass1FactHelper.resolveStableDefaultDouble(pass1Node, "root_depth_factor", 0.8));
-        }
-        if (!argsDraft.has("pawc_factor")) {
-            argsDraft.put("pawc_factor", Pass1FactHelper.resolveStableDefaultDouble(pass1Node, "pawc_factor", 0.85));
-        }
+        copyStableDefaultIfMissing(pass1Node, argsDraft, "root_depth_factor");
+        copyStableDefaultIfMissing(pass1Node, argsDraft, "pawc_factor");
 
         passBNode.set("args_draft", argsDraft);
         return new AssemblyResult(caseId, blockedMutations, overruledFields, assemblyBlocked);
@@ -133,6 +127,16 @@ class ExecutionContractAssembler {
         JsonNode value = source.path(key).path("value");
         if (!value.isMissingNode() && !value.isNull()) {
             target.set(key, value.deepCopy());
+        }
+    }
+
+    private void copyStableDefaultIfMissing(JsonNode pass1Node, ObjectNode argsDraft, String key) {
+        if (argsDraft.has(key)) {
+            return;
+        }
+        JsonNode stableDefault = Pass1FactHelper.resolveStableDefault(pass1Node, key);
+        if (stableDefault != null) {
+            argsDraft.set(key, stableDefault.deepCopy());
         }
     }
 

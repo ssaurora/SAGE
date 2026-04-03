@@ -2,16 +2,20 @@ package com.sage.backend.task;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.sage.backend.planning.Pass1FactHelper;
 
 final class SemanticDefaultResolver {
     private SemanticDefaultResolver() {
     }
 
-    static ObjectNode buildSemanticDefaults(ObjectNode passBNode) {
+    static ObjectNode buildSemanticDefaults(ObjectNode passBNode, JsonNode pass1Result) {
         ObjectNode defaults = passBNode.objectNode();
         String caseId = resolveCaseId(passBNode);
         if (!caseId.isBlank() && !hasSemanticValue(passBNode, "seasonality_constant")) {
-            defaults.put("seasonality_constant", 5.0);
+            JsonNode stableDefault = Pass1FactHelper.resolveStableDefault(pass1Result, "seasonality_constant");
+            if (stableDefault != null) {
+                defaults.set("seasonality_constant", stableDefault.deepCopy());
+            }
         }
         return defaults;
     }

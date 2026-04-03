@@ -161,12 +161,10 @@ public class GoalRouteService {
 
     private String inferPrimarySkill(String normalized) {
         if (normalized.contains("water_yield")
+                || normalized.contains("water yield")
                 || normalized.contains("precipitation")
                 || normalized.contains("eto")
-                || normalized.contains("yield")
-                || normalized.contains("gura")
-                || normalized.contains("blue nile")
-                || normalized.contains("upper nile")) {
+                || normalized.contains("yield")) {
             return "water_yield";
         }
         return "generic_analysis";
@@ -194,9 +192,6 @@ public class GoalRouteService {
         return normalized.contains("real case")
                 || normalized.contains("real_case")
                 || normalized.contains("invest")
-                || normalized.contains("gura")
-                || normalized.contains("blue nile")
-                || normalized.contains("upper nile")
                 || normalized.contains("真实");
     }
 

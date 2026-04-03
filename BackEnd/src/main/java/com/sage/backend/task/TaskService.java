@@ -2103,16 +2103,16 @@ public class TaskService {
             }
         }
         if (!boundRoles.contains("depth_to_root_restricting_layer") && !argsDraft.has("root_depth_factor")) {
-            argsDraft.put(
-                    "root_depth_factor",
-                    Pass1FactHelper.resolveStableDefaultDouble(pass1Result, "root_depth_factor", 0.8)
-            );
+            JsonNode stableDefault = Pass1FactHelper.resolveStableDefault(pass1Result, "root_depth_factor");
+            if (stableDefault != null) {
+                argsDraft.set("root_depth_factor", stableDefault.deepCopy());
+            }
         }
         if (!boundRoles.contains("plant_available_water_content") && !argsDraft.has("pawc_factor")) {
-            argsDraft.put(
-                    "pawc_factor",
-                    Pass1FactHelper.resolveStableDefaultDouble(pass1Result, "pawc_factor", 0.85)
-            );
+            JsonNode stableDefault = Pass1FactHelper.resolveStableDefault(pass1Result, "pawc_factor");
+            if (stableDefault != null) {
+                argsDraft.set("pawc_factor", stableDefault.deepCopy());
+            }
         }
     }
 

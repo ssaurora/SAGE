@@ -117,6 +117,21 @@ public final class Pass1FactHelper {
         return fallbackValue;
     }
 
+    public static JsonNode resolveStableDefault(JsonNode pass1Result, String key) {
+        if (pass1Result == null || pass1Result.isNull() || pass1Result.isMissingNode()) {
+            return null;
+        }
+        JsonNode stableDefaults = pass1Result.path("stable_defaults");
+        if (!stableDefaults.isObject()) {
+            return null;
+        }
+        JsonNode value = stableDefaults.path(key);
+        if (value.isMissingNode() || value.isNull()) {
+            return null;
+        }
+        return value;
+    }
+
     public static String resolveRuntimeProfileHint(JsonNode pass1Result) {
         if (pass1Result != null && !pass1Result.isNull() && !pass1Result.isMissingNode()) {
             String runtimeProfileHint = pass1Result.path("capability_facts").path("runtime_profile_hint").asText("");
