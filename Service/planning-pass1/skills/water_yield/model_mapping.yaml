@@ -1,0 +1,6 @@
+providers:
+  cognition:
+    default: deterministic
+    real_case_required: glm
+  runtime:
+    preferred_registry: governed_case_registry

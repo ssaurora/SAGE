@@ -27,6 +27,12 @@ public class TaskResultResponse {
     @JsonProperty("case_id")
     private String caseId;
 
+    @JsonProperty("skill_id")
+    private String skillId;
+
+    @JsonProperty("skill_version")
+    private String skillVersion;
+
     @JsonProperty("resume_transaction")
     private ResumeTransactionView resumeTransaction;
 
@@ -174,6 +180,22 @@ public class TaskResultResponse {
 
     public void setCaseId(String caseId) {
         this.caseId = caseId;
+    }
+
+    public String getSkillId() {
+        return skillId;
+    }
+
+    public void setSkillId(String skillId) {
+        this.skillId = skillId;
+    }
+
+    public String getSkillVersion() {
+        return skillVersion;
+    }
+
+    public void setSkillVersion(String skillVersion) {
+        this.skillVersion = skillVersion;
     }
 
     public ResumeTransactionView getResumeTransaction() {

@@ -1,0 +1,4 @@
+templates:
+  - template_id: water_yield_v1
+    analysis_type: Annual Water Yield Analysis
+    graph_family: governed_water_yield

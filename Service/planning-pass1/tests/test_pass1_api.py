@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from app.case_registry import get_case
 
 
 def _build_chain_payload(
@@ -53,35 +54,49 @@ def _build_chain_payload(
 
 
 def _materialize_args_draft(pass1_result: dict, passb_result: dict, task_id: str, user_query: str) -> None:
+    if passb_result.get("args_draft"):
+        return
     lower_query = user_query.lower()
-    real_case = any(token in lower_query for token in ("real case", "real_case", "invest", "gura"))
-    sample_root = "/sample-data/Annual_Water_Yield"
+    real_case = any(token in lower_query for token in ("real case", "real_case", "invest", "gura", "gtm", "upper tana"))
+    case_projection = passb_result.get("case_projection", {}) or {}
+    selected_case_id = (
+        passb_result.get("args_draft", {}).get("case_id")
+        or case_projection.get("selected_case_id")
+        or "annual_water_yield_gura"
+    )
+    descriptor = get_case(str(selected_case_id))
+    sample_root = descriptor.sample_root if descriptor is not None else "/sample-data/Annual_Water_Yield"
+    descriptor_version = descriptor.descriptor_version if descriptor is not None else "annual_water_yield_gura_v1"
+    default_args = descriptor.default_args if descriptor is not None else {}
     args_draft = {
         "analysis_template": pass1_result.get("selected_template", "water_yield_v1"),
-        "case_id": "annual_water_yield_gura",
-        "case_profile_version": "water_yield_case_contract_v1",
+        "case_id": selected_case_id,
+        "case_descriptor_version": descriptor_version,
         "contract_mode": "invest_real_case_v1" if real_case else "real_case_prep_v1",
         "runtime_mode": "invest_real_runner" if real_case else "deterministic_stub",
         "workspace_dir": f"/workspace/output/{task_id}",
-        "results_suffix": "gura" if real_case else "week3",
-        "n_workers": 1,
+        "results_suffix": str(default_args.get("results_suffix") or ("gura" if real_case else "week3")),
+        "n_workers": int(default_args.get("n_workers") or 1),
         "sample_data_root": sample_root,
-        "watersheds_path": f"{sample_root}/watershed_gura.shp",
-        "sub_watersheds_path": f"{sample_root}/subwatersheds_gura.shp",
-        "lulc_path": f"{sample_root}/land_use_gura.tif",
-        "biophysical_table_path": f"{sample_root}/biophysical_table_gura.csv",
-        "precipitation_path": f"{sample_root}/precipitation_gura.tif",
-        "eto_path": f"{sample_root}/reference_ET_gura.tif",
-        "depth_to_root_restricting_layer_path": f"{sample_root}/depth_to_root_restricting_layer_gura.tif",
-        "plant_available_water_content_path": f"{sample_root}/plant_available_water_fraction_gura.tif",
-        "invest_datastack_path": f"{sample_root}/annual_water_yield_gura.invs.json",
-        "seasonality_constant": 5.0,
+        "watersheds_path": f"{sample_root}/{default_args.get('watersheds', 'watershed_gura.shp')}",
+        "sub_watersheds_path": f"{sample_root}/{default_args.get('sub_watersheds', 'subwatersheds_gura.shp')}",
+        "lulc_path": f"{sample_root}/{default_args.get('lulc', 'land_use_gura.tif')}",
+        "biophysical_table_path": f"{sample_root}/{default_args.get('biophysical_table', 'biophysical_table_gura.csv')}",
+        "precipitation_path": f"{sample_root}/{default_args.get('precipitation', 'precipitation_gura.tif')}",
+        "eto_path": f"{sample_root}/{default_args.get('eto', 'reference_ET_gura.tif')}",
+        "depth_to_root_restricting_layer_path": f"{sample_root}/{default_args.get('depth_to_root_restricting_layer', 'depth_to_root_restricting_layer_gura.tif')}",
+        "plant_available_water_content_path": f"{sample_root}/{default_args.get('plant_available_water_content', 'plant_available_water_fraction_gura.tif')}",
+        "invest_datastack_path": f"{sample_root}/{default_args.get('invest_datastack', 'annual_water_yield_gura.invs.json')}",
+        "seasonality_constant": float(default_args.get("seasonality_constant") or 5.0),
         "root_depth_factor": pass1_result.get("stable_defaults", {}).get("root_depth_factor", 0.8),
         "pawc_factor": pass1_result.get("stable_defaults", {}).get("pawc_factor", 0.85),
     }
 
     mapping_by_role = {mapping["role_name"]: mapping for mapping in pass1_result.get("role_arg_mappings", [])}
-    simulate_assertion_failure = bool(passb_result.get("user_semantic_args", {}).get("simulate_assertion_failure"))
+    user_semantic_args = passb_result.get("user_semantic_args", {}) or {}
+    simulate_assertion_failure = bool(user_semantic_args.get("simulate_assertion_failure"))
+    if user_semantic_args.get("simulate_promotion_failure"):
+        args_draft["simulate_promotion_failure"] = True
     for binding in passb_result.get("slot_bindings", []):
         role_name = binding.get("role_name")
         slot_name = binding.get("slot_name")
@@ -94,7 +109,12 @@ def _materialize_args_draft(pass1_result: dict, passb_result: dict, task_id: str
             continue
         if slot_arg_key:
             args_draft[slot_arg_key] = slot_name
-        if value_arg_key and "default_value" in mapping and mapping["default_value"] is not None:
+        if (
+            value_arg_key
+            and value_arg_key not in args_draft
+            and "default_value" in mapping
+            and mapping["default_value"] is not None
+        ):
             args_draft[value_arg_key] = mapping["default_value"]
 
     passb_result["args_draft"] = args_draft
@@ -148,6 +168,79 @@ def _write_external_case_registry(tmp_path: Path) -> Path:
     return registry_path
 
 
+def _write_incomplete_skill_asset(tmp_path: Path) -> Path:
+    skill_root = tmp_path / "skills" / "water_yield"
+    skill_root.mkdir(parents=True, exist_ok=True)
+    (skill_root / "skill_profile.yaml").write_text(
+        "\n".join(
+            [
+                "skill_id: water_yield",
+                "skill_version: 1.0.0",
+                "analysis_type: Annual Water Yield Analysis",
+                "capability_key: water_yield",
+                "selected_template: water_yield_v1",
+                "display_name: Water Yield",
+                "supported_case_ids:",
+                "  - annual_water_yield_gura",
+                "required_roles:",
+                "  - watersheds",
+                "  - lulc",
+                "  - biophysical_table",
+                "  - precipitation",
+                "  - eto",
+                "optional_roles:",
+                "  - depth_to_root_restricting_layer",
+                "  - plant_available_water_content",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (skill_root / "validation_policy.yaml").write_text(
+        "validation_hints: []\nrequired_runtime_args: [workspace_dir, results_suffix]\nforbidden_semantic_keys: [workspace_dir]\n",
+        encoding="utf-8",
+    )
+    (skill_root / "repair_policy.yaml").write_text(
+        "reason_messages: {}\naction_message_templates: {}\nnotes: []\n",
+        encoding="utf-8",
+    )
+    (skill_root / "interpretation_guide.yaml").write_text(
+        "\n".join(
+            [
+                "title: Water Yield Explanation",
+                "analysis_type_label: Annual Water Yield Analysis",
+                "required_highlight_templates: []",
+                "narrative_template: '{analysis_type}: {summary}'",
+                "limitation_note: Stay grounded in the current result bundle.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return skill_root.parent
+
+
+def _catalog_fact(
+    asset_id: str,
+    roles: list[str],
+    *,
+    availability_status: str = "READY",
+    blacklist_flag: bool = False,
+    file_type: str = "raster",
+) -> dict:
+    return {
+        "asset_id": asset_id,
+        "logical_role_candidates": roles,
+        "file_type": file_type,
+        "crs": "EPSG:4326",
+        "extent": "bbox(0,0,1,1)",
+        "resolution": "30m",
+        "nodata_info": "-9999",
+        "source": "test_catalog",
+        "checksum_version": "sha256:test",
+        "availability_status": availability_status,
+        "blacklist_flag": blacklist_flag,
+    }
+
+
 def test_planning_pass1_response_schema(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path / "workspace"))
     from app.main import app
@@ -164,6 +257,8 @@ def test_planning_pass1_response_schema(monkeypatch, tmp_path: Path) -> None:
     assert response.status_code == 200
 
     body = response.json()
+    assert body["skill_id"] == "water_yield"
+    assert body["skill_version"] == "1.0.0"
     assert body["capability_key"] == "water_yield"
     assert body["capability_facts"]["capability_key"] == "water_yield"
     assert body["selected_template"] == "water_yield_v1"
@@ -275,6 +370,74 @@ def test_cognition_goal_route_marks_unsupported_for_other_capabilities(monkeypat
     body = response.json()
     assert body["planning_intent_status"] == "unsupported"
     assert body["goal_parse"]["goal_type"] == "unsupported_analysis_request"
+
+
+def test_planning_pass2_uses_metadata_catalog_facts_in_summary(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path / "workspace"))
+    from app.main import app
+
+    client = TestClient(app)
+    pass1_result, passb_result, validation_summary, _ = _build_chain_payload(
+        client,
+        task_id="task_w3_catalog",
+        user_query="run a real case invest annual water yield analysis for gura",
+    )
+
+    response = client.post(
+        "/planning/pass2",
+        json={
+            "task_id": "task_w3_catalog",
+            "state_version": 4,
+            "pass1_result": pass1_result,
+            "passb_result": passb_result,
+            "validation_summary": validation_summary,
+            "metadata_catalog_facts": [
+                _catalog_fact("asset_precip", ["precipitation"]),
+                _catalog_fact("asset_lulc_blacklisted", ["lulc"], blacklist_flag=True),
+            ],
+        },
+    )
+    assert response.status_code == 200
+
+    body = response.json()
+    planning_summary = body["planning_summary"]
+    assert planning_summary["catalog_asset_count"] == 2
+    assert planning_summary["catalog_ready_asset_count"] == 1
+    assert planning_summary["catalog_blacklisted_asset_count"] == 1
+    assert planning_summary["catalog_used_for_materialization"] is True
+    assert planning_summary["catalog_source"] == "metadata_catalog_facts"
+
+
+def test_planning_pass2_marks_catalog_unused_when_facts_missing(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path / "workspace"))
+    from app.main import app
+
+    client = TestClient(app)
+    pass1_result, passb_result, validation_summary, _ = _build_chain_payload(
+        client,
+        task_id="task_w3_no_catalog",
+        user_query="water yield",
+    )
+
+    response = client.post(
+        "/planning/pass2",
+        json={
+            "task_id": "task_w3_no_catalog",
+            "state_version": 4,
+            "pass1_result": pass1_result,
+            "passb_result": passb_result,
+            "validation_summary": validation_summary,
+        },
+    )
+    assert response.status_code == 200
+
+    body = response.json()
+    planning_summary = body["planning_summary"]
+    assert planning_summary["catalog_asset_count"] == 0
+    assert planning_summary["catalog_ready_asset_count"] == 0
+    assert planning_summary["catalog_blacklisted_asset_count"] == 0
+    assert planning_summary["catalog_used_for_materialization"] is False
+    assert planning_summary["catalog_source"] == "none"
 
 
 def test_workspace_directories_are_created(monkeypatch, tmp_path: Path) -> None:
@@ -576,6 +739,8 @@ def test_goal_route_real_case_query_requires_clarify_when_case_is_not_explicit(m
     assert response.status_code == 200
     body = response.json()
     assert body["planning_intent_status"] == "resolved"
+    assert body["skill_route"]["skill_id"] == "water_yield"
+    assert body["skill_route"]["skill_version"] == "1.0.0"
     assert body["case_projection"]["mode"] == "clarify_required"
     assert "annual_water_yield_gura" in body["case_projection"]["candidate_case_ids"]
     assert "annual_water_yield_blue_nile_fixture" not in body["case_projection"]["candidate_case_ids"]
@@ -617,6 +782,8 @@ def test_passb_real_case_query_requires_clarify_without_executable_args(monkeypa
     assert response.status_code == 200
     body = response.json()
     assert body["binding_status"] == "ambiguous"
+    assert body["skill_id"] == "water_yield"
+    assert body["skill_version"] == "1.0.0"
     assert body["case_projection"]["mode"] == "clarify_required"
     assert body["args_draft"] == {}
     assert body["slot_bindings"] == []
@@ -690,6 +857,8 @@ def test_passb_real_case_query_resolves_external_executable_case_without_case_sp
     assert response.status_code == 200
     body = response.json()
     assert body["binding_status"] == "resolved"
+    assert body["skill_id"] == "water_yield"
+    assert body["skill_version"] == "1.0.0"
     assert body["case_projection"]["mode"] == "resolved"
     assert body["case_projection"]["selected_case_id"] == "annual_water_yield_upper_tana"
     assert body["args_draft"]["case_id"] == "annual_water_yield_upper_tana"
@@ -736,10 +905,51 @@ def test_passb_real_case_query_accepts_case_override_for_clarify_resume(monkeypa
     assert response.status_code == 200
     body = response.json()
     assert body["binding_status"] == "resolved"
+    assert body["skill_id"] == "water_yield"
+    assert body["skill_version"] == "1.0.0"
     assert body["case_projection"]["mode"] == "resolved"
     assert body["case_projection"]["selected_case_id"] == "annual_water_yield_gura"
     assert body["args_draft"]["case_descriptor_version"] == "annual_water_yield_gura_v1"
     assert body["args_draft"]["runtime_mode"] == "invest_real_runner"
+
+
+def test_passb_parameter_schema_failure_returns_structured_error_without_legacy_fallback(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("SAGE_SKILL_ASSET_ROOT", str(_write_incomplete_skill_asset(tmp_path)))
+
+    from app.planner import build_pass1_response, build_passb_response
+    from app.schemas import CognitionPassBRequest, PlanningPass1Request
+
+    pass1_result = build_pass1_response(
+        PlanningPass1Request(
+            task_id="task_skill_asset_failure",
+            user_query="run a real case invest annual water yield analysis for gura",
+            state_version=1,
+        )
+    )
+
+    response = build_passb_response(
+        CognitionPassBRequest(
+            task_id="task_skill_asset_failure",
+            user_query="run a real case invest annual water yield analysis for gura",
+            state_version=2,
+            pass1_result=pass1_result,
+            goal_parse={"goal_type": "water_yield_analysis"},
+            skill_route={
+                "skill_id": "water_yield",
+                "skill_version": "1.0.0",
+                "capability_key": "water_yield",
+                "selected_template": "water_yield_v1",
+                "execution_mode": "real_case_validation",
+            },
+        )
+    )
+
+    assert response.skill_id == "water_yield"
+    assert response.skill_version == "1.0.0"
+    assert response.binding_status == "ambiguous"
+    assert response.args_draft == {}
+    assert response.cognition_metadata.failure_code == "PARAMETER_SCHEMA_UNAVAILABLE"
+    assert response.cognition_metadata.provider == "skill_asset"
 
 
 def test_job_fails_with_case_fact_mismatch_before_success(monkeypatch, tmp_path: Path) -> None:

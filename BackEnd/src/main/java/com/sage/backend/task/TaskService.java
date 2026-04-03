@@ -303,6 +303,9 @@ public class TaskService {
             );
             String pass1Json = objectMapper.writeValueAsString(pass1Response);
             JsonNode pass1Node = objectMapper.readTree(pass1Json);
+            skillRouteNode.put("skill_id", pass1Response.getSkillId());
+            skillRouteNode.put("skill_version", pass1Response.getSkillVersion());
+            skillRouteNode.put("selected_template", pass1Response.getSelectedTemplate());
             skillRouteNode.put("template_version", pass1Response.getTemplateVersion());
             String enrichedGoalParseJson = writeJson(goalParseNode);
             String enrichedSkillRouteJson = writeJson(skillRouteNode);
@@ -335,6 +338,19 @@ public class TaskService {
             JsonNode passBNode = passBStage.passBNode();
             String cognitionVerdict = CognitionVerdictResolver.resolve(goalParseNode, passBNode, passBStage.assemblyResult());
             taskStateMapper.updateCognitionVerdict(taskId, cognitionVerdict);
+
+            String passBHardFailureCode = evaluatePassBHardFailureMetadata(passBNode.path("cognition_metadata"));
+            if (passBHardFailureCode != null) {
+                return failCreateForRequiredCognition(
+                        taskId,
+                        currentVersion,
+                        currentState,
+                        traceId,
+                        "passb",
+                        passBHardFailureCode,
+                        passBNode
+                );
+            }
 
             if (isRealCaseRoute(skillRouteNode)) {
                 String cognitionFailureCode = evaluateRequiredLlmMetadata(passBNode.path("cognition_metadata"));
@@ -541,6 +557,8 @@ public class TaskService {
         response.setResumeTransaction(TaskProjectionBuilder.buildResumeTransaction(readJsonNode(taskState.getResumeTxnJson())));
         response.setCorruptionState(buildCorruptionState(taskState));
         response.setPromotionStatus(derivePromotionStatus(taskState.getCurrentState(), taskState.getCorruptionReason()));
+        response.setSkillId(routeProjection.skillRoute().path("skill_id").asText(null));
+        response.setSkillVersion(routeProjection.skillRoute().path("skill_version").asText(null));
         response.setGoalParseSummary(TaskProjectionBuilder.buildGoalParseSummary(routeProjection.goalParse()));
         response.setSkillRouteSummary(TaskProjectionBuilder.buildSkillRouteSummary(routeProjection.skillRoute()));
         response.setPass1Summary(buildPass1Summary(taskState.getPass1ResultJson()));
@@ -618,12 +636,14 @@ public class TaskService {
         response.setCaseId(activeCaseId);
         response.setPlanningIntentStatus(readJsonNode(taskState.getGoalParseJson()).path("planning_intent_status").asText(null));
         JsonNode passBRoot = readJsonNode(taskState.getPassbResultJson());
+        JsonNode skillRouteRoot = readJsonNode(taskState.getSkillRouteJson());
+        response.setSkillId(skillRouteRoot.path("skill_id").asText(passBRoot.path("skill_id").asText(null)));
+        response.setSkillVersion(skillRouteRoot.path("skill_version").asText(passBRoot.path("skill_version").asText(null)));
         response.setBindingStatus(passBRoot.path("binding_status").asText(null));
         response.setOverruledFields(TaskProjectionBuilder.jsonArrayToStrings(passBRoot.path("overruled_fields")));
         response.setBlockedMutations(TaskProjectionBuilder.jsonArrayToStrings(passBRoot.path("blocked_mutations")));
         response.setAssemblyBlocked(passBRoot.path("assembly_blocked").isBoolean() ? passBRoot.path("assembly_blocked").asBoolean() : null);
         JsonNode goalParseRoot = readJsonNode(taskState.getGoalParseJson());
-        JsonNode skillRouteRoot = readJsonNode(taskState.getSkillRouteJson());
         response.setCaseProjection(TaskProjectionBuilder.buildCaseProjection(goalParseRoot, passBRoot, objectMapper));
         response.setGoalRouteCognition(TaskProjectionBuilder.buildCognitionView(goalParseRoot, objectMapper));
         response.setGoalRouteOutput(TaskProjectionBuilder.buildGoalRouteOutput(goalParseRoot, skillRouteRoot, objectMapper));
@@ -778,6 +798,8 @@ public class TaskService {
         response.setCognitionVerdict(taskState.getCognitionVerdict());
         JsonNode goalParseRoot = readJsonNode(taskState.getGoalParseJson());
         JsonNode skillRouteRoot = readJsonNode(taskState.getSkillRouteJson());
+        response.setSkillId(skillRouteRoot.path("skill_id").asText(null));
+        response.setSkillVersion(skillRouteRoot.path("skill_version").asText(null));
         response.setPlanningIntentStatus(goalParseRoot.path("planning_intent_status").asText(null));
         JsonNode passBRoot = readJsonNode(taskState.getPassbResultJson());
         response.setBindingStatus(passBRoot.path("binding_status").asText(null));
@@ -1585,6 +1607,9 @@ public class TaskService {
                 );
                 String pass1Json = objectMapper.writeValueAsString(pass1Response);
                 pass1Node = objectMapper.readTree(pass1Json);
+                skillRouteNode.put("skill_id", pass1Response.getSkillId());
+                skillRouteNode.put("skill_version", pass1Response.getSkillVersion());
+                skillRouteNode.put("selected_template", pass1Response.getSelectedTemplate());
                 skillRouteNode.put("template_version", pass1Response.getTemplateVersion());
                 taskStateMapper.updateGoalAndRoute(taskId, writeJson(goalParseNode), writeJson(skillRouteNode));
                 ensureUpdated(taskStateMapper.updateStateAndPass1(taskId, currentVersion, TaskStatus.PLANNING.name(), pass1Json));
@@ -1613,6 +1638,22 @@ public class TaskService {
                 passBJson = passBStage.passBJson();
                 cognitionVerdict = CognitionVerdictResolver.resolve(goalParseNode, passBNode, passBStage.assemblyResult());
                 taskStateMapper.updateCognitionVerdict(taskId, cognitionVerdict);
+            }
+
+            String passBHardFailureCode = evaluatePassBHardFailureMetadata(passBNode.path("cognition_metadata"));
+            if (passBHardFailureCode != null) {
+                return failResumeForRequiredCognition(
+                        taskState,
+                        request,
+                        currentVersion,
+                        currentState,
+                        baseCheckpointVersion,
+                        candidateCheckpointVersion,
+                        candidateInventoryVersion,
+                        "passb",
+                        passBHardFailureCode,
+                        passBNode
+                );
             }
 
             if (isRealCaseRoute(skillRouteNode)) {
@@ -2397,6 +2438,24 @@ public class TaskService {
         return null;
     }
 
+    private String evaluatePassBHardFailureMetadata(JsonNode metadataNode) {
+        if (metadataNode == null || metadataNode.isNull() || metadataNode.isMissingNode()) {
+            return null;
+        }
+        String failureCode = metadataNode.path("failure_code").asText("");
+        String status = metadataNode.path("status").asText("");
+        for (String value : List.of(failureCode, status)) {
+            if ("SKILL_ASSET_UNAVAILABLE".equalsIgnoreCase(value)
+                    || "SKILL_ASSET_BINDING_FAILED".equalsIgnoreCase(value)
+                    || "PARAMETER_SCHEMA_UNAVAILABLE".equalsIgnoreCase(value)
+                    || "PARAMETER_SCHEMA_INVALID".equalsIgnoreCase(value)
+                    || "PARAMETER_SCHEMA_BINDING_FAILED".equalsIgnoreCase(value)) {
+                return value.toUpperCase();
+            }
+        }
+        return null;
+    }
+
     private CreateTaskResponse failCreateForRequiredCognition(
             String taskId,
             int currentVersion,
@@ -2480,11 +2539,23 @@ public class TaskService {
             case "COGNITION_TIMEOUT" -> "Required LLM cognition timed out during " + stage + ".";
             case "COGNITION_SCHEMA_INVALID" -> "Required LLM cognition returned invalid schema during " + stage + ".";
             case "COGNITION_POLICY_VIOLATION" -> "Required LLM cognition policy was violated during " + stage + ".";
+            case "SKILL_ASSET_UNAVAILABLE" -> "Skill asset loading failed during " + stage + ".";
+            case "SKILL_ASSET_BINDING_FAILED" -> "Skill asset binding failed during " + stage + ".";
+            case "PARAMETER_SCHEMA_UNAVAILABLE" -> "Parameter schema is unavailable during " + stage + ".";
+            case "PARAMETER_SCHEMA_INVALID" -> "Parameter schema is invalid during " + stage + ".";
+            case "PARAMETER_SCHEMA_BINDING_FAILED" -> "Parameter schema binding failed during " + stage + ".";
             default -> "Required LLM cognition was unavailable during " + stage + ".";
         };
     }
 
     private String mapCognitionFailureVerdict(String failureCode) {
+        if ("SKILL_ASSET_UNAVAILABLE".equalsIgnoreCase(failureCode)
+                || "SKILL_ASSET_BINDING_FAILED".equalsIgnoreCase(failureCode)
+                || "PARAMETER_SCHEMA_UNAVAILABLE".equalsIgnoreCase(failureCode)
+                || "PARAMETER_SCHEMA_INVALID".equalsIgnoreCase(failureCode)
+                || "PARAMETER_SCHEMA_BINDING_FAILED".equalsIgnoreCase(failureCode)) {
+            return "SKILL_ASSET_FAILED";
+        }
         if ("COGNITION_POLICY_VIOLATION".equalsIgnoreCase(failureCode)) {
             return "LLM_POLICY_VIOLATION";
         }
@@ -2696,6 +2767,9 @@ public class TaskService {
         req.setPass1Result(pass1Result);
         req.setPassbResult(passBResult);
         req.setValidationSummary(validationSummary);
+        req.setMetadataCatalogFacts(objectMapper.valueToTree(
+                AttachmentCatalogProjector.project(taskAttachmentMapper.findByTaskId(taskId))
+        ));
         return pass2Client.runPass2(req);
     }
 

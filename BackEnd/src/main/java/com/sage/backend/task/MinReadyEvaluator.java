@@ -84,27 +84,29 @@ final class MinReadyEvaluator {
 
     private static Set<String> resolveReadySlots(List<TaskAttachment> attachments) {
         Set<String> readySlots = new HashSet<>();
-        if (attachments == null) {
-            return readySlots;
-        }
-        for (TaskAttachment attachment : attachments) {
-            if (!hasVisibleAttachmentMetadata(attachment)) {
+        for (Map<String, Object> fact : AttachmentCatalogProjector.project(attachments)) {
+            if (!isUsableCatalogFact(fact)) {
                 continue;
             }
-            readySlots.add(attachment.getLogicalSlot().trim());
+            Object roleCandidates = fact.get("logical_role_candidates");
+            if (!(roleCandidates instanceof List<?> candidateList)) {
+                continue;
+            }
+            for (Object candidate : candidateList) {
+                String normalized = safeString(candidate == null ? null : candidate.toString());
+                if (!normalized.isBlank()) {
+                    readySlots.add(normalized);
+                }
+            }
         }
         return readySlots;
     }
 
-    private static boolean hasVisibleAttachmentMetadata(TaskAttachment attachment) {
-        return attachment != null
-                && !safeString(attachment.getId()).isBlank()
-                && !safeString(attachment.getLogicalSlot()).isBlank()
-                && !safeString(attachment.getFileName()).isBlank()
-                && attachment.getSizeBytes() != null
-                && attachment.getSizeBytes() >= 0
-                && !safeString(attachment.getStoredPath()).isBlank()
-                && !safeString(attachment.getChecksum()).isBlank();
+    private static boolean isUsableCatalogFact(Map<String, Object> fact) {
+        if (fact == null || Boolean.TRUE.equals(fact.get("blacklist_flag"))) {
+            return false;
+        }
+        return "READY".equalsIgnoreCase(safeString(stringValue(fact.get("availability_status"))));
     }
 
     private static boolean isSlotSatisfied(String slotName, Set<String> readySlots, Map<String, Object> slotOverrides) {
@@ -151,5 +153,9 @@ final class MinReadyEvaluator {
 
     private static String safeString(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private static String stringValue(Object value) {
+        return value == null ? null : value.toString();
     }
 }

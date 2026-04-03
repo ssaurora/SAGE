@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.skill_assets import build_skill_definition_from_bundle, maybe_load_skill_bundle
 from app.schemas import (
     CapabilityDefinitionLite,
     CapabilityOutputContract,
@@ -38,7 +39,13 @@ def get_skill_definition(capability_key: str | None) -> SkillDefinition:
     normalized_key = normalize_capability_key(capability_key)
     if normalized_key != CANONICAL_CAPABILITY_KEY:
         raise ValueError(f"Unsupported capability key: {capability_key}")
+    bundle = maybe_load_skill_bundle(normalized_key)
+    if bundle is not None:
+        return build_skill_definition_from_bundle(bundle)
+    return _build_legacy_skill_definition()
 
+
+def _build_legacy_skill_definition() -> SkillDefinition:
     capability = CapabilityDefinitionLite(
         capability_key=CANONICAL_CAPABILITY_KEY,
         display_name="Water Yield",

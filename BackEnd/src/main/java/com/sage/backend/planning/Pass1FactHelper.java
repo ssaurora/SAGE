@@ -66,6 +66,38 @@ public final class Pass1FactHelper {
         return "";
     }
 
+    public static String resolveSkillId(JsonNode pass1Result, JsonNode skillRoute) {
+        if (pass1Result != null && !pass1Result.isNull() && !pass1Result.isMissingNode()) {
+            String skillId = pass1Result.path("skill_id").asText("");
+            if (!skillId.isBlank()) {
+                return skillId;
+            }
+        }
+        if (skillRoute != null && !skillRoute.isNull() && !skillRoute.isMissingNode()) {
+            String skillId = skillRoute.path("skill_id").asText("");
+            if (!skillId.isBlank()) {
+                return skillId;
+            }
+        }
+        return DEFAULT_CAPABILITY_KEY;
+    }
+
+    public static String resolveSkillVersion(JsonNode pass1Result, JsonNode skillRoute) {
+        if (pass1Result != null && !pass1Result.isNull() && !pass1Result.isMissingNode()) {
+            String skillVersion = pass1Result.path("skill_version").asText("");
+            if (!skillVersion.isBlank()) {
+                return skillVersion;
+            }
+        }
+        if (skillRoute != null && !skillRoute.isNull() && !skillRoute.isMissingNode()) {
+            String skillVersion = skillRoute.path("skill_version").asText("");
+            if (!skillVersion.isBlank()) {
+                return skillVersion;
+            }
+        }
+        return "";
+    }
+
     public static double resolveStableDefaultDouble(JsonNode pass1Result, String key, double fallbackValue) {
         if (pass1Result != null && !pass1Result.isNull() && !pass1Result.isMissingNode()) {
             JsonNode stableDefaults = pass1Result.path("stable_defaults");

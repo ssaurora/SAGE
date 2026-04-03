@@ -99,6 +99,12 @@ public class TaskManifestResponse {
     @JsonProperty("skill_route")
     private SkillRoute skillRoute;
 
+    @JsonProperty("skill_id")
+    private String skillId;
+
+    @JsonProperty("skill_version")
+    private String skillVersion;
+
     @JsonProperty("capability_key")
     private String capabilityKey;
 
@@ -197,6 +203,10 @@ public class TaskManifestResponse {
     public void setGoalParse(GoalParse goalParse) { this.goalParse = goalParse; }
     public SkillRoute getSkillRoute() { return skillRoute; }
     public void setSkillRoute(SkillRoute skillRoute) { this.skillRoute = skillRoute; }
+    public String getSkillId() { return skillId; }
+    public void setSkillId(String skillId) { this.skillId = skillId; }
+    public String getSkillVersion() { return skillVersion; }
+    public void setSkillVersion(String skillVersion) { this.skillVersion = skillVersion; }
     public String getCapabilityKey() { return capabilityKey; }
     public void setCapabilityKey(String capabilityKey) { this.capabilityKey = capabilityKey; }
     public CapabilityFacts getCapabilityFacts() { return capabilityFacts; }
@@ -260,6 +270,12 @@ public class TaskManifestResponse {
         @JsonProperty("primary_skill")
         private String primarySkill;
 
+        @JsonProperty("skill_id")
+        private String skillId;
+
+        @JsonProperty("skill_version")
+        private String skillVersion;
+
         @JsonProperty("capability_key")
         private String capabilityKey;
 
@@ -289,6 +305,10 @@ public class TaskManifestResponse {
         public void setRouteMode(String routeMode) { this.routeMode = routeMode; }
         public String getPrimarySkill() { return primarySkill; }
         public void setPrimarySkill(String primarySkill) { this.primarySkill = primarySkill; }
+        public String getSkillId() { return skillId; }
+        public void setSkillId(String skillId) { this.skillId = skillId; }
+        public String getSkillVersion() { return skillVersion; }
+        public void setSkillVersion(String skillVersion) { this.skillVersion = skillVersion; }
         public String getCapabilityKey() { return capabilityKey; }
         public void setCapabilityKey(String capabilityKey) { this.capabilityKey = capabilityKey; }
         public String getRouteSource() { return routeSource; }

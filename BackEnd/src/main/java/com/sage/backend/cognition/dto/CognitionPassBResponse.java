@@ -9,6 +9,12 @@ import java.util.Map;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CognitionPassBResponse {
+    @JsonProperty("skill_id")
+    private String skillId;
+
+    @JsonProperty("skill_version")
+    private String skillVersion;
+
     @JsonProperty("binding_status")
     private String bindingStatus;
 
@@ -34,6 +40,22 @@ public class CognitionPassBResponse {
 
     @JsonProperty("cognition_metadata")
     private Map<String, Object> cognitionMetadata;
+
+    public String getSkillId() {
+        return skillId;
+    }
+
+    public void setSkillId(String skillId) {
+        this.skillId = skillId;
+    }
+
+    public String getSkillVersion() {
+        return skillVersion;
+    }
+
+    public void setSkillVersion(String skillVersion) {
+        this.skillVersion = skillVersion;
+    }
 
     public String getBindingStatus() {
         return bindingStatus;

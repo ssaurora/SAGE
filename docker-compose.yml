@@ -30,7 +30,7 @@ services:
       context: ./Service/planning-pass1
       dockerfile: ${SAGE_SERVICE_DOCKERFILE:-Dockerfile}
       args:
-        SAGE_INVEST_PIP_SPEC: ${SAGE_INVEST_PIP_SPEC:-}
+        SAGE_INVEST_PIP_SPEC: ${SAGE_INVEST_PIP_SPEC:-natcap.invest}
     image: ${SAGE_SERVICE_IMAGE:-sage-pass1:compose}
     container_name: ${SAGE_SERVICE_CONTAINER:-sage-service}
     environment:

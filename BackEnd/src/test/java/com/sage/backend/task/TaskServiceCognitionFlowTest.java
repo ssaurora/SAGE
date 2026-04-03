@@ -96,6 +96,31 @@ class TaskServiceCognitionFlowTest {
     }
 
     @Test
+    void createTaskPassBAssetFailureFailsWithoutValidationOrExecution() throws Exception {
+        Harness harness = new Harness(objectMapper);
+        when(harness.cognitionGoalRouteClient.route(any())).thenReturn(goalRouteResponseWithCaseProjection(
+                "resolved",
+                "real_case_validation",
+                Map.of(
+                        "mode", "resolved",
+                        "selected_case_id", "annual_water_yield_gura",
+                        "candidate_case_ids", List.of("annual_water_yield_gura")
+                )
+        ));
+        when(harness.pass1Client.runPass1(any())).thenReturn(defaultPass1Response());
+        when(harness.cognitionPassBClient.runPassB(any())).thenReturn(passBAssetFailureResponse());
+
+        CreateTaskRequest request = new CreateTaskRequest();
+        request.setUserQuery("run a real case invest annual water yield analysis for gura");
+
+        CreateTaskResponse response = harness.service.createTask(42L, request);
+
+        assertEquals(TaskStatus.FAILED.name(), response.getState());
+        verify(harness.validationClient, never()).validatePrimitive(any());
+        verify(harness.jobRuntimeClient, never()).createJob(any());
+    }
+
+    @Test
     void createTaskRealCaseGoalRouteClarifyRequiredTransitionsToWaitingUser() throws Exception {
         Harness harness = new Harness(objectMapper);
         when(harness.cognitionGoalRouteClient.route(any())).thenReturn(goalRouteResponseWithCaseProjection(
@@ -223,11 +248,15 @@ class TaskServiceCognitionFlowTest {
 
         assertEquals("resolved", response.getPlanningIntentStatus());
         assertEquals("resolved", response.getBindingStatus());
+        assertEquals("water_yield", response.getSkillId());
+        assertEquals("1.0.0", response.getSkillVersion());
         assertEquals(List.of("case_id"), response.getOverruledFields());
         assertEquals(List.of("case_id"), response.getBlockedMutations());
         assertTrue(Boolean.TRUE.equals(response.getAssemblyBlocked()));
         assertEquals("PRIMARY_OVERRULED", response.getCognitionVerdict());
         assertEquals("clarify_required", response.getCaseProjection().get("mode"));
+        assertEquals("water_yield", response.getSkillRouteSummary().getSkillId());
+        assertEquals("1.0.0", response.getSkillRouteSummary().getSkillVersion());
     }
 
     private CognitionGoalRouteResponse goalRouteResponse(String status) throws Exception {
@@ -255,6 +284,9 @@ class TaskServiceCognitionFlowTest {
                 {
                   "route_mode": "single_skill",
                   "primary_skill": "water_yield",
+                  "skill_id": "water_yield",
+                  "skill_version": "1.0.0",
+                  "analysis_type": "Annual Water Yield Analysis",
                   "capability_key": "water_yield",
                   "route_source": "cognition_test",
                   "selected_template": "water_yield_v1",
@@ -275,6 +307,8 @@ class TaskServiceCognitionFlowTest {
 
     private CognitionPassBResponse bindingAmbiguousPassBResponse() {
         CognitionPassBResponse response = new CognitionPassBResponse();
+        response.setSkillId("water_yield");
+        response.setSkillVersion("1.0.0");
         response.setBindingStatus("ambiguous");
         response.setSlotBindings(List.of());
         response.setUserSemanticArgs(Map.of());
@@ -287,6 +321,8 @@ class TaskServiceCognitionFlowTest {
 
     private CognitionPassBResponse bindingClarifyRequiredPassBResponse() {
         CognitionPassBResponse response = new CognitionPassBResponse();
+        response.setSkillId("water_yield");
+        response.setSkillVersion("1.0.0");
         response.setBindingStatus("ambiguous");
         response.setSlotBindings(List.of());
         response.setUserSemanticArgs(Map.of());
@@ -299,6 +335,28 @@ class TaskServiceCognitionFlowTest {
         ));
         response.setDecisionSummary(Map.of("strategy", "clarify"));
         response.setCognitionMetadata(Map.of("fallback_used", false, "schema_valid", true, "source", "test", "provider", "glm"));
+        return response;
+    }
+
+    private CognitionPassBResponse passBAssetFailureResponse() {
+        CognitionPassBResponse response = new CognitionPassBResponse();
+        response.setSkillId("water_yield");
+        response.setSkillVersion("1.0.0");
+        response.setBindingStatus("ambiguous");
+        response.setSlotBindings(List.of());
+        response.setUserSemanticArgs(Map.of());
+        response.setInferredSemanticArgs(Map.of());
+        response.setArgsDraft(Map.of());
+        response.setDecisionSummary(Map.of("strategy", "asset_failure"));
+        response.setCognitionMetadata(Map.of(
+                "fallback_used", false,
+                "schema_valid", false,
+                "source", "skill_asset",
+                "provider", "skill_asset",
+                "status", "PARAMETER_SCHEMA_UNAVAILABLE",
+                "failure_code", "PARAMETER_SCHEMA_UNAVAILABLE",
+                "failure_message", "Required skill asset file missing: parameter_schema.yaml"
+        ));
         return response;
     }
 
@@ -325,6 +383,8 @@ class TaskServiceCognitionFlowTest {
                 """);
         taskState.setSkillRouteJson("""
                 {
+                  "skill_id": "water_yield",
+                  "skill_version": "1.0.0",
                   "capability_key": "water_yield",
                   "selected_template": "water_yield_v1"
                 }
@@ -353,6 +413,8 @@ class TaskServiceCognitionFlowTest {
     private String samplePass1Json() {
         return """
                 {
+                  "skill_id": "water_yield",
+                  "skill_version": "1.0.0",
                   "capability_key": "water_yield",
                   "selected_template": "water_yield_v1",
                   "template_version": "1.0.0",

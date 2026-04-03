@@ -1,0 +1,9 @@
+contracts:
+  inspect_asset_facts:
+    capability_key: water_yield
+  validate_bindings:
+    capability_key: water_yield
+  validate_args:
+    capability_key: water_yield
+  submit_job:
+    capability_key: water_yield

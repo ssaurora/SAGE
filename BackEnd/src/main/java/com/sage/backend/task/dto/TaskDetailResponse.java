@@ -37,6 +37,12 @@ public class TaskDetailResponse {
     @JsonProperty("skill_route_summary")
     private SkillRouteSummary skillRouteSummary;
 
+    @JsonProperty("skill_id")
+    private String skillId;
+
+    @JsonProperty("skill_version")
+    private String skillVersion;
+
     @JsonProperty("slot_bindings_summary")
     private SlotBindingsSummary slotBindingsSummary;
 
@@ -215,6 +221,22 @@ public class TaskDetailResponse {
 
     public void setSkillRouteSummary(SkillRouteSummary skillRouteSummary) {
         this.skillRouteSummary = skillRouteSummary;
+    }
+
+    public String getSkillId() {
+        return skillId;
+    }
+
+    public void setSkillId(String skillId) {
+        this.skillId = skillId;
+    }
+
+    public String getSkillVersion() {
+        return skillVersion;
+    }
+
+    public void setSkillVersion(String skillVersion) {
+        this.skillVersion = skillVersion;
     }
 
     public SlotBindingsSummary getSlotBindingsSummary() {
@@ -742,6 +764,12 @@ public class TaskDetailResponse {
         @JsonProperty("primary_skill")
         private String primarySkill;
 
+        @JsonProperty("skill_id")
+        private String skillId;
+
+        @JsonProperty("skill_version")
+        private String skillVersion;
+
         @JsonProperty("capability_key")
         private String capabilityKey;
 
@@ -781,6 +809,22 @@ public class TaskDetailResponse {
 
         public void setPrimarySkill(String primarySkill) {
             this.primarySkill = primarySkill;
+        }
+
+        public String getSkillId() {
+            return skillId;
+        }
+
+        public void setSkillId(String skillId) {
+            this.skillId = skillId;
+        }
+
+        public String getSkillVersion() {
+            return skillVersion;
+        }
+
+        public void setSkillVersion(String skillVersion) {
+            this.skillVersion = skillVersion;
         }
 
         public String getCapabilityKey() {

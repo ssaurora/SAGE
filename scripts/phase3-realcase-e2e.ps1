@@ -290,7 +290,7 @@ function Invoke-RealCaseSecondCaseSuccessScenario {
     $taskId = [string]$task.task_id
     Assert-True (-not [string]::IsNullOrWhiteSpace($taskId)) "case B success scenario task_id should exist"
 
-    $detail = Wait-TaskState -TaskId $taskId -Headers $Headers -States @("SUCCEEDED", "FAILED", "WAITING_USER", "STATE_CORRUPTED") -TimeoutSeconds 360
+    $detail = Wait-TaskState -TaskId $taskId -Headers $Headers -States @("SUCCEEDED", "FAILED", "WAITING_USER", "STATE_CORRUPTED") -TimeoutSeconds 600
     Assert-True ([string]$detail.state -eq "SUCCEEDED") "case B success scenario should finish in SUCCEEDED"
 
     $result = Get-TaskResult -TaskId $taskId -Headers $Headers

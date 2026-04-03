@@ -1,0 +1,8 @@
+title: Water Yield Result Summary
+analysis_type_label: Annual Water Yield Analysis
+required_highlight_templates:
+  - used_real_invest = {used_real_invest}
+  - main_output_count = {main_output_count}
+  - primary_artifact_count = {primary_artifact_count}
+narrative_template: "{analysis_type_label} completed for case {case_id}. The result bundle recorded {main_output_count} main outputs and {primary_artifact_count} primary artifacts."
+limitation_note: Interpretation is constrained to the recorded result bundle and promoted artifacts.

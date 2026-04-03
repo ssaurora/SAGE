@@ -22,6 +22,7 @@ RUN if [ -n "$SAGE_INVEST_PIP_SPEC" ]; then \
     fi
 
 COPY app ./app
+COPY skills ./skills
 
 ENV WORKSPACE_ROOT=/workspace
 RUN mkdir -p /workspace/input /workspace/output /workspace/logs

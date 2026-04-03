@@ -6,6 +6,12 @@ import java.util.List;
 import java.util.Map;
 
 public class Pass1Response {
+    @JsonProperty("skill_id")
+    private String skillId;
+
+    @JsonProperty("skill_version")
+    private String skillVersion;
+
     @JsonProperty("capability_key")
     private String capabilityKey;
 
@@ -32,6 +38,22 @@ public class Pass1Response {
 
     @JsonProperty("graph_skeleton")
     private GraphSkeleton graphSkeleton;
+
+    public String getSkillId() {
+        return skillId;
+    }
+
+    public void setSkillId(String skillId) {
+        this.skillId = skillId;
+    }
+
+    public String getSkillVersion() {
+        return skillVersion;
+    }
+
+    public void setSkillVersion(String skillVersion) {
+        this.skillVersion = skillVersion;
+    }
 
     public String getCapabilityKey() {
         return capabilityKey;

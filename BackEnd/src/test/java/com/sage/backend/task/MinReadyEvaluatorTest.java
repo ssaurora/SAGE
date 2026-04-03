@@ -39,6 +39,20 @@ class MinReadyEvaluatorTest {
     }
 
     @Test
+    void rejectsBlacklistedCatalogFactForRequiredUpload() {
+        RepairProposalRequest.WaitingContext waitingContext = waitingContext(
+                List.of(missingSlot("precipitation")),
+                List.of(requiredAction("upload", "upload_precipitation"))
+        );
+        ResumeTaskRequest request = new ResumeTaskRequest();
+
+        TaskAttachment attachment = readyAttachment("precipitation");
+        attachment.setAssignmentStatus("BLACKLISTED");
+
+        assertFalse(MinReadyEvaluator.isReady(waitingContext, List.of(attachment), request));
+    }
+
+    @Test
     void acceptsSlotOverrideAsSatisfiedMissingInput() {
         RepairProposalRequest.WaitingContext waitingContext = waitingContext(
                 List.of(missingSlot("precipitation")),

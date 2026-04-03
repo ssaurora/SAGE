@@ -145,6 +145,8 @@ class TaskProjectionBuilderTest {
                 {
                   "route_mode": "single_skill",
                   "primary_skill": "water_yield",
+                  "skill_id": "water_yield",
+                  "skill_version": "1.0.0",
                   "capability_key": "water_yield",
                   "route_source": "deterministic_phase0",
                   "confidence": 0.9,
@@ -160,6 +162,8 @@ class TaskProjectionBuilderTest {
 
         assertEquals("single_skill", summary.getRouteMode());
         assertEquals("water_yield", summary.getPrimarySkill());
+        assertEquals("water_yield", summary.getSkillId());
+        assertEquals("1.0.0", summary.getSkillVersion());
         assertEquals("water_yield", summary.getCapabilityKey());
         assertEquals("deterministic_phase0", summary.getRouteSource());
         assertEquals(0.9, summary.getConfidence());
@@ -634,6 +638,8 @@ class TaskProjectionBuilderTest {
                 {
                   "route_mode": "single_skill",
                   "primary_skill": "water_yield",
+                  "skill_id": "water_yield",
+                  "skill_version": "1.0.0",
                   "capability_key": "water_yield",
                   "route_source": "deterministic_phase0",
                   "confidence": 0.9,
@@ -650,6 +656,8 @@ class TaskProjectionBuilderTest {
 
         assertEquals("single_skill", summary.getRouteMode());
         assertEquals("water_yield", summary.getPrimarySkill());
+        assertEquals("water_yield", summary.getSkillId());
+        assertEquals("1.0.0", summary.getSkillVersion());
         assertEquals("water_yield", summary.getCapabilityKey());
         assertEquals("deterministic_phase0", summary.getRouteSource());
         assertEquals(0.9, summary.getConfidence());

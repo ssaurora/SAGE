@@ -19,6 +19,9 @@ public class Pass2Request {
     @JsonProperty("validation_summary")
     private JsonNode validationSummary;
 
+    @JsonProperty("metadata_catalog_facts")
+    private JsonNode metadataCatalogFacts;
+
     public String getTaskId() {
         return taskId;
     }
@@ -58,5 +61,12 @@ public class Pass2Request {
     public void setValidationSummary(JsonNode validationSummary) {
         this.validationSummary = validationSummary;
     }
-}
 
+    public JsonNode getMetadataCatalogFacts() {
+        return metadataCatalogFacts;
+    }
+
+    public void setMetadataCatalogFacts(JsonNode metadataCatalogFacts) {
+        this.metadataCatalogFacts = metadataCatalogFacts;
+    }
+}

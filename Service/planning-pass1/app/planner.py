@@ -15,6 +15,8 @@ from app.case_registry import (
     match_cases,
 )
 from app.cognition_support import call_glm_json
+from app.metadata_catalog import build_catalog_summary
+from app.skill_assets import SkillAssetError, load_skill_bundle, maybe_load_skill_bundle
 from app.schemas import (
     CaseProjection,
     CognitionGoalRouteRequest,
@@ -49,6 +51,8 @@ def build_pass1_response(payload: PlanningPass1Request) -> PlanningPass1Response
     if selected_template != skill.selected_template:
         raise ValueError(f"Unsupported template for {skill.capability.capability_key}: {selected_template}")
     return PlanningPass1Response(
+        skill_id=skill.skill_id,
+        skill_version=skill.skill_version,
         capability_key=skill.capability.capability_key,
         capability_facts=skill.capability,
         selected_template=selected_template,
@@ -114,12 +118,17 @@ def build_passb_response(payload: CognitionPassBRequest) -> CognitionPassBRespon
     )
     provider = _resolve_cognition_provider("SAGE_COGNITION_PASSB_PROVIDER")
     llm_required = _llm_required_for_real_case(real_case_requested)
-    known_case_projection = _build_known_case_cached_passb_response(payload, lower_query, real_case_requested)
+    try:
+        known_case_projection = _build_known_case_cached_passb_response(payload, lower_query, real_case_requested)
+    except SkillAssetError as exc:
+        return _build_skill_asset_failure_passb_response(payload, exc)
     if provider == "glm" and known_case_projection is not None:
         return known_case_projection
     if provider == "glm":
         try:
             return _build_glm_passb_response(payload)
+        except SkillAssetError as exc:
+            return _build_skill_asset_failure_passb_response(payload, exc)
         except Exception as exc:
             if llm_required:
                 failure_code, failure_message = _classify_cognition_failure(exc, "passb")
@@ -135,7 +144,10 @@ def build_passb_response(payload: CognitionPassBRequest) -> CognitionPassBRespon
             failure_code="COGNITION_POLICY_VIOLATION",
             failure_message="Real-case passb requires glm provider.",
         )
-    return _build_deterministic_passb_response(payload, fallback_used=provider == "glm")
+    try:
+        return _build_deterministic_passb_response(payload, fallback_used=provider == "glm")
+    except SkillAssetError as exc:
+        return _build_skill_asset_failure_passb_response(payload, exc)
 
 
 def _build_deterministic_goal_route_response(
@@ -143,6 +155,9 @@ def _build_deterministic_goal_route_response(
     *,
     fallback_used: bool,
 ) -> CognitionGoalRouteResponse:
+    skill = get_skill_definition("water_yield")
+    bundle = maybe_load_skill_bundle(skill.skill_id)
+    analysis_type = bundle.profile.analysis_type if bundle is not None else "Annual Water Yield Analysis"
     normalized = _normalize_query(payload.user_query, payload.user_note)
     planning_intent_status = _derive_planning_intent_status(normalized)
     real_case_requested = _is_real_case_requested(normalized)
@@ -167,7 +182,10 @@ def _build_deterministic_goal_route_response(
         ),
         skill_route=SkillRouteOutput(
             route_mode="single_skill" if planning_intent_status == "resolved" else "",
-            primary_skill=capability_key,
+            primary_skill=skill.skill_id if planning_intent_status == "resolved" else "",
+            skill_id=skill.skill_id if planning_intent_status == "resolved" else "",
+            skill_version=skill.skill_version if planning_intent_status == "resolved" else "",
+            analysis_type=analysis_type if planning_intent_status == "resolved" else "",
             capability_key=capability_key,
             route_source="cognition_deterministic_fallback",
             confidence=confidence,
@@ -198,6 +216,9 @@ def _build_deterministic_goal_route_response(
 
 
 def _build_glm_goal_route_response(payload: CognitionGoalRouteRequest) -> CognitionGoalRouteResponse:
+    skill = get_skill_definition("water_yield")
+    bundle = maybe_load_skill_bundle(skill.skill_id)
+    analysis_type = bundle.profile.analysis_type if bundle is not None else "Annual Water Yield Analysis"
     system_prompt = (
         "You are a planning intent router for a governed geospatial workflow. "
         "Return ONLY strict JSON with keys: planning_intent_status, capability_key, selected_template, confidence, "
@@ -269,7 +290,10 @@ def _build_glm_goal_route_response(payload: CognitionGoalRouteRequest) -> Cognit
         ),
         skill_route=SkillRouteOutput(
             route_mode="single_skill" if status == "resolved" else "",
-            primary_skill=capability_key,
+            primary_skill=skill.skill_id if status == "resolved" else "",
+            skill_id=skill.skill_id if status == "resolved" else "",
+            skill_version=skill.skill_version if status == "resolved" else "",
+            analysis_type=analysis_type if status == "resolved" else "",
             capability_key=capability_key,
             route_source="cognition_llm_primary",
             confidence=confidence,
@@ -332,6 +356,9 @@ def _build_unavailable_goal_route_response(
     failure_code: str,
     failure_message: str,
 ) -> CognitionGoalRouteResponse:
+    skill = get_skill_definition("water_yield")
+    bundle = maybe_load_skill_bundle(skill.skill_id)
+    analysis_type = bundle.profile.analysis_type if bundle is not None else "Annual Water Yield Analysis"
     normalized = _normalize_query(payload.user_query, payload.user_note)
     real_case_requested = _is_real_case_requested(normalized)
     case_projection = _resolve_case_projection(
@@ -352,7 +379,10 @@ def _build_unavailable_goal_route_response(
         ),
         skill_route=SkillRouteOutput(
             route_mode="single_skill" if real_case_requested else "",
-            primary_skill="water_yield" if real_case_requested else "",
+            primary_skill=skill.skill_id if real_case_requested else "",
+            skill_id=skill.skill_id if real_case_requested else "",
+            skill_version=skill.skill_version if real_case_requested else "",
+            analysis_type=analysis_type if real_case_requested else "",
             capability_key="water_yield" if real_case_requested else "",
             route_source="cognition_unavailable",
             confidence=None,
@@ -416,6 +446,7 @@ def _build_deterministic_passb_response(
     *,
     fallback_used: bool,
 ) -> CognitionPassBResponse:
+    skill = get_skill_definition(payload.pass1_result.capability_key)
     slot_names = {slot.slot_name for slot in payload.pass1_result.slot_schema_view.slots}
     lower_query = _normalize_query(payload.user_query, payload.user_note)
     real_case_requested = (
@@ -477,6 +508,8 @@ def _build_deterministic_passb_response(
         )
 
     return CognitionPassBResponse(
+        skill_id=skill.skill_id,
+        skill_version=skill.skill_version,
         binding_status=binding_status,
         slot_bindings=bindings,
         user_semantic_args=user_semantic_args,
@@ -505,6 +538,7 @@ def _build_deterministic_passb_response(
 
 
 def _build_glm_passb_response(payload: CognitionPassBRequest) -> CognitionPassBResponse:
+    skill = get_skill_definition(payload.pass1_result.capability_key)
     system_prompt = (
         "You are a governed binding planner for a single-skill annual water yield workflow. "
         "Return ONLY strict JSON with keys: binding_status, slot_bindings, user_semantic_args, inferred_semantic_args, confidence, notes. "
@@ -611,6 +645,8 @@ def _build_glm_passb_response(payload: CognitionPassBRequest) -> CognitionPassBR
     confidence_value = parsed.get("confidence")
     confidence = float(confidence_value) if isinstance(confidence_value, (int, float)) else None
     return CognitionPassBResponse(
+        skill_id=skill.skill_id,
+        skill_version=skill.skill_version,
         binding_status=binding_status,
         slot_bindings=bindings,
         user_semantic_args=user_semantic_args,
@@ -641,6 +677,7 @@ def _build_unavailable_passb_response(
     failure_code: str,
     failure_message: str,
 ) -> CognitionPassBResponse:
+    skill = get_skill_definition(payload.pass1_result.capability_key)
     lower_query = _normalize_query(payload.user_query, payload.user_note)
     case_projection = _resolve_case_projection(
         lower_query,
@@ -650,6 +687,8 @@ def _build_unavailable_passb_response(
         force_mode="unavailable",
     )
     return CognitionPassBResponse(
+        skill_id=skill.skill_id,
+        skill_version=skill.skill_version,
         binding_status="resolved",
         slot_bindings=[],
         user_semantic_args={},
@@ -705,11 +744,53 @@ def _build_glm_passb_fallback_response(
     return fallback
 
 
+def _build_skill_asset_failure_passb_response(
+    payload: CognitionPassBRequest,
+    exc: SkillAssetError,
+) -> CognitionPassBResponse:
+    skill = get_skill_definition(payload.pass1_result.capability_key)
+    lower_query = _normalize_query(payload.user_query, payload.user_note)
+    case_projection = _resolve_case_projection(
+        lower_query,
+        real_case_requested=_is_real_case_requested(lower_query),
+        known_case_ids=_known_case_ids_from_payload(payload),
+        explicit_case_id=_extract_case_override(payload),
+    )
+    return CognitionPassBResponse(
+        skill_id=skill.skill_id,
+        skill_version=skill.skill_version,
+        binding_status="ambiguous",
+        slot_bindings=[],
+        user_semantic_args={},
+        inferred_semantic_args={},
+        args_draft={},
+        case_projection=case_projection,
+        decision_summary=DecisionSummary(
+            strategy="skill_asset_failure",
+            assumptions=[exc.message],
+        ),
+        confidence=None,
+        cognition_metadata=CognitionMetadata(
+            source="skill_asset_gate",
+            provider="skill_asset",
+            model=None,
+            prompt_version="passb_v1",
+            fallback_used=False,
+            schema_valid=False,
+            response_id=None,
+            status=exc.code,
+            failure_code=exc.code,
+            failure_message=exc.message,
+        ),
+    )
+
+
 def _build_known_case_cached_passb_response(
     payload: CognitionPassBRequest,
     lower_query: str,
     real_case_requested: bool,
 ) -> CognitionPassBResponse | None:
+    skill = get_skill_definition(payload.pass1_result.capability_key)
     if not real_case_requested:
         return None
     explicit_case_id = _extract_case_override(payload)
@@ -735,6 +816,8 @@ def _build_known_case_cached_passb_response(
     if not bindings:
         return None
     return CognitionPassBResponse(
+        skill_id=skill.skill_id,
+        skill_version=skill.skill_version,
         binding_status=binding_status,
         slot_bindings=bindings,
         user_semantic_args={
@@ -924,16 +1007,26 @@ def _build_real_case_args_draft(
     case_id: str,
     missing_roles: set[str],
 ) -> dict[str, str | int | float | bool]:
+    skill_id = payload.pass1_result.skill_id or str(payload.skill_route.get("skill_id") or "water_yield")
+    bundle = load_skill_bundle(skill_id)
+    required_case_args = set(bundle.parameter_schema.required_case_args)
     descriptor = get_case(case_id)
     if descriptor is None or not descriptor.executable:
-        return {}
-    return descriptor.build_args_draft(
+        raise SkillAssetError("SKILL_ASSET_BINDING_FAILED", f"Case {case_id} is not an executable governed case.")
+    args_draft = descriptor.build_args_draft(
         task_id=payload.task_id,
         analysis_template=payload.pass1_result.selected_template or "water_yield_v1",
         runtime_mode="invest_real_runner",
         contract_mode="invest_real_case_v1",
         missing_roles=missing_roles,
     )
+    missing_keys = [key for key in required_case_args if key not in args_draft or args_draft.get(key) in (None, "")]
+    if missing_keys:
+        raise SkillAssetError(
+            "PARAMETER_SCHEMA_BINDING_FAILED",
+            "Parameter schema binding did not produce required case args: " + ", ".join(sorted(missing_keys)),
+        )
+    return args_draft
 
 
 def _normalize_notes(raw_notes: object) -> list[str]:
@@ -1104,11 +1197,13 @@ def _reject_execution_fields(
 
 
 def build_primitive_validation_response(payload: PrimitiveValidationRequest) -> PrimitiveValidationResponse:
+    bundle = maybe_load_skill_bundle(payload.pass1_result.skill_id or "water_yield")
+    validation_policy = bundle.validation_policy if bundle is not None else None
     required_roles = [role.role_name for role in payload.pass1_result.logical_input_roles if role.required]
     bound_roles = {binding.role_name for binding in payload.passb_result.slot_bindings}
     missing_roles = [role_name for role_name in required_roles if role_name not in bound_roles]
 
-    required_params = ["workspace_dir", "results_suffix"]
+    required_params = validation_policy.required_runtime_args if validation_policy is not None else ["workspace_dir", "results_suffix"]
     missing_params = []
     for param_name in required_params:
         value = payload.passb_result.args_draft.get(param_name)
@@ -1126,15 +1221,16 @@ def build_primitive_validation_response(payload: PrimitiveValidationRequest) -> 
             invalid_bindings.append(binding.role_name)
 
     semantic_keys = set(payload.passb_result.user_semantic_args.keys()) | set(payload.passb_result.inferred_semantic_args.keys())
+    forbidden_semantic_keys = set(validation_policy.forbidden_semantic_keys if validation_policy is not None else [
+        "sample_data_root",
+        "workspace_dir",
+        "results_suffix",
+        "n_workers",
+        "output_registry",
+        "artifact_catalog",
+    ])
     for semantic_key in semantic_keys:
-        if semantic_key.endswith("_path") or semantic_key in {
-            "sample_data_root",
-            "workspace_dir",
-            "results_suffix",
-            "n_workers",
-            "output_registry",
-            "artifact_catalog",
-        }:
+        if semantic_key.endswith("_path") or semantic_key in forbidden_semantic_keys:
             invalid_bindings.append(semantic_key)
 
     if invalid_bindings:
@@ -1174,6 +1270,10 @@ def build_pass2_response(payload: PlanningPass2Request) -> PlanningPass2Response
     canonical_nodes, canonical_edges, canonicalization_summary = _canonicalize_graph(rewritten_nodes, rewritten_edges)
     graph_digest = _build_graph_digest(canonical_nodes, canonical_edges)
     assertions = _build_runtime_assertions(payload)
+    catalog_summary = build_catalog_summary(
+        payload.metadata_catalog_facts,
+        bound_roles={binding.role_name for binding in payload.passb_result.slot_bindings},
+    )
 
     planning_summary = {
         "planner": "pass2_minimal",
@@ -1185,6 +1285,7 @@ def build_pass2_response(payload: PlanningPass2Request) -> PlanningPass2Response
         "template": payload.pass1_result.selected_template,
         "runtime_assertion_count": len(assertions),
         "graph_digest": graph_digest,
+        **catalog_summary,
     }
 
     return PlanningPass2Response(

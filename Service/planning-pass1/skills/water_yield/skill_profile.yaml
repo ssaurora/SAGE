@@ -1,0 +1,22 @@
+skill_id: water_yield
+skill_version: 1.0.0
+analysis_type: Annual Water Yield Analysis
+capability_key: water_yield
+selected_template: water_yield_v1
+display_name: Water Yield
+supported_case_ids:
+  - annual_water_yield_gura
+  - annual_water_yield_gtm_national
+required_roles:
+  - watersheds
+  - lulc
+  - biophysical_table
+  - precipitation
+  - eto
+optional_roles:
+  - depth_to_root_restricting_layer
+  - plant_available_water_content
+binding_hints:
+  provider_preference: planning-pass1-invest-local
+  runtime_profile_preference: docker-invest-real
+runtime_profile_hint: docker-local

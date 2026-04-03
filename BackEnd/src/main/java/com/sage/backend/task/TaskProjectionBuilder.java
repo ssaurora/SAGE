@@ -219,6 +219,8 @@ final class TaskProjectionBuilder {
         TaskDetailResponse.SkillRouteSummary summary = new TaskDetailResponse.SkillRouteSummary();
         summary.setRouteMode(root.path("route_mode").asText(null));
         summary.setPrimarySkill(root.path("primary_skill").asText(null));
+        summary.setSkillId(root.path("skill_id").asText(null));
+        summary.setSkillVersion(root.path("skill_version").asText(null));
         summary.setCapabilityKey(root.path("capability_key").asText(null));
         summary.setRouteSource(root.path("route_source").asText(null));
         summary.setConfidence(root.path("confidence").isNumber() ? root.path("confidence").asDouble() : null);
@@ -538,6 +540,8 @@ final class TaskProjectionBuilder {
         TaskManifestResponse.SkillRoute summary = new TaskManifestResponse.SkillRoute();
         summary.setRouteMode(root.path("route_mode").asText(null));
         summary.setPrimarySkill(root.path("primary_skill").asText(null));
+        summary.setSkillId(root.path("skill_id").asText(null));
+        summary.setSkillVersion(root.path("skill_version").asText(null));
         summary.setCapabilityKey(root.path("capability_key").asText(null));
         summary.setRouteSource(root.path("route_source").asText(null));
         summary.setConfidence(root.path("confidence").isNumber() ? root.path("confidence").asDouble() : null);

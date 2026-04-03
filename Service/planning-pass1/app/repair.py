@@ -7,12 +7,13 @@ from app.schemas import (
     RepairProposalResponse,
     RequiredUserAction,
 )
+from app.skill_assets import maybe_load_skill_bundle
 import os
 from typing import Any
 
 import httpx
 
-from app.cognition_support import call_glm_json
+from app.cognition_support import call_glm_json, parse_llm_json as _parse_llm_json
 
 DEBUG_REPAIR = os.getenv("SAGE_REPAIR_DEBUG", "false").strip().lower() in ("1", "true", "yes", "on")
 DEBUG_MAX_CHARS = int(os.getenv("SAGE_REPAIR_DEBUG_MAX_CHARS", "2000"))
@@ -43,6 +44,8 @@ def build_repair_proposal_response(payload: RepairProposalRequest) -> RepairProp
 def build_deterministic_repair_proposal(
     payload: RepairProposalRequest, *, debug_note: str | None = None
 ) -> RepairProposalResponse:
+    bundle = maybe_load_skill_bundle("water_yield")
+    repair_policy = bundle.repair_policy if bundle is not None else None
     waiting_context = payload.waiting_context
     validation_summary = payload.validation_summary
     failure_summary = payload.failure_summary
@@ -54,13 +57,30 @@ def build_deterministic_repair_proposal(
     user_note = (payload.user_note or "").strip()
 
     if missing_slots:
-        user_facing_reason = "Additional required inputs are missing before the task can continue."
+        user_facing_reason = (
+            repair_policy.reason_messages.get("missing_slots")
+            if repair_policy is not None
+            else "Additional required inputs are missing before the task can continue."
+        )
     elif invalid_bindings:
-        user_facing_reason = "The current task has binding issues that must be repaired before execution can continue."
+        user_facing_reason = (
+            repair_policy.reason_messages.get("invalid_bindings")
+            if repair_policy is not None
+            else "The current task has binding issues that must be repaired before execution can continue."
+        )
     elif failure_code:
-        user_facing_reason = f"The task requires review because the latest validation reported {failure_code}."
+        template = (
+            repair_policy.reason_messages.get("failure_code")
+            if repair_policy is not None
+            else "The task requires review because the latest validation reported {failure_code}."
+        )
+        user_facing_reason = template.format(failure_code=failure_code)
     else:
-        user_facing_reason = "Task requires additional user actions before it can continue."
+        user_facing_reason = (
+            repair_policy.reason_messages.get("default")
+            if repair_policy is not None
+            else "Task requires additional user actions before it can continue."
+        )
 
     resume_hint = waiting_context.resume_hint or "Complete required actions and try resume."
 
@@ -69,7 +89,11 @@ def build_deterministic_repair_proposal(
         key = action.key
         label = action.label or key or "required action"
         action_type = action.action_type or "action"
-        if action_type == "upload":
+        templates = repair_policy.action_message_templates if repair_policy is not None else {}
+        template = templates.get(action_type) or templates.get("default")
+        if template:
+            message = template.format(label=label)
+        elif action_type == "upload":
             message = f"Upload the required input for {label}."
         elif action_type == "override":
             message = f"Provide or correct the required value for {label}."
@@ -77,7 +101,7 @@ def build_deterministic_repair_proposal(
             message = f"Complete the required step for {label}."
         action_explanations.append(RepairActionExplanation(key=key, message=message))
 
-    notes = [
+    notes = list(repair_policy.notes) if repair_policy is not None else [
         "Dispatcher rules remain the source of truth.",
         "This repair proposal is advisory and does not decide workflow state.",
     ]
@@ -251,3 +275,7 @@ def classify_failure(exc: Exception) -> tuple[str, str]:
     if "valid json" in message.lower():
         return "COGNITION_SCHEMA_INVALID", "Repair proposal provider returned invalid JSON."
     return "COGNITION_UNAVAILABLE", message or "Repair proposal provider failed."
+
+
+def parse_llm_json(content: str) -> dict[str, Any]:
+    return _parse_llm_json(content)

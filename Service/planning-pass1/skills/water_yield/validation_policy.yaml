@@ -1,0 +1,25 @@
+validation_hints:
+  - role_name: watersheds
+    expected_slot_type: vector
+  - role_name: lulc
+    expected_slot_type: raster
+  - role_name: biophysical_table
+    expected_slot_type: table
+  - role_name: precipitation
+    expected_slot_type: raster
+  - role_name: eto
+    expected_slot_type: raster
+  - role_name: depth_to_root_restricting_layer
+    expected_slot_type: raster
+  - role_name: plant_available_water_content
+    expected_slot_type: raster
+required_runtime_args:
+  - workspace_dir
+  - results_suffix
+forbidden_semantic_keys:
+  - sample_data_root
+  - workspace_dir
+  - results_suffix
+  - n_workers
+  - output_registry
+  - artifact_catalog

@@ -39,6 +39,9 @@ class GoalParseOutput(BaseModel):
 class SkillRouteOutput(BaseModel):
     route_mode: str = ""
     primary_skill: str = ""
+    skill_id: str = ""
+    skill_version: str = ""
+    analysis_type: str = ""
     capability_key: str = ""
     route_source: str = ""
     confidence: float | None = None
@@ -155,6 +158,8 @@ class GraphSkeleton(BaseModel):
 
 
 class PlanningPass1Response(BaseModel):
+    skill_id: str = Field(min_length=1)
+    skill_version: str = Field(min_length=1)
     capability_key: str = Field(min_length=1)
     capability_facts: CapabilityDefinitionLite
     selected_template: str
@@ -197,6 +202,8 @@ class InferredSemanticArg(BaseModel):
 
 
 class CognitionPassBResponse(BaseModel):
+    skill_id: str = ""
+    skill_version: str = ""
     binding_status: str = "resolved"
     slot_bindings: list[SlotBinding]
     user_semantic_args: dict[str, str | int | float | bool] = Field(default_factory=dict)
@@ -223,12 +230,27 @@ class PrimitiveValidationResponse(BaseModel):
     invalid_bindings: list[str]
 
 
+class MetadataCatalogFact(BaseModel):
+    asset_id: str = Field(min_length=1)
+    logical_role_candidates: list[str] = Field(default_factory=list)
+    file_type: str | None = None
+    crs: str | None = None
+    extent: str | None = None
+    resolution: str | None = None
+    nodata_info: str | None = None
+    source: str = ""
+    checksum_version: str | None = None
+    availability_status: str = "UNKNOWN"
+    blacklist_flag: bool = False
+
+
 class PlanningPass2Request(BaseModel):
     task_id: str = Field(min_length=1)
     state_version: int = Field(ge=0)
     pass1_result: PlanningPass1Response
     passb_result: CognitionPassBResponse
     validation_summary: PrimitiveValidationResponse
+    metadata_catalog_facts: list[MetadataCatalogFact] = Field(default_factory=list)
 
 
 class MaterializedExecutionNode(BaseModel):

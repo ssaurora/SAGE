@@ -1,0 +1,65 @@
+role_arg_mappings:
+  - role_name: watersheds
+    slot_arg_key: watersheds_slot
+  - role_name: lulc
+    slot_arg_key: lulc_slot
+  - role_name: biophysical_table
+    slot_arg_key: biophysical_table_slot
+  - role_name: precipitation
+    slot_arg_key: precipitation_slot
+    value_arg_key: precipitation_index
+    default_value: 1200.0
+  - role_name: eto
+    slot_arg_key: eto_slot
+    value_arg_key: eto_index
+    default_value: 800.0
+  - role_name: depth_to_root_restricting_layer
+    slot_arg_key: root_depth_slot
+    value_arg_key: root_depth_factor
+    default_value: 0.95
+  - role_name: plant_available_water_content
+    slot_arg_key: pawc_slot
+    value_arg_key: pawc_factor
+    default_value: 0.9
+stable_defaults:
+  analysis_template: water_yield_v1
+  seasonality_constant: 5.0
+  root_depth_factor: 0.8
+  pawc_factor: 0.85
+slot_specs:
+  - slot_name: watersheds
+    type: vector
+    bound_role: watersheds
+  - slot_name: lulc
+    type: raster
+    bound_role: lulc
+  - slot_name: biophysical_table
+    type: table
+    bound_role: biophysical_table
+  - slot_name: precipitation
+    type: raster
+    bound_role: precipitation
+  - slot_name: eto
+    type: raster
+    bound_role: eto
+  - slot_name: depth_to_root_restricting_layer
+    type: raster
+    bound_role: depth_to_root_restricting_layer
+  - slot_name: plant_available_water_content
+    type: raster
+    bound_role: plant_available_water_content
+required_runtime_args:
+  - workspace_dir
+  - results_suffix
+forbidden_semantic_keys:
+  - sample_data_root
+  - workspace_dir
+  - results_suffix
+  - n_workers
+  - output_registry
+  - artifact_catalog
+required_case_args:
+  - case_id
+  - case_descriptor_version
+  - contract_mode
+  - runtime_mode

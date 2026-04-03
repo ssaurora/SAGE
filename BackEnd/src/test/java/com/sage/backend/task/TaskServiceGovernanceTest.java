@@ -18,11 +18,13 @@ import com.sage.backend.mapper.TaskAttachmentMapper;
 import com.sage.backend.mapper.TaskAttemptMapper;
 import com.sage.backend.mapper.TaskStateMapper;
 import com.sage.backend.model.AnalysisManifest;
+import com.sage.backend.model.TaskAttachment;
 import com.sage.backend.model.JobState;
 import com.sage.backend.model.TaskState;
 import com.sage.backend.model.TaskStatus;
 import com.sage.backend.planning.Pass1Client;
 import com.sage.backend.planning.Pass2Client;
+import com.sage.backend.planning.dto.Pass2Request;
 import com.sage.backend.planning.dto.Pass1Response;
 import com.sage.backend.planning.dto.Pass2Response;
 import com.sage.backend.repair.RepairDecision;
@@ -54,6 +56,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -221,6 +224,85 @@ class TaskServiceGovernanceTest {
     }
 
     @Test
+    void clarifyResumeReusesFrozenSkillVersionWithoutRerunningGoalRouteOrPass1() throws Exception {
+        Harness harness = new Harness(objectMapper);
+        TaskState waitingTask = clarifyWaitingTaskState();
+        TaskState resumedTask = clarifyResumingTaskState();
+        ResumeTaskRequest request = resumeRequest("resume_clarify_version");
+        request.setArgsOverrides(Map.of("case_id", "annual_water_yield_gura"));
+
+        AtomicReference<com.sage.backend.cognition.dto.CognitionPassBRequest> capturedPassBRequest = new AtomicReference<>();
+
+        when(harness.taskStateMapper.findByTaskId("task_resume")).thenReturn(waitingTask, resumedTask, resumedTask);
+        when(harness.repairRecordMapper.findByTaskIdAndResumeRequestId("task_resume", "resume_clarify_version")).thenReturn(null);
+        when(harness.repairDispatcherService.decide(any(), any(), any())).thenReturn(readyDecision());
+        when(harness.taskStateMapper.acceptResume(anyString(), anyInt(), anyString(), anyString(), anyString(), anyInt(), anyInt()))
+                .thenReturn(1);
+        when(harness.cognitionPassBClient.runPassB(any())).thenAnswer(invocation -> {
+            capturedPassBRequest.set(invocation.getArgument(0));
+            return passBResponse();
+        });
+        when(harness.validationClient.validatePrimitive(any())).thenReturn(validValidation());
+        when(harness.pass2Client.runPass2(any())).thenReturn(pass2Response());
+        when(harness.analysisManifestMapper.insert(any())).thenReturn(1);
+        when(harness.analysisManifestMapper.updateFreezeStatus(anyString(), anyString(), anyString())).thenReturn(1);
+        when(harness.jobRuntimeClient.createJob(any())).thenReturn(createJobResponse("job_resume_clarify"));
+        when(harness.taskStateMapper.updateResumeTransaction(eq("task_resume"), anyString())).thenReturn(1);
+        when(harness.taskStateMapper.commitQueuedWithGovernance(
+                anyString(), anyInt(), anyString(), anyString(), anyString(), anyString(), anyInt(), anyInt(), anyInt(), anyInt(), anyString(), anyString()
+        )).thenReturn(1);
+
+        ResumeTaskResponse response = harness.service.resumeTask("task_resume", 42L, request);
+
+        assertEquals(TaskStatus.QUEUED.name(), response.getState());
+        assertNotNull(capturedPassBRequest.get());
+        assertEquals("water_yield", capturedPassBRequest.get().getSkillRoute().path("skill_id").asText());
+        assertEquals("1.0.0", capturedPassBRequest.get().getSkillRoute().path("skill_version").asText());
+        verify(harness.cognitionGoalRouteClient, never()).route(any());
+        verify(harness.pass1Client, never()).runPass1(any());
+    }
+
+    @Test
+    void runPass2ProjectsAttachmentCatalogFactsIntoRequest() throws Exception {
+        Harness harness = new Harness(objectMapper);
+        TaskState waitingTask = waitingTaskState();
+        TaskState resumedTask = resumingTaskState();
+        ResumeTaskRequest request = resumeRequest("resume_catalog_projection");
+        AtomicReference<Pass2Request> capturedPass2Request = new AtomicReference<>();
+
+        when(harness.taskStateMapper.findByTaskId("task_resume")).thenReturn(waitingTask, resumedTask, resumedTask);
+        when(harness.repairRecordMapper.findByTaskIdAndResumeRequestId("task_resume", "resume_catalog_projection")).thenReturn(null);
+        when(harness.repairDispatcherService.decide(any(), any(), any())).thenReturn(readyDecision());
+        when(harness.taskStateMapper.acceptResume(anyString(), anyInt(), anyString(), anyString(), anyString(), anyInt(), anyInt()))
+                .thenReturn(1);
+        when(harness.cognitionPassBClient.runPassB(any())).thenReturn(passBResponse());
+        when(harness.validationClient.validatePrimitive(any())).thenReturn(validValidation());
+        when(harness.pass2Client.runPass2(any())).thenAnswer(invocation -> {
+            capturedPass2Request.set(invocation.getArgument(0));
+            return pass2Response();
+        });
+        when(harness.analysisManifestMapper.insert(any())).thenReturn(1);
+        when(harness.analysisManifestMapper.updateFreezeStatus(anyString(), anyString(), anyString())).thenReturn(1);
+        when(harness.jobRuntimeClient.createJob(any())).thenReturn(createJobResponse("job_resume_catalog"));
+        when(harness.taskStateMapper.updateResumeTransaction(eq("task_resume"), anyString())).thenReturn(1);
+        when(harness.taskStateMapper.commitQueuedWithGovernance(
+                anyString(), anyInt(), anyString(), anyString(), anyString(), anyString(), anyInt(), anyInt(), anyInt(), anyInt(), anyString(), anyString()
+        )).thenReturn(1);
+        when(harness.taskAttachmentMapper.findByTaskId("task_resume")).thenReturn(List.of(readyAttachment("precipitation")));
+
+        ResumeTaskResponse response = harness.service.resumeTask("task_resume", 42L, request);
+
+        assertEquals(TaskStatus.QUEUED.name(), response.getState());
+        assertNotNull(capturedPass2Request.get());
+        JsonNode metadataCatalogFacts = capturedPass2Request.get().getMetadataCatalogFacts();
+        assertNotNull(metadataCatalogFacts);
+        assertEquals(1, metadataCatalogFacts.size());
+        assertEquals("task_attachment", metadataCatalogFacts.get(0).path("source").asText());
+        assertEquals("READY", metadataCatalogFacts.get(0).path("availability_status").asText());
+        assertEquals("precipitation", metadataCatalogFacts.get(0).path("logical_role_candidates").get(0).asText());
+    }
+
+    @Test
     void getTaskManifestSupportsLegacyManifestWithNullGovernanceFields() {
         Harness harness = new Harness(objectMapper);
         TaskState taskState = succeededTaskState();
@@ -268,7 +350,15 @@ class TaskServiceGovernanceTest {
         taskState.setUserQuery("resume task");
         taskState.setPass1ResultJson(samplePass1Json());
         taskState.setGoalParseJson("{\"goal_type\":\"water_yield_analysis\"}");
-        taskState.setSkillRouteJson("{\"primary_skill\":\"water_yield\",\"capability_key\":\"water_yield\"}");
+        taskState.setSkillRouteJson("""
+                {
+                  "primary_skill": "water_yield",
+                  "skill_id": "water_yield",
+                  "skill_version": "1.0.0",
+                  "capability_key": "water_yield",
+                  "selected_template": "water_yield_v1"
+                }
+                """);
         taskState.setValidationSummaryJson("{}");
         taskState.setResumeAttemptCount(2);
         taskState.setActiveAttemptNo(3);
@@ -281,6 +371,37 @@ class TaskServiceGovernanceTest {
 
     private TaskState resumingTaskState() {
         TaskState taskState = waitingTaskState();
+        taskState.setCurrentState(TaskStatus.RESUMING.name());
+        taskState.setStateVersion(5);
+        taskState.setResumeAttemptCount(3);
+        taskState.setActiveAttemptNo(4);
+        return taskState;
+    }
+
+    private TaskState clarifyWaitingTaskState() {
+        TaskState taskState = waitingTaskState();
+        taskState.setWaitingContextJson("""
+                {
+                  "waiting_reason_type": "CLARIFY_CASE_SELECTION",
+                  "can_resume": false
+                }
+                """);
+        taskState.setGoalParseJson("""
+                {
+                  "goal_type": "water_yield_analysis",
+                  "analysis_kind": "water_yield",
+                  "case_projection": {
+                    "mode": "clarify_required",
+                    "candidate_case_ids": ["annual_water_yield_gura", "annual_water_yield_gtm_national"]
+                  }
+                }
+                """);
+        taskState.setPassbResultJson(null);
+        return taskState;
+    }
+
+    private TaskState clarifyResumingTaskState() {
+        TaskState taskState = clarifyWaitingTaskState();
         taskState.setCurrentState(TaskStatus.RESUMING.name());
         taskState.setStateVersion(5);
         taskState.setResumeAttemptCount(3);
@@ -433,6 +554,18 @@ class TaskServiceGovernanceTest {
         return response;
     }
 
+    private static TaskAttachment readyAttachment(String logicalSlot) {
+        TaskAttachment attachment = new TaskAttachment();
+        attachment.setId("att_" + logicalSlot);
+        attachment.setLogicalSlot(logicalSlot);
+        attachment.setFileName(logicalSlot + ".tif");
+        attachment.setSizeBytes(1024L);
+        attachment.setStoredPath("E:/tmp/" + logicalSlot + ".tif");
+        attachment.setChecksum("abc123");
+        attachment.setAssignmentStatus("BOUND");
+        return attachment;
+    }
+
     private String samplePass1Json() {
         return """
                 {
@@ -565,6 +698,8 @@ class TaskServiceGovernanceTest {
         private String samplePass1Json() {
             return """
                     {
+                      "skill_id": "water_yield",
+                      "skill_version": "1.0.0",
                       "capability_key": "water_yield",
                       "selected_template": "water_yield_v1",
                       "template_version": "1.0.0",

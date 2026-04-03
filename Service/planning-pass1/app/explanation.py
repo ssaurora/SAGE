@@ -7,6 +7,7 @@ import httpx
 
 from app.case_registry import get_case
 from app.cognition_support import call_glm_json
+from app.skill_assets import maybe_load_skill_bundle
 from app.schemas import CognitionFinalExplanationRequest, CognitionMetadata, FinalExplanation
 
 
@@ -95,20 +96,36 @@ def _build_deterministic_final_explanation_response(
     *,
     fallback_used: bool,
 ) -> FinalExplanation:
+    bundle = maybe_load_skill_bundle("water_yield")
+    guide = bundle.interpretation_guide if bundle is not None else None
     result_bundle = payload.result_bundle or {}
     metrics = result_bundle.get("metrics") if isinstance(result_bundle.get("metrics"), dict) else {}
     main_outputs = result_bundle.get("main_outputs") if isinstance(result_bundle.get("main_outputs"), list) else []
     artifact_catalog = payload.artifact_catalog or {}
     primary_outputs = artifact_catalog.get("primary_outputs") if isinstance(artifact_catalog.get("primary_outputs"), list) else []
-    title = "Water Yield Result Summary"
-    highlights = [
-        f"used_real_invest = {bool(metrics.get('used_real_invest', False))}",
-        f"main_output_count = {len(main_outputs)}",
-        f"primary_artifact_count = {len(primary_outputs)}",
-    ]
+    context = {
+        "used_real_invest": bool(metrics.get("used_real_invest", False)),
+        "main_output_count": len(main_outputs),
+        "primary_artifact_count": len(primary_outputs),
+        "case_id": payload.case_id or "-",
+        "analysis_type_label": guide.analysis_type_label if guide is not None else "Annual Water Yield Analysis",
+    }
+    title = guide.title if guide is not None else "Water Yield Result Summary"
+    if guide is not None and guide.required_highlight_templates:
+        highlights = [template.format(**context) for template in guide.required_highlight_templates]
+        if guide.limitation_note:
+            highlights.append(guide.limitation_note)
+    else:
+        highlights = [
+            f"used_real_invest = {context['used_real_invest']}",
+            f"main_output_count = {context['main_output_count']}",
+            f"primary_artifact_count = {context['primary_artifact_count']}",
+        ]
     narrative = (
-        f"Task {payload.task_id} completed water_yield processing for case {payload.case_id or '-'}. "
-        f"The result bundle recorded {len(main_outputs)} main outputs and {len(primary_outputs)} primary artifacts."
+        guide.narrative_template.format(**context)
+        if guide is not None
+        else f"Task {payload.task_id} completed water_yield processing for case {payload.case_id or '-'}. "
+             f"The result bundle recorded {len(main_outputs)} main outputs and {len(primary_outputs)} primary artifacts."
     )
     return FinalExplanation(
         available=True,

@@ -1,0 +1,12 @@
+reason_messages:
+  missing_slots: Additional required inputs are missing before the task can continue.
+  invalid_bindings: The current task has binding issues that must be repaired before execution can continue.
+  failure_code: The task requires review because the latest validation reported {failure_code}.
+  default: Task requires additional user actions before it can continue.
+action_message_templates:
+  upload: Upload the required input for {label}.
+  override: Provide or correct the required value for {label}.
+  default: Complete the required step for {label}.
+notes:
+  - Dispatcher rules remain the source of truth.
+  - This repair proposal is advisory and does not decide workflow state.

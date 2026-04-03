@@ -74,6 +74,8 @@ public class GoalRouteService {
         ObjectNode skillRoute = objectMapper.createObjectNode();
         skillRoute.put("route_mode", "single_skill");
         skillRoute.put("primary_skill", capabilityKey);
+        skillRoute.put("skill_id", Pass1FactHelper.resolveSkillId(pass1Result, null));
+        skillRoute.put("skill_version", Pass1FactHelper.resolveSkillVersion(pass1Result, null));
         skillRoute.put("capability_key", capabilityKey);
         skillRoute.put("route_source", "derived_fallback");
         skillRoute.put("source", "derived_fallback");
@@ -131,6 +133,14 @@ public class GoalRouteService {
         }
         if (!enriched.path("primary_skill").isTextual() || enriched.path("primary_skill").asText("").isBlank()) {
             enriched.put("primary_skill", capabilityKey);
+        }
+        String skillId = Pass1FactHelper.resolveSkillId(pass1Result, enriched);
+        if (!skillId.isBlank()) {
+            enriched.put("skill_id", skillId);
+        }
+        String skillVersion = Pass1FactHelper.resolveSkillVersion(pass1Result, enriched);
+        if (!skillVersion.isBlank()) {
+            enriched.put("skill_version", skillVersion);
         }
 
         String selectedTemplate = Pass1FactHelper.resolveAnalysisTemplate(pass1Result);
