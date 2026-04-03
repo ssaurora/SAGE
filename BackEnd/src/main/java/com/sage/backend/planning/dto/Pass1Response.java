@@ -274,6 +274,9 @@ public class Pass1Response {
         @JsonProperty("repair_hints")
         private List<RepairHint> repairHints;
 
+        @JsonProperty("contracts")
+        private Object contracts;
+
         @JsonProperty("output_contract")
         private Object outputContract;
 
@@ -310,6 +313,14 @@ public class Pass1Response {
 
         public void setRepairHints(List<RepairHint> repairHints) {
             this.repairHints = repairHints;
+        }
+
+        public Object getContracts() {
+            return contracts;
+        }
+
+        public void setContracts(Object contracts) {
+            this.contracts = contracts;
         }
 
         public Object getOutputContract() {

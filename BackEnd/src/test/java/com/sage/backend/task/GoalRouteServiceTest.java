@@ -6,6 +6,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class GoalRouteServiceTest {
     private GoalRouteService service;
@@ -32,8 +33,9 @@ class GoalRouteServiceTest {
         GoalRouteService.GoalRouteDecision decision = service.derive("run a real case invest water yield analysis");
 
         assertEquals("real_case_validation", decision.goalParse().path("execution_mode").asText());
-        assertEquals("planning-pass1-invest-local", decision.skillRoute().path("provider_preference").asText());
-        assertEquals("docker-invest-real", decision.skillRoute().path("runtime_profile_preference").asText());
+        assertEquals("real_case_validation", decision.skillRoute().path("execution_mode").asText());
+        assertFalse(decision.skillRoute().has("provider_preference"));
+        assertFalse(decision.skillRoute().has("runtime_profile_preference"));
     }
 
     @Test

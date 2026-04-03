@@ -8,6 +8,7 @@ import yaml
 from pydantic import BaseModel, Field, ValidationError
 
 from app.schemas import (
+    CapabilityContractSpec,
     CapabilityDefinitionLite,
     CapabilityOutputContract,
     CapabilityOutputItem,
@@ -93,12 +94,28 @@ class InterpretationGuideAsset(BaseModel):
     limitation_note: str | None = None
 
 
+class ContractSpecAsset(BaseModel):
+    capability_key: str
+    input_schema: str
+    output_schema: str
+    side_effect_level: str
+    caller_scope: str
+    idempotency: str
+    cancel_semantics: str
+    audit_requirement: str
+
+
+class McpToolsMapAsset(BaseModel):
+    contracts: dict[str, ContractSpecAsset] = Field(default_factory=dict)
+
+
 class SkillAssetBundle(BaseModel):
     profile: SkillProfileAsset
     parameter_schema: ParameterSchemaAsset
     validation_policy: ValidationPolicyAsset
     repair_policy: RepairPolicyAsset
     interpretation_guide: InterpretationGuideAsset
+    mcp_tools_map: McpToolsMapAsset
 
 
 def get_skill_asset_root() -> Path:
@@ -130,6 +147,7 @@ def load_skill_bundle(skill_id: str) -> SkillAssetBundle:
             InterpretationGuideAsset,
             "INTERPRETATION_GUIDE_INVALID",
         ),
+        mcp_tools_map=_load_yaml_model(skill_root / "mcp_tools_map.yaml", McpToolsMapAsset, "MCP_TOOLS_MAP_INVALID"),
     )
 
 
@@ -156,6 +174,19 @@ def build_skill_definition_from_bundle(bundle: SkillAssetBundle) -> SkillDefinit
             _build_repair_hint(role_name)
             for role_name in [*profile.required_roles, *profile.optional_roles]
         ],
+        contracts={
+            contract_name: CapabilityContractSpec(
+                capability_key=contract.capability_key,
+                input_schema=contract.input_schema,
+                output_schema=contract.output_schema,
+                side_effect_level=contract.side_effect_level,
+                caller_scope=contract.caller_scope,
+                idempotency=contract.idempotency,
+                cancel_semantics=contract.cancel_semantics,
+                audit_requirement=contract.audit_requirement,
+            )
+            for contract_name, contract in bundle.mcp_tools_map.contracts.items()
+        },
         output_contract=CapabilityOutputContract(
             outputs=[
                 CapabilityOutputItem(artifact_role="PRIMARY_OUTPUT", logical_name="watershed_results"),

@@ -99,6 +99,17 @@ class CapabilityRepairHint(BaseModel):
     action_label: str
 
 
+class CapabilityContractSpec(BaseModel):
+    capability_key: str = Field(min_length=1)
+    input_schema: str = Field(min_length=1)
+    output_schema: str = Field(min_length=1)
+    side_effect_level: str = Field(min_length=1)
+    caller_scope: str = Field(min_length=1)
+    idempotency: str = Field(min_length=1)
+    cancel_semantics: str = Field(min_length=1)
+    audit_requirement: str = Field(min_length=1)
+
+
 class CapabilityOutputItem(BaseModel):
     artifact_role: str
     logical_name: str
@@ -113,6 +124,7 @@ class CapabilityDefinitionLite(BaseModel):
     display_name: str = Field(min_length=1)
     validation_hints: list[CapabilityValidationHint] = Field(default_factory=list)
     repair_hints: list[CapabilityRepairHint] = Field(default_factory=list)
+    contracts: dict[str, CapabilityContractSpec] = Field(default_factory=dict)
     output_contract: CapabilityOutputContract = Field(default_factory=CapabilityOutputContract)
     runtime_profile_hint: str = Field(min_length=1)
 

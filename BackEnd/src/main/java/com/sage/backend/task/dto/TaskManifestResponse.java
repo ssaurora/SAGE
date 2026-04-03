@@ -342,6 +342,9 @@ public class TaskManifestResponse {
         @JsonProperty("repair_hints")
         private List<CapabilityRepairHint> repairHints;
 
+        @JsonProperty("contracts")
+        private Object contracts;
+
         @JsonProperty("output_contract")
         private CapabilityOutputContract outputContract;
 
@@ -356,6 +359,8 @@ public class TaskManifestResponse {
         public void setValidationHints(List<CapabilityValidationHint> validationHints) { this.validationHints = validationHints; }
         public List<CapabilityRepairHint> getRepairHints() { return repairHints; }
         public void setRepairHints(List<CapabilityRepairHint> repairHints) { this.repairHints = repairHints; }
+        public Object getContracts() { return contracts; }
+        public void setContracts(Object contracts) { this.contracts = contracts; }
         public CapabilityOutputContract getOutputContract() { return outputContract; }
         public void setOutputContract(CapabilityOutputContract outputContract) { this.outputContract = outputContract; }
         public String getRuntimeProfileHint() { return runtimeProfileHint; }

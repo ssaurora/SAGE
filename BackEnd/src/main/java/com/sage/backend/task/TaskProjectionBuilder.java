@@ -120,6 +120,12 @@ final class TaskProjectionBuilder {
         JsonNode roleArgMappings = root.path("role_arg_mappings");
         summary.setRoleArgMappingCount(roleArgMappings.isArray() ? roleArgMappings.size() : 0);
         summary.setSlotSchemaViewVersion("v1");
+        JsonNode contractsNode = root.path("capability_facts").path("contracts");
+        Map<String, Object> contracts = buildJsonObjectView(contractsNode, null);
+        List<String> contractNames = contracts == null ? Collections.emptyList() : new ArrayList<>(contracts.keySet());
+        Collections.sort(contractNames);
+        summary.setContractCount(contractNames.size());
+        summary.setContractNames(contractNames);
         summary.setStableDefaults(buildPass1StableDefaults(root.path("stable_defaults")));
         return summary;
     }
@@ -567,6 +573,7 @@ final class TaskProjectionBuilder {
         facts.setDisplayName(root.path("display_name").asText(null));
         facts.setValidationHints(buildManifestValidationHints(root.path("validation_hints")));
         facts.setRepairHints(buildManifestRepairHints(root.path("repair_hints")));
+        facts.setContracts(buildJsonObjectView(root.path("contracts"), null));
         facts.setOutputContract(buildManifestOutputContract(root.path("output_contract")));
         facts.setRuntimeProfileHint(root.path("runtime_profile_hint").asText(null));
         return facts;

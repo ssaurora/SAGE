@@ -22,6 +22,16 @@ class TaskProjectionBuilderTest {
                 {
                   "capability_key": "water_yield",
                   "selected_template": "water_yield_v1",
+                  "capability_facts": {
+                    "contracts": {
+                      "validate_args": {
+                        "input_schema": "args_draft_validation_v1"
+                      },
+                      "submit_job": {
+                        "input_schema": "runtime_submission_v1"
+                      }
+                    }
+                  },
                   "logical_input_roles": [
                     {"role_name": "precipitation", "required": true},
                     {"role_name": "eto", "required": true},
@@ -48,6 +58,8 @@ class TaskProjectionBuilderTest {
         assertEquals(1, summary.getOptionalRolesCount());
         assertEquals(2, summary.getRoleArgMappingCount());
         assertEquals("v1", summary.getSlotSchemaViewVersion());
+        assertEquals(2, summary.getContractCount());
+        assertEquals(List.of("submit_job", "validate_args"), summary.getContractNames());
         assertEquals("water_yield_v1", summary.getStableDefaults().getAnalysisTemplate());
         assertEquals(0.8, summary.getStableDefaults().getRootDepthFactor());
         assertEquals(0.85, summary.getStableDefaults().getPawcFactor());
@@ -463,7 +475,13 @@ class TaskProjectionBuilderTest {
                   "capability_key": "water_yield",
                   "capability_facts": {
                     "capability_key": "water_yield",
-                    "display_name": "Water Yield"
+                    "display_name": "Water Yield",
+                    "contracts": {
+                      "validate_args": {
+                        "input_schema": "args_draft_validation_v1",
+                        "output_schema": "validation_result_v1"
+                      }
+                    }
                   },
                   "role_arg_mappings": [
                     {
@@ -486,6 +504,9 @@ class TaskProjectionBuilderTest {
 
         assertEquals("water_yield", response.getCapabilityKey());
         assertEquals("Water Yield", response.getCapabilityFacts().getDisplayName());
+        Map<?, ?> contracts = (Map<?, ?>) response.getCapabilityFacts().getContracts();
+        Map<?, ?> validateArgsContract = (Map<?, ?>) contracts.get("validate_args");
+        assertEquals("args_draft_validation_v1", validateArgsContract.get("input_schema"));
         assertEquals("precipitation_slot", response.getRoleArgMappings().get(0).getSlotArgKey());
         assertEquals("precipitation_index", response.getRoleArgMappings().get(0).getValueArgKey());
         assertEquals(1200.0, response.getRoleArgMappings().get(0).getDefaultValue());

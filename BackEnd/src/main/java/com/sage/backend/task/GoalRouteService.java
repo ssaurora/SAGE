@@ -182,10 +182,6 @@ public class GoalRouteService {
 
     private void applyExecutionPreferences(ObjectNode node, boolean realCaseRequested) {
         node.put("execution_mode", realCaseRequested ? "real_case_validation" : "governed_baseline");
-        if (realCaseRequested) {
-            node.put("provider_preference", "planning-pass1-invest-local");
-            node.put("runtime_profile_preference", "docker-invest-real");
-        }
     }
 
     private boolean isRealCaseRequested(String normalized) {

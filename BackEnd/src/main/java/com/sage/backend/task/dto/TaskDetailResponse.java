@@ -588,6 +588,12 @@ public class TaskDetailResponse {
         @JsonProperty("slot_schema_view_version")
         private String slotSchemaViewVersion;
 
+        @JsonProperty("contract_count")
+        private Integer contractCount;
+
+        @JsonProperty("contract_names")
+        private java.util.List<String> contractNames;
+
         @JsonProperty("stable_defaults")
         private StableDefaults stableDefaults;
 
@@ -645,6 +651,22 @@ public class TaskDetailResponse {
 
         public void setSlotSchemaViewVersion(String slotSchemaViewVersion) {
             this.slotSchemaViewVersion = slotSchemaViewVersion;
+        }
+
+        public Integer getContractCount() {
+            return contractCount;
+        }
+
+        public void setContractCount(Integer contractCount) {
+            this.contractCount = contractCount;
+        }
+
+        public java.util.List<String> getContractNames() {
+            return contractNames;
+        }
+
+        public void setContractNames(java.util.List<String> contractNames) {
+            this.contractNames = contractNames;
         }
 
         public StableDefaults getStableDefaults() {
