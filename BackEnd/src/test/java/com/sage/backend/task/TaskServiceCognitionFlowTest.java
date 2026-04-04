@@ -1,5 +1,6 @@
 package com.sage.backend.task;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sage.backend.audit.AuditService;
 import com.sage.backend.cognition.CognitionFinalExplanationClient;
@@ -15,10 +16,12 @@ import com.sage.backend.mapper.RepairRecordMapper;
 import com.sage.backend.mapper.TaskAttachmentMapper;
 import com.sage.backend.mapper.TaskAttemptMapper;
 import com.sage.backend.mapper.TaskStateMapper;
+import com.sage.backend.model.TaskAttachment;
 import com.sage.backend.model.TaskState;
 import com.sage.backend.model.TaskStatus;
 import com.sage.backend.planning.Pass1Client;
 import com.sage.backend.planning.dto.Pass1Response;
+import com.sage.backend.planning.dto.Pass2Response;
 import com.sage.backend.repair.RepairDispatcherService;
 import com.sage.backend.repair.RepairProposalService;
 import com.sage.backend.repair.dto.RepairProposalResponse;
@@ -26,13 +29,16 @@ import com.sage.backend.task.dto.CreateTaskRequest;
 import com.sage.backend.task.dto.CreateTaskResponse;
 import com.sage.backend.task.dto.TaskDetailResponse;
 import com.sage.backend.validationgate.ValidationClient;
+import com.sage.backend.validationgate.dto.PrimitiveValidationResponse;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -117,6 +123,27 @@ class TaskServiceCognitionFlowTest {
 
         assertEquals(TaskStatus.FAILED.name(), response.getState());
         verify(harness.validationClient, never()).validatePrimitive(any());
+        verify(harness.jobRuntimeClient, never()).createJob(any());
+    }
+
+    @Test
+    void createTaskMissingSubmitJobContractFailsBeforeExecution() throws Exception {
+        Harness harness = new Harness(objectMapper);
+        when(harness.cognitionGoalRouteClient.route(any())).thenReturn(goalRouteResponse("resolved"));
+        when(harness.pass1Client.runPass1(any())).thenReturn(pass1ResponseWithoutContract("submit_job"));
+        when(harness.cognitionPassBClient.runPassB(any())).thenReturn(bindingResolvedPassBResponse());
+        when(harness.validationClient.validatePrimitive(any())).thenReturn(validValidation());
+        when(harness.pass2Client.runPass2(any())).thenReturn(defaultPass2Response());
+
+        CreateTaskRequest request = new CreateTaskRequest();
+        request.setUserQuery("run water yield");
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> harness.service.createTask(42L, request)
+        );
+
+        assertEquals(502, exception.getStatusCode().value());
         verify(harness.jobRuntimeClient, never()).createJob(any());
     }
 
@@ -243,6 +270,7 @@ class TaskServiceCognitionFlowTest {
         Harness harness = new Harness(objectMapper);
         TaskState taskState = taskStateForProjection();
         when(harness.taskStateMapper.findByTaskId("task_projection")).thenReturn(taskState);
+        when(harness.taskAttachmentMapper.findByTaskId("task_projection")).thenReturn(List.of(readyAttachment("precipitation")));
 
         TaskDetailResponse response = harness.service.getTask("task_projection", 42L);
 
@@ -257,6 +285,13 @@ class TaskServiceCognitionFlowTest {
         assertEquals("clarify_required", response.getCaseProjection().get("mode"));
         assertEquals("water_yield", response.getSkillRouteSummary().getSkillId());
         assertEquals("1.0.0", response.getSkillRouteSummary().getSkillVersion());
+        assertEquals(1, response.getCatalogSummary().get("catalog_asset_count"));
+        assertEquals(1, response.getCatalogSummary().get("catalog_ready_asset_count"));
+        assertEquals(List.of("precipitation"), response.getCatalogSummary().get("catalog_ready_role_names"));
+        assertEquals("task_attachment_projection", response.getCatalogSummary().get("catalog_source"));
+        assertEquals("waiting_context", response.getCatalogConsistency().get("scope"));
+        assertEquals(false, response.getCatalogConsistency().get("waiting_context_catalog_present"));
+        assertEquals(List.of("precipitation"), response.getCatalogConsistency().get("stale_missing_slots"));
     }
 
     private CognitionGoalRouteResponse goalRouteResponse(String status) throws Exception {
@@ -360,6 +395,24 @@ class TaskServiceCognitionFlowTest {
         return response;
     }
 
+    private CognitionPassBResponse bindingResolvedPassBResponse() {
+        CognitionPassBResponse response = new CognitionPassBResponse();
+        response.setSkillId("water_yield");
+        response.setSkillVersion("1.0.0");
+        response.setBindingStatus("resolved");
+        response.setSlotBindings(List.of());
+        response.setUserSemanticArgs(Map.of());
+        response.setInferredSemanticArgs(Map.of());
+        response.setArgsDraft(Map.of(
+                "workspace_dir", "/tmp/workspace",
+                "results_suffix", "attempt_1",
+                "analysis_template", "water_yield_v1"
+        ));
+        response.setDecisionSummary(Map.of("strategy", "resolved"));
+        response.setCognitionMetadata(Map.of("fallback_used", false, "schema_valid", true, "source", "test", "provider", "glm"));
+        return response;
+    }
+
     private TaskState taskStateForProjection() {
         TaskState taskState = new TaskState();
         taskState.setTaskId("task_projection");
@@ -406,7 +459,19 @@ class TaskServiceCognitionFlowTest {
                 """);
         taskState.setPass1ResultJson(samplePass1Json());
         taskState.setValidationSummaryJson("{}");
-        taskState.setWaitingContextJson("{}");
+        taskState.setWaitingContextJson("""
+                {
+                  "waiting_reason_type": "MISSING_INPUT",
+                  "missing_slots": [
+                    {"slot_name": "precipitation", "expected_type": "raster", "required": true}
+                  ],
+                  "required_user_actions": [
+                    {"action_type": "upload", "key": "upload_precipitation", "label": "Upload precipitation", "required": true}
+                  ],
+                  "resume_hint": "Upload precipitation before resuming.",
+                  "can_resume": false
+                }
+                """);
         return taskState;
     }
 
@@ -421,7 +486,45 @@ class TaskServiceCognitionFlowTest {
                   "capability_facts": {
                     "runtime_profile_hint": "docker-local",
                     "validation_hints": [],
-                    "repair_hints": []
+                    "repair_hints": [],
+                    "contracts": {
+                      "validate_bindings": {
+                        "input_schema": "slot_bindings_validation_v1",
+                        "output_schema": "binding_validation_summary_v1",
+                        "caller_scope": "control_or_planning",
+                        "side_effect_level": "read_only"
+                      },
+                      "validate_args": {
+                        "input_schema": "args_draft_validation_v1",
+                        "output_schema": "arg_validation_summary_v1",
+                        "caller_scope": "control_or_planning",
+                        "side_effect_level": "read_only"
+                      },
+                      "checkpoint_resume_ack": {
+                        "input_schema": "checkpoint_resume_request_v1",
+                        "output_schema": "checkpoint_resume_ack_v1",
+                        "caller_scope": "control_only",
+                        "side_effect_level": "workflow_checkpoint"
+                      },
+                      "submit_job": {
+                        "input_schema": "create_job_request_v1",
+                        "output_schema": "create_job_response_v1",
+                        "caller_scope": "control_only",
+                        "side_effect_level": "runtime_submission"
+                      },
+                      "query_job_status": {
+                        "input_schema": "job_status_request_v1",
+                        "output_schema": "job_status_response_v1",
+                        "caller_scope": "control_or_presentation",
+                        "side_effect_level": "read_only"
+                      },
+                      "collect_result_bundle": {
+                        "input_schema": "result_bundle_collection_request_v1",
+                        "output_schema": "result_bundle_collection_response_v1",
+                        "caller_scope": "control_only",
+                        "side_effect_level": "artifact_collection"
+                      }
+                    }
                   },
                   "logical_input_roles": [],
                   "role_arg_mappings": [],
@@ -435,6 +538,66 @@ class TaskServiceCognitionFlowTest {
                   "stable_defaults": {}
                 }
                 """;
+    }
+
+    private Pass1Response pass1ResponseWithoutContract(String contractName) throws Exception {
+        JsonNode root = objectMapper.readTree(samplePass1Json());
+        ((com.fasterxml.jackson.databind.node.ObjectNode) root.path("capability_facts").path("contracts")).remove(contractName);
+        return objectMapper.treeToValue(root, Pass1Response.class);
+    }
+
+    private PrimitiveValidationResponse validValidation() {
+        PrimitiveValidationResponse response = new PrimitiveValidationResponse();
+        response.setIsValid(true);
+        response.setMissingRoles(List.of());
+        response.setMissingParams(List.of());
+        response.setInvalidBindings(List.of());
+        response.setErrorCode("NONE");
+        return response;
+    }
+
+    private Pass2Response defaultPass2Response() throws Exception {
+        Pass2Response response = new Pass2Response();
+        response.setGraphDigest("digest_test");
+        response.setMaterializedExecutionGraph(objectMapper.readTree("""
+                {
+                  "nodes": [{"node_id": "load_inputs", "kind": "io"}],
+                  "edges": []
+                }
+                """));
+        response.setRuntimeAssertions(objectMapper.readTree("[]"));
+        response.setPlanningSummary(objectMapper.readTree("""
+                {
+                  "planner": "pass2_minimal",
+                  "node_count": 1,
+                  "edge_count": 0,
+                  "validation_is_valid": true,
+                  "validation_error_code": "NONE",
+                  "capability_key": "water_yield",
+                  "template": "water_yield_v1",
+                  "runtime_assertion_count": 0
+                }
+                """));
+        response.setCanonicalizationSummary(objectMapper.readTree("""
+                {"canonicalizer": "deterministic_sort_v1"}
+                """));
+        response.setRewriteSummary(objectMapper.readTree("""
+                {"rewriter": "whitelist_minimal"}
+                """));
+        return response;
+    }
+
+    private TaskAttachment readyAttachment(String logicalSlot) {
+        TaskAttachment attachment = new TaskAttachment();
+        attachment.setId("att_" + logicalSlot);
+        attachment.setLogicalSlot(logicalSlot);
+        attachment.setFileName(logicalSlot + ".tif");
+        attachment.setContentType("image/tiff");
+        attachment.setSizeBytes(1024L);
+        attachment.setStoredPath("/workspace/input/" + logicalSlot + ".tif");
+        attachment.setChecksum("sha256:" + logicalSlot);
+        attachment.setAssignmentStatus("ASSIGNED");
+        return attachment;
     }
 
     private static final class Harness {

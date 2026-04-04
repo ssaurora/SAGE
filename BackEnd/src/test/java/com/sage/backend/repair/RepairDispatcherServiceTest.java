@@ -60,6 +60,9 @@ class RepairDispatcherServiceTest {
         assertEquals("raster", decision.waitingContext().getMissingSlots().get(0).getExpectedType());
         assertEquals("upload_precipitation", decision.waitingContext().getRequiredUserActions().get(0).getKey());
         assertEquals("Upload precipitation", decision.waitingContext().getRequiredUserActions().get(0).getLabel());
+        assertEquals(0, decision.waitingContext().getCatalogSummary().get("catalog_asset_count"));
+        assertEquals(0, decision.waitingContext().getCatalogSummary().get("catalog_ready_asset_count"));
+        assertEquals("none", decision.waitingContext().getCatalogSummary().get("catalog_source"));
     }
 
     @Test
@@ -93,13 +96,117 @@ class RepairDispatcherServiceTest {
                 """);
 
         TaskAttachment attachment = new TaskAttachment();
+        attachment.setId("att_precip");
         attachment.setLogicalSlot("precipitation");
+        attachment.setFileName("precipitation.tif");
+        attachment.setContentType("image/tiff");
+        attachment.setSizeBytes(1024L);
+        attachment.setStoredPath("E:/tmp/precipitation.tif");
+        attachment.setChecksum("sha256:precip");
+        attachment.setAssignmentStatus("ASSIGNED");
 
         RepairDecision decision = service.decide(validationSummary, pass1Result, List.of(attachment));
 
         assertTrue(Boolean.TRUE.equals(decision.waitingContext().getCanResume()));
         assertEquals(0, decision.waitingContext().getRequiredUserActions().size());
         assertEquals(0, decision.waitingContext().getMissingSlots().size());
+        assertEquals(1, decision.waitingContext().getCatalogSummary().get("catalog_asset_count"));
+        assertEquals(1, decision.waitingContext().getCatalogSummary().get("catalog_ready_asset_count"));
+        assertEquals(List.of("precipitation"), decision.waitingContext().getCatalogSummary().get("catalog_ready_role_names"));
+    }
+
+    @Test
+    void decideDoesNotTreatBlacklistedAttachmentAsSatisfiedInput() throws Exception {
+        PrimitiveValidationResponse validationSummary = new PrimitiveValidationResponse();
+        validationSummary.setMissingRoles(List.of("precipitation"));
+        validationSummary.setMissingParams(List.of());
+        validationSummary.setInvalidBindings(List.of());
+        validationSummary.setErrorCode("MISSING_ROLE");
+        JsonNode pass1Result = objectMapper.readTree("""
+                {
+                  "capability_facts": {
+                    "validation_hints": [
+                      {"role_name": "precipitation", "expected_slot_type": "raster"}
+                    ],
+                    "repair_hints": [
+                      {
+                        "role_name": "precipitation",
+                        "action_type": "upload",
+                        "action_key": "upload_precipitation",
+                        "action_label": "Upload precipitation"
+                      }
+                    ]
+                  },
+                  "slot_schema_view": {
+                    "slots": [
+                      {"slot_name": "precipitation", "type": "raster", "bound_role": "precipitation"}
+                    ]
+                  }
+                }
+                """);
+
+        TaskAttachment attachment = new TaskAttachment();
+        attachment.setId("att_blacklisted");
+        attachment.setLogicalSlot("precipitation");
+        attachment.setFileName("precipitation.tif");
+        attachment.setContentType("image/tiff");
+        attachment.setSizeBytes(1024L);
+        attachment.setStoredPath("E:/tmp/precipitation.tif");
+        attachment.setChecksum("sha256:precip");
+        attachment.setAssignmentStatus("BLACKLISTED");
+
+        RepairDecision decision = service.decide(validationSummary, pass1Result, List.of(attachment));
+
+        assertFalse(Boolean.TRUE.equals(decision.waitingContext().getCanResume()));
+        assertEquals(1, decision.waitingContext().getRequiredUserActions().size());
+        assertEquals(1, decision.waitingContext().getMissingSlots().size());
+    }
+
+    @Test
+    void decideDoesNotTreatIncompleteAttachmentMetadataAsSatisfiedInput() throws Exception {
+        PrimitiveValidationResponse validationSummary = new PrimitiveValidationResponse();
+        validationSummary.setMissingRoles(List.of("precipitation"));
+        validationSummary.setMissingParams(List.of());
+        validationSummary.setInvalidBindings(List.of());
+        validationSummary.setErrorCode("MISSING_ROLE");
+        JsonNode pass1Result = objectMapper.readTree("""
+                {
+                  "capability_facts": {
+                    "validation_hints": [
+                      {"role_name": "precipitation", "expected_slot_type": "raster"}
+                    ],
+                    "repair_hints": [
+                      {
+                        "role_name": "precipitation",
+                        "action_type": "upload",
+                        "action_key": "upload_precipitation",
+                        "action_label": "Upload precipitation"
+                      }
+                    ]
+                  },
+                  "slot_schema_view": {
+                    "slots": [
+                      {"slot_name": "precipitation", "type": "raster", "bound_role": "precipitation"}
+                    ]
+                  }
+                }
+                """);
+
+        TaskAttachment attachment = new TaskAttachment();
+        attachment.setId("att_incomplete");
+        attachment.setLogicalSlot("precipitation");
+        attachment.setFileName("precipitation.tif");
+        attachment.setContentType("image/tiff");
+        attachment.setSizeBytes(1024L);
+        attachment.setStoredPath(null);
+        attachment.setChecksum("sha256:precip");
+        attachment.setAssignmentStatus("ASSIGNED");
+
+        RepairDecision decision = service.decide(validationSummary, pass1Result, List.of(attachment));
+
+        assertFalse(Boolean.TRUE.equals(decision.waitingContext().getCanResume()));
+        assertEquals(1, decision.waitingContext().getRequiredUserActions().size());
+        assertEquals(1, decision.waitingContext().getMissingSlots().size());
     }
 
     @Test

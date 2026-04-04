@@ -89,6 +89,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -387,6 +388,8 @@ public class TaskService {
                 }
             }
 
+            CapabilityContractGuard.requireResumeAckContract(pass1Node);
+
             if ("ambiguous".equalsIgnoreCase(passBNode.path("binding_status").asText(""))) {
                 WaitingStateSnapshot waitingState = buildClarifyWaitingState(
                         taskId,
@@ -541,12 +544,14 @@ public class TaskService {
 
     public TaskDetailResponse getTask(String taskId, Long userId) {
         TaskState taskState = getOwnedTask(taskId, userId);
+        List<TaskAttachment> attachments = taskAttachmentMapper.findByTaskId(taskId);
         JsonNode pass1Projection = readJsonNode(taskState.getPass1ResultJson());
         RouteProjection routeProjection = buildRouteProjection(
                 taskState.getGoalParseJson(),
                 taskState.getSkillRouteJson(),
                 pass1Projection
         );
+        Map<String, Object> catalogSummary = buildCatalogSummary(attachments, taskState);
         TaskDetailResponse response = new TaskDetailResponse();
         response.setTaskId(taskState.getTaskId());
         response.setState(taskState.getCurrentState());
@@ -571,7 +576,9 @@ public class TaskService {
         response.setResultBundleSummary(TaskProjectionBuilder.buildResultBundleSummaryView(readJsonNode(taskState.getResultBundleSummaryJson())));
         response.setFinalExplanationSummary(TaskProjectionBuilder.buildFinalExplanationSummary(readJsonNode(taskState.getFinalExplanationSummaryJson())));
         response.setLastFailureSummary(TaskProjectionBuilder.buildFailureSummary(readJsonNode(taskState.getLastFailureSummaryJson())));
+        response.setCatalogSummary(catalogSummary);
         response.setWaitingContext(TaskProjectionBuilder.buildWaitingContext(readJsonNode(taskState.getWaitingContextJson())));
+        response.setCatalogConsistency(buildDetailCatalogConsistency(response.getWaitingContext(), catalogSummary));
         response.setLatestResultBundleId(taskState.getLatestResultBundleId());
         response.setLatestWorkspaceId(taskState.getLatestWorkspaceId());
         JsonNode pass2Root = readJsonNode(taskState.getPass2ResultJson());
@@ -620,6 +627,7 @@ public class TaskService {
 
     public TaskResultResponse getTaskResult(String taskId, Long userId) {
         TaskState taskState = getOwnedTask(taskId, userId);
+        List<TaskAttachment> attachments = taskAttachmentMapper.findByTaskId(taskId);
         JobRecord jobRecord = taskState.getJobId() == null ? null : jobRecordMapper.findByJobId(taskState.getJobId());
         AnalysisManifest activeManifest = resolveActiveManifest(taskState);
         String activeCaseId = extractCaseId(activeManifest);
@@ -645,6 +653,8 @@ public class TaskService {
         response.setAssemblyBlocked(passBRoot.path("assembly_blocked").isBoolean() ? passBRoot.path("assembly_blocked").asBoolean() : null);
         JsonNode goalParseRoot = readJsonNode(taskState.getGoalParseJson());
         response.setCaseProjection(TaskProjectionBuilder.buildCaseProjection(goalParseRoot, passBRoot, objectMapper));
+        Map<String, Object> catalogSummary = resolveManifestCatalogSummary(activeManifest, attachments, taskState);
+        response.setCatalogSummary(catalogSummary);
         response.setGoalRouteCognition(TaskProjectionBuilder.buildCognitionView(goalParseRoot, objectMapper));
         response.setGoalRouteOutput(TaskProjectionBuilder.buildGoalRouteOutput(goalParseRoot, skillRouteRoot, objectMapper));
         response.setPassbCognition(TaskProjectionBuilder.buildCognitionView(passBRoot, objectMapper));
@@ -677,6 +687,8 @@ public class TaskService {
             response.setWorkspaceSummary(TaskProjectionBuilder.buildWorkspaceSummary(readJsonNode(jobRecord.getWorkspaceSummaryJson())));
             response.setArtifactCatalog(TaskProjectionBuilder.buildArtifactCatalog(readJsonNode(jobRecord.getArtifactCatalogJson())));
             response.setPlanningSummary(TaskProjectionBuilder.buildJsonObjectView(readJsonNode(jobRecord.getPlanningPass2SummaryJson()), objectMapper));
+            List<String> resultRoleNames = extractResultInputRoleNames(response);
+            response.setCatalogConsistency(AttachmentCatalogProjector.buildCoverageConsistency(resultRoleNames, catalogSummary, "result_input_bindings"));
         }
         int attemptNo = resolveActiveAttemptNo(taskState);
         RepairRecord latestRepair = repairRecordMapper.findLatestByTaskIdAndAttemptNo(taskId, attemptNo);
@@ -773,6 +785,7 @@ public class TaskService {
 
     public TaskManifestResponse getTaskManifest(String taskId, Long userId) {
         TaskState taskState = getOwnedTask(taskId, userId);
+        List<TaskAttachment> attachments = taskAttachmentMapper.findByTaskId(taskId);
         AnalysisManifest manifest = null;
         if (taskState.getActiveManifestId() != null && !taskState.getActiveManifestId().isBlank()) {
             manifest = analysisManifestMapper.findByManifestId(taskState.getActiveManifestId());
@@ -795,6 +808,8 @@ public class TaskService {
         response.setCheckpointVersion(manifest.getCheckpointVersion());
         response.setGraphDigest(manifest.getGraphDigest());
         response.setPlanningSummary(TaskProjectionBuilder.buildJsonObjectView(readJsonNode(manifest.getPlanningSummaryJson()), objectMapper));
+        Map<String, Object> catalogSummary = resolveManifestCatalogSummary(manifest, attachments, taskState);
+        response.setCatalogSummary(catalogSummary);
         response.setCognitionVerdict(taskState.getCognitionVerdict());
         JsonNode goalParseRoot = readJsonNode(taskState.getGoalParseJson());
         JsonNode skillRouteRoot = readJsonNode(taskState.getSkillRouteJson());
@@ -829,6 +844,11 @@ public class TaskService {
         response.setLogicalInputRoles(TaskProjectionBuilder.buildManifestLogicalInputRoles(readJsonNode(manifest.getLogicalInputRolesJson())));
         response.setSlotSchemaView(TaskProjectionBuilder.buildManifestSlotSchemaView(readJsonNode(manifest.getSlotSchemaViewJson())));
         response.setSlotBindings(TaskProjectionBuilder.buildManifestSlotBindings(readJsonNode(manifest.getSlotBindingsJson())));
+        response.setCatalogConsistency(AttachmentCatalogProjector.buildCoverageConsistency(
+                extractManifestRoleNames(response.getSlotBindings()),
+                catalogSummary,
+                "manifest_slot_bindings"
+        ));
         response.setArgsDraft(TaskProjectionBuilder.buildJsonObjectView(readJsonNode(manifest.getArgsDraftJson()), objectMapper));
         response.setValidationSummary(TaskProjectionBuilder.buildManifestValidationSummary(readJsonNode(manifest.getValidationSummaryJson())));
         response.setExecutionGraph(TaskProjectionBuilder.buildManifestExecutionGraph(readJsonNode(manifest.getExecutionGraphJson())));
@@ -848,6 +868,64 @@ public class TaskService {
             response.setFinalExplanationOutput(TaskProjectionBuilder.buildStageOutput(finalExplanationNode, objectMapper));
         }
         return response;
+    }
+
+    private Map<String, Object> buildDetailCatalogConsistency(TaskDetailResponse.WaitingContext waitingContext, Map<String, Object> currentCatalogSummary) {
+        Map<String, Object> consistency = new LinkedHashMap<>();
+        Map<String, Object> waitingCatalogSummary = waitingContext == null ? null : waitingContext.getCatalogSummary();
+        boolean waitingCatalogPresent = waitingCatalogSummary != null && !waitingCatalogSummary.isEmpty();
+        consistency.put("scope", "waiting_context");
+        consistency.put("waiting_context_catalog_present", waitingCatalogPresent);
+        consistency.put("current_catalog_source", currentCatalogSummary == null ? "" : currentCatalogSummary.getOrDefault("catalog_source", ""));
+        consistency.put("current_catalog_revision", AttachmentCatalogProjector.extractCatalogRevision(currentCatalogSummary));
+        consistency.put("current_catalog_fingerprint", AttachmentCatalogProjector.extractCatalogFingerprint(currentCatalogSummary));
+        consistency.put("waiting_context_catalog_source", waitingCatalogPresent ? waitingCatalogSummary.getOrDefault("catalog_source", "") : "");
+        consistency.put("waiting_context_catalog_revision", AttachmentCatalogProjector.extractCatalogRevision(waitingCatalogSummary));
+        consistency.put("waiting_context_catalog_fingerprint", AttachmentCatalogProjector.extractCatalogFingerprint(waitingCatalogSummary));
+        consistency.put("waiting_context_matches_current_catalog", waitingCatalogPresent && AttachmentCatalogProjector.sameCatalogIdentity(waitingCatalogSummary, currentCatalogSummary));
+        consistency.put("stale_missing_slots", resolveStaleWaitingSlots(waitingContext, currentCatalogSummary));
+        return consistency;
+    }
+
+    private List<String> resolveStaleWaitingSlots(TaskDetailResponse.WaitingContext waitingContext, Map<String, Object> currentCatalogSummary) {
+        if (waitingContext == null || waitingContext.getMissingSlots() == null || waitingContext.getMissingSlots().isEmpty()) {
+            return List.of();
+        }
+        Set<String> readyRoleNames = new LinkedHashSet<>(AttachmentCatalogProjector.extractReadyRoleNames(currentCatalogSummary));
+        List<String> staleSlots = new ArrayList<>();
+        for (TaskDetailResponse.MissingSlot missingSlot : waitingContext.getMissingSlots()) {
+            String slotName = missingSlot == null ? null : missingSlot.getSlotName();
+            if (slotName != null && readyRoleNames.contains(slotName)) {
+                staleSlots.add(slotName);
+            }
+        }
+        return staleSlots;
+    }
+
+    private List<String> extractManifestRoleNames(List<TaskManifestResponse.SlotBinding> slotBindings) {
+        if (slotBindings == null || slotBindings.isEmpty()) {
+            return List.of();
+        }
+        Set<String> roleNames = new LinkedHashSet<>();
+        for (TaskManifestResponse.SlotBinding binding : slotBindings) {
+            if (binding != null && binding.getRoleName() != null && !binding.getRoleName().isBlank()) {
+                roleNames.add(binding.getRoleName());
+            }
+        }
+        return new ArrayList<>(roleNames);
+    }
+
+    private List<String> extractResultInputRoleNames(TaskResultResponse response) {
+        if (response == null || response.getDockerRuntimeEvidence() == null || response.getDockerRuntimeEvidence().getInputBindings() == null) {
+            return List.of();
+        }
+        Set<String> roleNames = new LinkedHashSet<>();
+        for (TaskResultResponse.InputBinding binding : response.getDockerRuntimeEvidence().getInputBindings()) {
+            if (binding != null && binding.getRoleName() != null && !binding.getRoleName().isBlank()) {
+                roleNames.add(binding.getRoleName());
+            }
+        }
+        return new ArrayList<>(roleNames);
     }
 
     @Transactional
@@ -1030,12 +1108,20 @@ public class TaskService {
                 OffsetDateTime.now(ZoneOffset.UTC)
         );
 
+        Map<String, Object> currentCatalogSummary = waitingState.waitingContext().getCatalogSummary();
+        int candidateCatalogRevision = taskState.getInventoryVersion() == null ? 0 : taskState.getInventoryVersion() + 1;
+        String currentCatalogFingerprint = AttachmentCatalogProjector.extractCatalogFingerprint(currentCatalogSummary);
+
         String resumeTxnJson = writeJson(buildResumeTransactionPayload(
                 resumeRequestId,
                 "PREPARING",
                 taskState.getCheckpointVersion(),
                 taskState.getCheckpointVersion() == null ? 1 : taskState.getCheckpointVersion() + 1,
                 taskState.getInventoryVersion() == null ? 0 : taskState.getInventoryVersion() + 1,
+                AttachmentCatalogProjector.extractCatalogRevision(currentCatalogSummary),
+                currentCatalogFingerprint,
+                candidateCatalogRevision,
+                currentCatalogFingerprint,
                 null,
                 newAttemptNo,
                 null,
@@ -1138,12 +1224,20 @@ public class TaskService {
             throw new ResponseStatusException(NOT_FOUND, "Frozen manifest not found for target checkpoint");
         }
 
+        Map<String, Object> currentCatalogSummary = buildCatalogSummary(taskId, taskState);
+        String currentCatalogFingerprint = AttachmentCatalogProjector.extractCatalogFingerprint(currentCatalogSummary);
+        Integer currentCatalogRevision = AttachmentCatalogProjector.extractCatalogRevision(currentCatalogSummary);
+
         String resumeTxnJson = writeJson(buildResumeTransactionPayload(
                 request.getRequestId(),
                 "FORCE_REVERTED",
                 taskState.getCheckpointVersion(),
                 manifest.getCheckpointVersion(),
                 currentInventoryVersion(taskState),
+                currentCatalogRevision,
+                currentCatalogFingerprint,
+                currentCatalogRevision,
+                currentCatalogFingerprint,
                 manifest.getManifestId(),
                 manifest.getAttemptNo(),
                 null,
@@ -1225,6 +1319,17 @@ public class TaskService {
     }
 
     private void syncSingleJob(JobRecord jobRecord) throws Exception {
+        TaskState taskState = taskStateMapper.findByTaskId(jobRecord.getTaskId());
+        if (taskState == null || !Objects.equals(taskState.getJobId(), jobRecord.getJobId())) {
+            return;
+        }
+        try {
+            CapabilityContractGuard.requireQueryJobStatusContract(readJsonNode(taskState.getPass1ResultJson()));
+        } catch (IllegalStateException exception) {
+            markTaskCorruptedForCapabilityContract(taskState, exception.getMessage());
+            return;
+        }
+
         JobStatusResponse status = jobRuntimeClient.getJob(jobRecord.getJobId());
         String newState = safeString(status.getJobState());
         String previousState = safeString(jobRecord.getJobState());
@@ -1256,7 +1361,7 @@ public class TaskService {
         }
         workspaceTraceService.updateWorkspaceFromStatus(jobRecord, status.getWorkspaceSummary(), status.getDockerRuntimeEvidence(), terminal);
 
-        TaskState taskState = taskStateMapper.findByTaskId(jobRecord.getTaskId());
+        taskState = taskStateMapper.findByTaskId(jobRecord.getTaskId());
         if (taskState == null || !Objects.equals(taskState.getJobId(), jobRecord.getJobId()) || Objects.equals(previousState, newState)) {
             return;
         }
@@ -1328,6 +1433,7 @@ public class TaskService {
         }
 
         try {
+            CapabilityContractGuard.requireCollectResultBundleContract(readJsonNode(taskState.getPass1ResultJson()));
             JsonNode finalExplanationNode = buildFinalExplanationNode(taskState, jobRecord, status);
             SuccessOutputSummaries outputSummaries = buildSuccessOutputSummaries(status, finalExplanationNode);
             workspaceTraceService.persistSuccess(taskState, jobRecord, status.getResultBundle(), finalExplanationNode, status.getArtifactCatalog());
@@ -1356,6 +1462,28 @@ public class TaskService {
 
         ensureUpdated(taskStateMapper.updateState(taskId, version, TaskStatus.SUCCEEDED.name()));
         appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState, TaskStatus.SUCCEEDED.name(), version + 1, null);
+    }
+
+    private void markTaskCorruptedForCapabilityContract(TaskState taskState, String failureReason) {
+        if (taskState == null) {
+            return;
+        }
+        ensureUpdated(taskStateMapper.markCorrupted(
+                taskState.getTaskId(),
+                taskState.getStateVersion(),
+                TaskStatus.STATE_CORRUPTED.name(),
+                failureReason,
+                OffsetDateTime.now(ZoneOffset.UTC),
+                taskState.getResumeTxnJson()
+        ));
+        appendEvent(
+                taskState.getTaskId(),
+                EventType.STATE_CHANGED.name(),
+                taskState.getCurrentState(),
+                TaskStatus.STATE_CORRUPTED.name(),
+                taskState.getStateVersion() + 1,
+                null
+        );
     }
 
     private TerminalFailureHandling handleNonSuccessTerminalState(TaskState taskState, JobRecord jobRecord, JobStatusResponse status, String newState) throws Exception {
@@ -1442,6 +1570,11 @@ public class TaskService {
         int baseCheckpointVersion = currentCheckpointVersion(taskState);
         int candidateCheckpointVersion = baseCheckpointVersion + 1;
         int candidateInventoryVersion = nextResumeInventoryVersion(taskState);
+        Map<String, Object> currentCatalogSummary = buildCatalogSummary(taskId, taskState);
+        Integer baseCatalogRevision = AttachmentCatalogProjector.extractCatalogRevision(currentCatalogSummary);
+        String baseCatalogFingerprint = AttachmentCatalogProjector.extractCatalogFingerprint(currentCatalogSummary);
+        Integer candidateCatalogRevision = candidateInventoryVersion;
+        String candidateCatalogFingerprint = baseCatalogFingerprint;
         PreparedJobSubmission preparedSubmission = null;
 
         try {
@@ -1498,6 +1631,10 @@ public class TaskService {
                             baseCheckpointVersion,
                             candidateCheckpointVersion,
                             candidateInventoryVersion,
+                            baseCatalogRevision,
+                            baseCatalogFingerprint,
+                            candidateCatalogRevision,
+                            candidateCatalogFingerprint,
                             null,
                             resolveActiveAttemptNo(taskState),
                             null,
@@ -1526,6 +1663,10 @@ public class TaskService {
                             baseCheckpointVersion,
                             candidateCheckpointVersion,
                             candidateInventoryVersion,
+                            baseCatalogRevision,
+                            baseCatalogFingerprint,
+                            candidateCatalogRevision,
+                            candidateCatalogFingerprint,
                             null,
                             resolveActiveAttemptNo(taskState),
                             null,
@@ -1576,6 +1717,10 @@ public class TaskService {
                                 baseCheckpointVersion,
                                 candidateCheckpointVersion,
                                 candidateInventoryVersion,
+                                baseCatalogRevision,
+                                baseCatalogFingerprint,
+                                candidateCatalogRevision,
+                                candidateCatalogFingerprint,
                                 null,
                                 resolveActiveAttemptNo(taskState),
                                 null,
@@ -1704,6 +1849,10 @@ public class TaskService {
                             baseCheckpointVersion,
                             candidateCheckpointVersion,
                             candidateInventoryVersion,
+                            baseCatalogRevision,
+                            baseCatalogFingerprint,
+                            candidateCatalogRevision,
+                            candidateCatalogFingerprint,
                             null,
                             resolveActiveAttemptNo(taskState),
                             null,
@@ -1738,6 +1887,10 @@ public class TaskService {
                         baseCheckpointVersion,
                         candidateCheckpointVersion,
                         candidateInventoryVersion,
+                        baseCatalogRevision,
+                        baseCatalogFingerprint,
+                        candidateCatalogRevision,
+                        candidateCatalogFingerprint,
                         null,
                         resolveActiveAttemptNo(taskState),
                         null,
@@ -1758,6 +1911,7 @@ public class TaskService {
                 return buildResumeTaskResponse(taskId, TaskStatus.WAITING_USER.name(), currentVersion + 1, true, taskState.getActiveAttemptNo());
             }
 
+            CapabilityContractGuard.requireResumeAckContract(pass1Node);
             ValidationStageResult validationStage = runValidationStage(taskId, currentVersion, pass1Node, passBNode);
             taskStateMapper.updateInputChainSnapshot(
                     taskId,
@@ -1776,6 +1930,10 @@ public class TaskService {
                             baseCheckpointVersion,
                             candidateCheckpointVersion,
                             candidateInventoryVersion,
+                            baseCatalogRevision,
+                            baseCatalogFingerprint,
+                            candidateCatalogRevision,
+                            candidateCatalogFingerprint,
                             null,
                             resolveActiveAttemptNo(taskState),
                             null,
@@ -1825,6 +1983,10 @@ public class TaskService {
                         baseCheckpointVersion,
                         candidateCheckpointVersion,
                         candidateInventoryVersion,
+                        baseCatalogRevision,
+                        baseCatalogFingerprint,
+                        candidateCatalogRevision,
+                        candidateCatalogFingerprint,
                         null,
                         resolveActiveAttemptNo(taskState),
                         null,
@@ -1877,6 +2039,10 @@ public class TaskService {
                     baseCheckpointVersion,
                     candidateCheckpointVersion,
                     candidateInventoryVersion,
+                    baseCatalogRevision,
+                    baseCatalogFingerprint,
+                    candidateCatalogRevision,
+                    candidateCatalogFingerprint,
                     preparedSubmission.manifestCandidate().getManifestId(),
                     attemptNo,
                     preparedSubmission.createJobResponse().getJobId(),
@@ -1889,6 +2055,10 @@ public class TaskService {
                     baseCheckpointVersion,
                     candidateCheckpointVersion,
                     candidateInventoryVersion,
+                    baseCatalogRevision,
+                    baseCatalogFingerprint,
+                    candidateCatalogRevision,
+                    candidateCatalogFingerprint,
                     preparedSubmission.manifestCandidate().getManifestId(),
                     attemptNo,
                     preparedSubmission.createJobResponse().getJobId(),
@@ -1934,6 +2104,10 @@ public class TaskService {
                         baseCheckpointVersion,
                         candidateCheckpointVersion,
                         candidateInventoryVersion,
+                        baseCatalogRevision,
+                        baseCatalogFingerprint,
+                        candidateCatalogRevision,
+                        candidateCatalogFingerprint,
                         preparedSubmission == null ? null : preparedSubmission.manifestCandidate().getManifestId(),
                         resolveActiveAttemptNo(taskState),
                         preparedSubmission == null ? null : preparedSubmission.createJobResponse().getJobId(),
@@ -2166,9 +2340,15 @@ public class TaskService {
             String userNote
     ) {
         List<TaskAttachment> attachments = taskAttachmentMapper.findByTaskId(taskId);
+        TaskState latestTaskState = taskStateMapper.findByTaskId(taskId);
         RepairDecision decision = assertionFailureMapper.map(failureSummary, pass1Result, attachments);
         if (decision == null || isFatalRepairDecision(decision)) {
-            decision = repairDispatcherService.decide(readValidationSummary(validationSummary), pass1Result, attachments);
+            decision = repairDispatcherService.decide(
+                    readValidationSummary(validationSummary),
+                    pass1Result,
+                    attachments,
+                    currentInventoryVersion(latestTaskState)
+            );
         }
         return buildWaitingStateSnapshot(taskId, decision, validationSummary, failureSummary, userNote, true);
     }
@@ -2283,6 +2463,7 @@ public class TaskService {
                 ? "Select a governed case and then resume."
                 : "Provide clarification in user_note before resuming.");
         waitingContext.setCanResume(false);
+        waitingContext.setCatalogSummary(buildCatalogSummary(taskId, taskStateMapper.findByTaskId(taskId)));
 
         RepairDecision decision = new RepairDecision("RECOVERABLE", "WAITING_USER", waitingContext);
         return buildWaitingStateSnapshot(taskId, decision, objectMapper.createObjectNode(), objectMapper.createObjectNode(), userNote, false);
@@ -2501,12 +2682,17 @@ public class TaskService {
             JsonNode payloadNode
     ) throws Exception {
         String taskId = taskState.getTaskId();
+        Map<String, Object> currentCatalogSummary = buildCatalogSummary(taskId, taskState);
         String rolledBackTxn = writeJson(buildResumeTransactionPayload(
                 request.getResumeRequestId(),
                 "ROLLED_BACK",
                 baseCheckpointVersion,
                 candidateCheckpointVersion,
                 candidateInventoryVersion,
+                AttachmentCatalogProjector.extractCatalogRevision(currentCatalogSummary),
+                AttachmentCatalogProjector.extractCatalogFingerprint(currentCatalogSummary),
+                candidateInventoryVersion,
+                AttachmentCatalogProjector.extractCatalogFingerprint(currentCatalogSummary),
                 null,
                 resolveActiveAttemptNo(taskState),
                 null,
@@ -2839,6 +3025,7 @@ public class TaskService {
                 skillRouteNode,
                 pass1Node
         );
+        CapabilityContractGuard.requireSubmitJobContract(pass1Node);
         String workspaceId = generateWorkspaceId();
         CreateJobResponse createJobResponse = submitJob(
                 taskId,
@@ -3079,6 +3266,7 @@ public class TaskService {
             JsonNode pass1Node,
             JsonNode passBNode
     ) throws Exception {
+        CapabilityContractGuard.requireValidationContracts(pass1Node);
         appendEvent(taskId, EventType.VALIDATION_STARTED.name(), null, null, stateVersion, null);
         PrimitiveValidationResponse validationResponse = runValidation(taskId, stateVersion, pass1Node, passBNode);
         String validationSummaryJson = objectMapper.writeValueAsString(validationResponse);
@@ -3097,7 +3285,13 @@ public class TaskService {
         RepairDecision repairDecision = null;
         TaskStatus nextState = TaskStatus.PLANNING;
         if (!Boolean.TRUE.equals(validationResponse.getIsValid())) {
-            repairDecision = repairDispatcherService.decide(validationResponse, pass1Node, taskAttachmentMapper.findByTaskId(taskId));
+            TaskState latestTaskState = taskStateMapper.findByTaskId(taskId);
+            repairDecision = repairDispatcherService.decide(
+                    validationResponse,
+                    pass1Node,
+                    taskAttachmentMapper.findByTaskId(taskId),
+                    currentInventoryVersion(latestTaskState)
+            );
             nextState = isFatalRepairDecision(repairDecision) ? TaskStatus.FAILED : TaskStatus.WAITING_USER;
         }
         return new ValidationStageResult(
@@ -3216,6 +3410,7 @@ public class TaskService {
         manifest.setCheckpointVersion(nextCheckpointVersion(latestTaskState));
         manifest.setGraphDigest(pass2Response == null ? null : pass2Response.getGraphDigest());
         manifest.setPlanningSummaryJson(writeJsonIfPresent(pass2Response == null ? null : pass2Response.getPlanningSummary()));
+        manifest.setCatalogSummaryJson(writeJson(buildCatalogSummary(taskAttachmentMapper.findByTaskId(taskId), latestTaskState)));
         manifest.setCapabilityKey(pass1Node == null || pass1Node.isMissingNode()
                 ? null
                 : Pass1FactHelper.normalizeCapabilityKey(pass1Node.path("capability_key").asText(null)));
@@ -3359,12 +3554,47 @@ public class TaskService {
         );
     }
 
+    private Map<String, Object> buildCatalogSummary(String taskId, TaskState taskState) {
+        return buildCatalogSummary(taskAttachmentMapper.findByTaskId(taskId), taskState);
+    }
+
+    private Map<String, Object> buildCatalogSummary(List<TaskAttachment> attachments, TaskState taskState) {
+        return AttachmentCatalogProjector.buildCatalogSummary(attachments, currentInventoryVersion(taskState));
+    }
+
+    private Map<String, Object> resolveManifestCatalogSummary(
+            AnalysisManifest manifest,
+            List<TaskAttachment> attachments,
+            TaskState taskState
+    ) {
+        Map<String, Object> frozenSummary = readJsonMap(manifest == null ? null : manifest.getCatalogSummaryJson());
+        if (frozenSummary != null && !frozenSummary.isEmpty()) {
+            return frozenSummary;
+        }
+        return buildCatalogSummary(attachments, taskState);
+    }
+
+    private Map<String, Object> readJsonMap(String sourceJson) {
+        if (sourceJson == null || sourceJson.isBlank()) {
+            return null;
+        }
+        try {
+            return TaskProjectionBuilder.buildJsonObjectView(objectMapper.readTree(sourceJson), objectMapper);
+        } catch (Exception exception) {
+            return null;
+        }
+    }
+
     private Map<String, Object> buildResumeTransactionPayload(
             String resumeRequestId,
             String status,
             Integer baseCheckpointVersion,
             Integer candidateCheckpointVersion,
             Integer candidateInventoryVersion,
+            Integer baseCatalogRevision,
+            String baseCatalogFingerprint,
+            Integer candidateCatalogRevision,
+            String candidateCatalogFingerprint,
             String candidateManifestId,
             Integer candidateAttemptNo,
             String candidateJobId,
@@ -3376,6 +3606,10 @@ public class TaskService {
         payload.put("base_checkpoint_version", baseCheckpointVersion);
         payload.put("candidate_checkpoint_version", candidateCheckpointVersion);
         payload.put("candidate_inventory_version", candidateInventoryVersion);
+        payload.put("base_catalog_revision", baseCatalogRevision);
+        payload.put("base_catalog_fingerprint", baseCatalogFingerprint);
+        payload.put("candidate_catalog_revision", candidateCatalogRevision);
+        payload.put("candidate_catalog_fingerprint", candidateCatalogFingerprint);
         payload.put("candidate_manifest_id", candidateManifestId);
         payload.put("candidate_attempt_no", candidateAttemptNo);
         payload.put("candidate_job_id", candidateJobId);

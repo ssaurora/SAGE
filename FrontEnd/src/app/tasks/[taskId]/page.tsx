@@ -5,6 +5,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
 import {
+  CatalogConsistencyDto,
+  CatalogSummaryDto,
   CapabilityOutputItemDto,
   CapabilityRepairHintDto,
   CapabilityValidationHintDto,
@@ -41,6 +43,10 @@ type GoalParseView =
 type SkillRouteView =
   | NonNullable<TaskDetailResponse["skill_route_summary"]>
   | NonNullable<TaskManifestResponse["skill_route"]>;
+type CatalogSummaryView =
+  | CatalogSummaryDto
+  | NonNullable<NonNullable<TaskDetailResponse["waiting_context"]>["catalog_summary"]>;
+type CatalogConsistencyView = CatalogConsistencyDto;
 
 function CognitionMetadataPanel({
   metadata,
@@ -301,6 +307,66 @@ function StringList({ values, emptyText }: { values?: string[]; emptyText: strin
         <li key={`${value}-${index}`}>{value}</li>
       ))}
     </ul>
+  );
+}
+
+function CatalogSummaryPanel({
+  summary,
+  emptyText,
+}: {
+  summary?: CatalogSummaryView;
+  emptyText: string;
+}) {
+  if (!summary) {
+    return <p className="muted">{emptyText}</p>;
+  }
+
+  return (
+    <>
+      <div className="kv-grid">
+        <div className="kv-item"><span className="kv-key">catalog_asset_count</span><span className="kv-value">{formatValue(summary.catalog_asset_count)}</span></div>
+        <div className="kv-item"><span className="kv-key">catalog_ready_asset_count</span><span className="kv-value">{formatValue(summary.catalog_ready_asset_count)}</span></div>
+        <div className="kv-item"><span className="kv-key">catalog_blacklisted_asset_count</span><span className="kv-value">{formatValue(summary.catalog_blacklisted_asset_count)}</span></div>
+        <div className="kv-item"><span className="kv-key">catalog_role_coverage_count</span><span className="kv-value">{formatValue(summary.catalog_role_coverage_count)}</span></div>
+        <div className="kv-item"><span className="kv-key">catalog_source</span><span className="kv-value">{summary.catalog_source ?? "-"}</span></div>
+      </div>
+      <h4>Catalog Ready Roles</h4>
+      <StringList values={summary.catalog_ready_role_names} emptyText="No catalog-ready roles." />
+    </>
+  );
+}
+
+function CatalogConsistencyPanel({
+  consistency,
+  emptyText,
+}: {
+  consistency?: CatalogConsistencyView;
+  emptyText: string;
+}) {
+  if (!consistency) {
+    return <p className="muted">{emptyText}</p>;
+  }
+
+  return (
+    <>
+      <div className="kv-grid">
+        <div className="kv-item"><span className="kv-key">scope</span><span className="kv-value">{consistency.scope ?? "-"}</span></div>
+        <div className="kv-item"><span className="kv-key">covered</span><span className="kv-value">{formatValue(consistency.covered)}</span></div>
+        <div className="kv-item"><span className="kv-key">catalog_source</span><span className="kv-value">{consistency.catalog_source ?? "-"}</span></div>
+        <div className="kv-item"><span className="kv-key">current_catalog_source</span><span className="kv-value">{consistency.current_catalog_source ?? "-"}</span></div>
+        <div className="kv-item"><span className="kv-key">waiting_context_catalog_present</span><span className="kv-value">{formatValue(consistency.waiting_context_catalog_present)}</span></div>
+        <div className="kv-item"><span className="kv-key">waiting_context_matches_current_catalog</span><span className="kv-value">{formatValue(consistency.waiting_context_matches_current_catalog)}</span></div>
+        <div className="kv-item"><span className="kv-key">waiting_context_catalog_source</span><span className="kv-value">{consistency.waiting_context_catalog_source ?? "-"}</span></div>
+      </div>
+      <h4>Catalog Ready Roles</h4>
+      <StringList values={consistency.catalog_ready_role_names} emptyText="No catalog-ready roles." />
+      <h4>Expected Role Names</h4>
+      <StringList values={consistency.expected_role_names} emptyText="No expected roles." />
+      <h4>Missing Catalog Roles</h4>
+      <StringList values={consistency.missing_catalog_roles} emptyText="No missing catalog roles." />
+      <h4>Stale Missing Slots</h4>
+      <StringList values={consistency.stale_missing_slots} emptyText="No stale missing slots." />
+    </>
   );
 }
 
@@ -1588,6 +1654,10 @@ export default function TaskDetailPage() {
             ) : null}
             <h3>Planning Summary</h3>
             <DebugJsonPanel title="Planning Summary" payload={task.planning_summary ?? null} defaultExpanded={false} />
+            <h3>Catalog Summary</h3>
+            <CatalogSummaryPanel summary={task.catalog_summary} emptyText="No catalog summary available." />
+            <h3>Catalog Consistency</h3>
+            <CatalogConsistencyPanel consistency={task.catalog_consistency} emptyText="No catalog consistency available." />
           </>
         ) : (
           <p className="muted">No governance state available.</p>
@@ -1729,6 +1799,10 @@ export default function TaskDetailPage() {
           <StringList values={manifest.blocked_mutations} emptyText="No blocked mutations." />
           <h3>Manifest Planning Summary</h3>
           <DebugJsonPanel title="Manifest Planning Summary" payload={manifest.planning_summary ?? null} defaultExpanded={false} />
+          <h3>Manifest Catalog Summary</h3>
+          <CatalogSummaryPanel summary={manifest.catalog_summary} emptyText="No manifest catalog summary available." />
+          <h3>Manifest Catalog Consistency</h3>
+          <CatalogConsistencyPanel consistency={manifest.catalog_consistency} emptyText="No manifest catalog consistency available." />
           <h3>Manifest Case Projection</h3>
           <CaseProjectionPanel projection={manifest.case_projection} />
           <h3>Manifest Goal Parse</h3>
@@ -1874,6 +1948,8 @@ export default function TaskDetailPage() {
           <h2>Repair Panel</h2>
           <h3>Waiting Context</h3>
           <WaitingContextPanel waitingContext={task.waiting_context} />
+          <h3>Waiting Catalog Summary</h3>
+          <CatalogSummaryPanel summary={task.waiting_context?.catalog_summary} emptyText="No waiting catalog summary available." />
           <h3>Repair Proposal</h3>
           <RepairProposalPanel proposal={task.repair_proposal} />
           <h3>Repair Proposal Cognition</h3>

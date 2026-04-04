@@ -54,6 +54,12 @@ public class TaskResultResponse {
     @JsonProperty("planning_summary")
     private Map<String, Object> planningSummary;
 
+    @JsonProperty("catalog_summary")
+    private Map<String, Object> catalogSummary;
+
+    @JsonProperty("catalog_consistency")
+    private Map<String, Object> catalogConsistency;
+
     @JsonProperty("canonicalization_summary")
     private Map<String, Object> canonicalizationSummary;
 
@@ -252,6 +258,22 @@ public class TaskResultResponse {
 
     public void setPlanningSummary(Map<String, Object> planningSummary) {
         this.planningSummary = planningSummary;
+    }
+
+    public Map<String, Object> getCatalogSummary() {
+        return catalogSummary;
+    }
+
+    public void setCatalogSummary(Map<String, Object> catalogSummary) {
+        this.catalogSummary = catalogSummary;
+    }
+
+    public Map<String, Object> getCatalogConsistency() {
+        return catalogConsistency;
+    }
+
+    public void setCatalogConsistency(Map<String, Object> catalogConsistency) {
+        this.catalogConsistency = catalogConsistency;
     }
 
     public Map<String, Object> getCanonicalizationSummary() {

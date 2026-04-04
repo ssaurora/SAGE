@@ -71,6 +71,9 @@ public class RepairProposalRequest {
         @JsonProperty("can_resume")
         private Boolean canResume = Boolean.FALSE;
 
+        @JsonProperty("catalog_summary")
+        private Map<String, Object> catalogSummary = new LinkedHashMap<>();
+
         public String getWaitingReasonType() {
             return waitingReasonType;
         }
@@ -117,6 +120,14 @@ public class RepairProposalRequest {
 
         public void setCanResume(Boolean canResume) {
             this.canResume = canResume;
+        }
+
+        public Map<String, Object> getCatalogSummary() {
+            return catalogSummary;
+        }
+
+        public void setCatalogSummary(Map<String, Object> catalogSummary) {
+            this.catalogSummary = catalogSummary == null ? new LinkedHashMap<>() : catalogSummary;
         }
     }
 

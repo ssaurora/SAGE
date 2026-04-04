@@ -90,6 +90,12 @@ public class TaskDetailResponse {
     @JsonProperty("planning_summary")
     private Map<String, Object> planningSummary;
 
+    @JsonProperty("catalog_summary")
+    private Map<String, Object> catalogSummary;
+
+    @JsonProperty("catalog_consistency")
+    private Map<String, Object> catalogConsistency;
+
     @JsonProperty("planning_intent_status")
     private String planningIntentStatus;
 
@@ -365,6 +371,22 @@ public class TaskDetailResponse {
 
     public void setPlanningSummary(Map<String, Object> planningSummary) {
         this.planningSummary = planningSummary;
+    }
+
+    public Map<String, Object> getCatalogSummary() {
+        return catalogSummary;
+    }
+
+    public void setCatalogSummary(Map<String, Object> catalogSummary) {
+        this.catalogSummary = catalogSummary;
+    }
+
+    public Map<String, Object> getCatalogConsistency() {
+        return catalogConsistency;
+    }
+
+    public void setCatalogConsistency(Map<String, Object> catalogConsistency) {
+        this.catalogConsistency = catalogConsistency;
     }
 
     public String getPlanningIntentStatus() {
@@ -1475,6 +1497,9 @@ public class TaskDetailResponse {
         @JsonProperty("can_resume")
         private Boolean canResume;
 
+        @JsonProperty("catalog_summary")
+        private Map<String, Object> catalogSummary;
+
         public String getWaitingReasonType() {
             return waitingReasonType;
         }
@@ -1521,6 +1546,14 @@ public class TaskDetailResponse {
 
         public void setCanResume(Boolean canResume) {
             this.canResume = canResume;
+        }
+
+        public Map<String, Object> getCatalogSummary() {
+            return catalogSummary;
+        }
+
+        public void setCatalogSummary(Map<String, Object> catalogSummary) {
+            this.catalogSummary = catalogSummary;
         }
     }
 

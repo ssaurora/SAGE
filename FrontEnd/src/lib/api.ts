@@ -139,6 +139,29 @@ export type CapabilityOutputItemDto = {
   logical_name?: string;
 };
 
+export type CatalogSummaryDto = {
+  catalog_asset_count?: number;
+  catalog_ready_asset_count?: number;
+  catalog_blacklisted_asset_count?: number;
+  catalog_role_coverage_count?: number;
+  catalog_ready_role_names?: string[];
+  catalog_source?: string;
+};
+
+export type CatalogConsistencyDto = {
+  scope?: string;
+  catalog_source?: string;
+  current_catalog_source?: string;
+  waiting_context_catalog_source?: string;
+  waiting_context_catalog_present?: boolean;
+  waiting_context_matches_current_catalog?: boolean;
+  stale_missing_slots?: string[];
+  expected_role_names?: string[];
+  missing_catalog_roles?: string[];
+  covered?: boolean;
+  catalog_ready_role_names?: string[];
+};
+
 export type TaskDetailResponse = {
   task_id: string;
   state: string;
@@ -156,6 +179,8 @@ export type TaskDetailResponse = {
   blocked_mutations?: string[];
   assembly_blocked?: boolean;
   cognition_verdict?: string;
+  catalog_summary?: CatalogSummaryDto;
+  catalog_consistency?: CatalogConsistencyDto;
   case_projection?: CaseProjectionDto;
   goal_route_cognition?: CognitionMetadataDto;
   goal_route_output?: Record<string, unknown>;
@@ -283,6 +308,7 @@ export type TaskDetailResponse = {
     required_user_actions?: { action_type: string; key: string; label: string; required: boolean }[];
     resume_hint?: string;
     can_resume?: boolean;
+    catalog_summary?: CatalogSummaryDto;
   };
   repair_proposal?: {
     available?: boolean;
@@ -340,6 +366,8 @@ export type TaskManifestResponse = {
   blocked_mutations?: string[];
   assembly_blocked?: boolean;
   cognition_verdict?: string;
+  catalog_summary?: CatalogSummaryDto;
+  catalog_consistency?: CatalogConsistencyDto;
   case_projection?: CaseProjectionDto;
   goal_route_cognition?: CognitionMetadataDto;
   goal_route_output?: Record<string, unknown>;
@@ -474,6 +502,8 @@ export type TaskResultResponse = {
   blocked_mutations?: string[];
   assembly_blocked?: boolean;
   cognition_verdict?: string;
+  catalog_summary?: CatalogSummaryDto;
+  catalog_consistency?: CatalogConsistencyDto;
   case_projection?: CaseProjectionDto;
   goal_route_cognition?: CognitionMetadataDto;
   goal_route_output?: Record<string, unknown>;

@@ -17,6 +17,18 @@ public class ResumeTransactionView {
     @JsonProperty("candidate_inventory_version")
     private Integer candidateInventoryVersion;
 
+    @JsonProperty("base_catalog_revision")
+    private Integer baseCatalogRevision;
+
+    @JsonProperty("base_catalog_fingerprint")
+    private String baseCatalogFingerprint;
+
+    @JsonProperty("candidate_catalog_revision")
+    private Integer candidateCatalogRevision;
+
+    @JsonProperty("candidate_catalog_fingerprint")
+    private String candidateCatalogFingerprint;
+
     @JsonProperty("candidate_manifest_id")
     private String candidateManifestId;
 
@@ -70,6 +82,38 @@ public class ResumeTransactionView {
 
     public void setCandidateInventoryVersion(Integer candidateInventoryVersion) {
         this.candidateInventoryVersion = candidateInventoryVersion;
+    }
+
+    public Integer getBaseCatalogRevision() {
+        return baseCatalogRevision;
+    }
+
+    public void setBaseCatalogRevision(Integer baseCatalogRevision) {
+        this.baseCatalogRevision = baseCatalogRevision;
+    }
+
+    public String getBaseCatalogFingerprint() {
+        return baseCatalogFingerprint;
+    }
+
+    public void setBaseCatalogFingerprint(String baseCatalogFingerprint) {
+        this.baseCatalogFingerprint = baseCatalogFingerprint;
+    }
+
+    public Integer getCandidateCatalogRevision() {
+        return candidateCatalogRevision;
+    }
+
+    public void setCandidateCatalogRevision(Integer candidateCatalogRevision) {
+        this.candidateCatalogRevision = candidateCatalogRevision;
+    }
+
+    public String getCandidateCatalogFingerprint() {
+        return candidateCatalogFingerprint;
+    }
+
+    public void setCandidateCatalogFingerprint(String candidateCatalogFingerprint) {
+        this.candidateCatalogFingerprint = candidateCatalogFingerprint;
     }
 
     public String getCandidateManifestId() {

@@ -33,6 +33,12 @@ public class TaskManifestResponse {
     @JsonProperty("planning_summary")
     private Map<String, Object> planningSummary;
 
+    @JsonProperty("catalog_summary")
+    private Map<String, Object> catalogSummary;
+
+    @JsonProperty("catalog_consistency")
+    private Map<String, Object> catalogConsistency;
+
     @JsonProperty("canonicalization_summary")
     private Map<String, Object> canonicalizationSummary;
 
@@ -159,6 +165,10 @@ public class TaskManifestResponse {
     public void setGraphDigest(String graphDigest) { this.graphDigest = graphDigest; }
     public Map<String, Object> getPlanningSummary() { return planningSummary; }
     public void setPlanningSummary(Map<String, Object> planningSummary) { this.planningSummary = planningSummary; }
+    public Map<String, Object> getCatalogSummary() { return catalogSummary; }
+    public void setCatalogSummary(Map<String, Object> catalogSummary) { this.catalogSummary = catalogSummary; }
+    public Map<String, Object> getCatalogConsistency() { return catalogConsistency; }
+    public void setCatalogConsistency(Map<String, Object> catalogConsistency) { this.catalogConsistency = catalogConsistency; }
     public Map<String, Object> getCanonicalizationSummary() { return canonicalizationSummary; }
     public void setCanonicalizationSummary(Map<String, Object> canonicalizationSummary) { this.canonicalizationSummary = canonicalizationSummary; }
     public Map<String, Object> getRewriteSummary() { return rewriteSummary; }

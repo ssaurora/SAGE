@@ -3,6 +3,7 @@ package com.sage.backend.task;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sage.backend.cognition.dto.CognitionPassBResponse;
+import com.sage.backend.task.dto.ResumeTransactionView;
 import com.sage.backend.task.dto.TaskDetailResponse;
 import com.sage.backend.task.dto.TaskManifestResponse;
 import com.sage.backend.task.dto.TaskResultResponse;
@@ -279,6 +280,36 @@ class TaskProjectionBuilderTest {
     }
 
     @Test
+    void buildResumeTransactionPreservesCatalogRevisionFacts() throws Exception {
+        JsonNode resumeTransaction = objectMapper.readTree("""
+                {
+                  "resume_request_id": "resume_001",
+                  "status": "ACKED",
+                  "base_checkpoint_version": 3,
+                  "candidate_checkpoint_version": 4,
+                  "candidate_inventory_version": 8,
+                  "base_catalog_revision": 7,
+                  "base_catalog_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "candidate_catalog_revision": 8,
+                  "candidate_catalog_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "candidate_manifest_id": "manifest_001",
+                  "candidate_attempt_no": 4,
+                  "candidate_job_id": "job_001",
+                  "updated_at": "2026-04-05T10:00:00Z"
+                }
+                """);
+
+        ResumeTransactionView view = TaskProjectionBuilder.buildResumeTransaction(resumeTransaction);
+
+        assertEquals("resume_001", view.getResumeRequestId());
+        assertEquals("ACKED", view.getStatus());
+        assertEquals(7, view.getBaseCatalogRevision());
+        assertEquals("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", view.getBaseCatalogFingerprint());
+        assertEquals(8, view.getCandidateCatalogRevision());
+        assertEquals("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", view.getCandidateCatalogFingerprint());
+    }
+
+    @Test
     void buildResultObjectSummaryPreservesArtifactFacts() throws Exception {
         JsonNode resultObjectSummary = objectMapper.readTree("""
                 {
@@ -423,6 +454,14 @@ class TaskProjectionBuilderTest {
                   "required_user_actions": [
                     {"action_type": "upload", "key": "upload_precipitation", "label": "Upload precipitation", "required": true}
                   ],
+                  "catalog_summary": {
+                    "catalog_asset_count": 1,
+                    "catalog_ready_asset_count": 0,
+                    "catalog_blacklisted_asset_count": 0,
+                    "catalog_role_coverage_count": 0,
+                    "catalog_ready_role_names": [],
+                    "catalog_source": "task_attachment_projection"
+                  },
                   "resume_hint": "Upload required files.",
                   "can_resume": false
                 }
@@ -441,6 +480,9 @@ class TaskProjectionBuilderTest {
         assertEquals("upload_precipitation", summary.getRequiredUserActions().get(0).getKey());
         assertEquals("Upload precipitation", summary.getRequiredUserActions().get(0).getLabel());
         assertEquals(true, summary.getRequiredUserActions().get(0).getRequired());
+        assertEquals(1, summary.getCatalogSummary().get("catalog_asset_count"));
+        assertEquals(0, summary.getCatalogSummary().get("catalog_ready_asset_count"));
+        assertEquals("task_attachment_projection", summary.getCatalogSummary().get("catalog_source"));
         assertEquals("Upload required files.", summary.getResumeHint());
         assertEquals(false, summary.getCanResume());
     }

@@ -334,6 +334,10 @@ final class TaskProjectionBuilder {
         view.setBaseCheckpointVersion(root.path("base_checkpoint_version").isNumber() ? root.path("base_checkpoint_version").asInt() : null);
         view.setCandidateCheckpointVersion(root.path("candidate_checkpoint_version").isNumber() ? root.path("candidate_checkpoint_version").asInt() : null);
         view.setCandidateInventoryVersion(root.path("candidate_inventory_version").isNumber() ? root.path("candidate_inventory_version").asInt() : null);
+        view.setBaseCatalogRevision(root.path("base_catalog_revision").isNumber() ? root.path("base_catalog_revision").asInt() : null);
+        view.setBaseCatalogFingerprint(root.path("base_catalog_fingerprint").asText(null));
+        view.setCandidateCatalogRevision(root.path("candidate_catalog_revision").isNumber() ? root.path("candidate_catalog_revision").asInt() : null);
+        view.setCandidateCatalogFingerprint(root.path("candidate_catalog_fingerprint").asText(null));
         view.setCandidateManifestId(root.path("candidate_manifest_id").asText(null));
         view.setCandidateAttemptNo(root.path("candidate_attempt_no").isNumber() ? root.path("candidate_attempt_no").asInt() : null);
         view.setCandidateJobId(root.path("candidate_job_id").asText(null));
@@ -409,6 +413,7 @@ final class TaskProjectionBuilder {
         summary.setRequiredUserActions(buildRequiredUserActions(root.path("required_user_actions")));
         summary.setResumeHint(root.path("resume_hint").asText(null));
         summary.setCanResume(root.path("can_resume").isBoolean() ? root.path("can_resume").asBoolean() : null);
+        summary.setCatalogSummary(buildJsonObjectView(root.path("catalog_summary"), null));
         return summary;
     }
 

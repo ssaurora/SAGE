@@ -11,6 +11,7 @@ import com.sage.backend.cognition.dto.CognitionPassBResponse;
 import com.sage.backend.event.EventService;
 import com.sage.backend.execution.JobRuntimeClient;
 import com.sage.backend.execution.dto.CreateJobResponse;
+import com.sage.backend.execution.dto.JobStatusResponse;
 import com.sage.backend.mapper.AnalysisManifestMapper;
 import com.sage.backend.mapper.JobRecordMapper;
 import com.sage.backend.mapper.RepairRecordMapper;
@@ -18,6 +19,7 @@ import com.sage.backend.mapper.TaskAttachmentMapper;
 import com.sage.backend.mapper.TaskAttemptMapper;
 import com.sage.backend.mapper.TaskStateMapper;
 import com.sage.backend.model.AnalysisManifest;
+import com.sage.backend.model.JobRecord;
 import com.sage.backend.model.TaskAttachment;
 import com.sage.backend.model.JobState;
 import com.sage.backend.model.TaskState;
@@ -76,7 +78,7 @@ class TaskServiceGovernanceTest {
 
         when(harness.taskStateMapper.findByTaskId("task_resume")).thenReturn(waitingTask, resumedTask, resumedTask);
         when(harness.repairRecordMapper.findByTaskIdAndResumeRequestId("task_resume", "resume_success")).thenReturn(null);
-        when(harness.repairDispatcherService.decide(any(), any(), any())).thenReturn(readyDecision());
+        when(harness.repairDispatcherService.decide(any(), any(), any(), any())).thenReturn(readyDecision());
         when(harness.taskStateMapper.acceptResume(anyString(), anyInt(), anyString(), anyString(), anyString(), anyInt(), anyInt()))
                 .thenAnswer(invocation -> {
                     preparingTxn.set(invocation.getArgument(4));
@@ -114,8 +116,14 @@ class TaskServiceGovernanceTest {
         assertEquals("COMMITTED", committed.path("status").asText());
         assertEquals(4, acked.path("candidate_checkpoint_version").asInt());
         assertEquals(8, acked.path("candidate_inventory_version").asInt());
+        assertEquals(7, acked.path("base_catalog_revision").asInt());
+        assertEquals(8, acked.path("candidate_catalog_revision").asInt());
+        assertEquals(64, acked.path("base_catalog_fingerprint").asText().length());
+        assertEquals(acked.path("base_catalog_fingerprint").asText(), acked.path("candidate_catalog_fingerprint").asText());
         assertEquals(acked.path("candidate_manifest_id").asText(), committed.path("candidate_manifest_id").asText());
         assertEquals(acked.path("candidate_job_id").asText(), committed.path("candidate_job_id").asText());
+        assertEquals(acked.path("base_catalog_revision").asInt(), committed.path("base_catalog_revision").asInt());
+        assertEquals(acked.path("candidate_catalog_revision").asInt(), committed.path("candidate_catalog_revision").asInt());
 
         verify(harness.taskStateMapper).acceptResume(
                 eq("task_resume"),
@@ -149,7 +157,7 @@ class TaskServiceGovernanceTest {
 
         when(harness.taskStateMapper.findByTaskId("task_resume")).thenReturn(waitingTask, resumedTask);
         when(harness.repairRecordMapper.findByTaskIdAndResumeRequestId("task_resume", "resume_recoverable")).thenReturn(null);
-        when(harness.repairDispatcherService.decide(any(), any(), any()))
+        when(harness.repairDispatcherService.decide(any(), any(), any(), any()))
                 .thenReturn(readyDecision(), recoverableDecision(), recoverableDecision());
         when(harness.taskStateMapper.acceptResume(anyString(), anyInt(), anyString(), anyString(), anyString(), anyInt(), anyInt()))
                 .thenAnswer(invocation -> {
@@ -174,6 +182,9 @@ class TaskServiceGovernanceTest {
         assertEquals("RECOVERABLE_VALIDATION", rolledBack.path("failure_reason").asText());
         assertEquals(4, rolledBack.path("candidate_checkpoint_version").asInt());
         assertEquals(8, rolledBack.path("candidate_inventory_version").asInt());
+        assertEquals(7, rolledBack.path("base_catalog_revision").asInt());
+        assertEquals(8, rolledBack.path("candidate_catalog_revision").asInt());
+        assertEquals(64, rolledBack.path("base_catalog_fingerprint").asText().length());
     }
 
     @Test
@@ -187,7 +198,7 @@ class TaskServiceGovernanceTest {
 
         when(harness.taskStateMapper.findByTaskId("task_resume")).thenReturn(waitingTask, resumedTask, resumedTask);
         when(harness.repairRecordMapper.findByTaskIdAndResumeRequestId("task_resume", "resume_corrupted")).thenReturn(null);
-        when(harness.repairDispatcherService.decide(any(), any(), any())).thenReturn(readyDecision());
+        when(harness.repairDispatcherService.decide(any(), any(), any(), any())).thenReturn(readyDecision());
         when(harness.taskStateMapper.acceptResume(anyString(), anyInt(), anyString(), anyString(), anyString(), anyInt(), anyInt()))
                 .thenReturn(1);
         when(harness.cognitionPassBClient.runPassB(any())).thenReturn(passBResponse());
@@ -219,6 +230,8 @@ class TaskServiceGovernanceTest {
         JsonNode corrupted = objectMapper.readTree(corruptedTxn.get());
         assertEquals("CORRUPTED", corrupted.path("status").asText());
         assertEquals("State version conflict", corrupted.path("failure_reason").asText());
+        assertEquals(7, corrupted.path("base_catalog_revision").asInt());
+        assertEquals(8, corrupted.path("candidate_catalog_revision").asInt());
         assertNotNull(corrupted.path("candidate_manifest_id").asText(null));
         assertEquals("job_resume_corrupted", corrupted.path("candidate_job_id").asText());
     }
@@ -235,7 +248,7 @@ class TaskServiceGovernanceTest {
 
         when(harness.taskStateMapper.findByTaskId("task_resume")).thenReturn(waitingTask, resumedTask, resumedTask);
         when(harness.repairRecordMapper.findByTaskIdAndResumeRequestId("task_resume", "resume_clarify_version")).thenReturn(null);
-        when(harness.repairDispatcherService.decide(any(), any(), any())).thenReturn(readyDecision());
+        when(harness.repairDispatcherService.decide(any(), any(), any(), any())).thenReturn(readyDecision());
         when(harness.taskStateMapper.acceptResume(anyString(), anyInt(), anyString(), anyString(), anyString(), anyInt(), anyInt()))
                 .thenReturn(1);
         when(harness.cognitionPassBClient.runPassB(any())).thenAnswer(invocation -> {
@@ -263,6 +276,36 @@ class TaskServiceGovernanceTest {
     }
 
     @Test
+    void resumeTaskMissingCheckpointResumeAckContractFailsBeforeValidationAndExecution() throws Exception {
+        Harness harness = new Harness(objectMapper);
+        TaskState waitingTask = waitingTaskState();
+        TaskState resumedTask = resumingTaskState();
+        waitingTask.setPass1ResultJson(samplePass1JsonWithoutContract("checkpoint_resume_ack"));
+        resumedTask.setPass1ResultJson(samplePass1JsonWithoutContract("checkpoint_resume_ack"));
+        waitingTask.setPassbResultJson("{\"binding_status\":\"resolved\",\"slot_bindings\":[],\"args_draft\":{}}");
+        resumedTask.setPassbResultJson("{\"binding_status\":\"resolved\",\"slot_bindings\":[],\"args_draft\":{}}");
+        ResumeTaskRequest request = resumeRequest("resume_missing_checkpoint_contract");
+
+        when(harness.taskStateMapper.findByTaskId("task_resume")).thenReturn(waitingTask, resumedTask, resumedTask);
+        when(harness.repairRecordMapper.findByTaskIdAndResumeRequestId("task_resume", "resume_missing_checkpoint_contract")).thenReturn(null);
+        when(harness.repairDispatcherService.decide(any(), any(), any(), any())).thenReturn(readyDecision());
+        when(harness.taskStateMapper.acceptResume(anyString(), anyInt(), anyString(), anyString(), anyString(), anyInt(), anyInt()))
+                .thenReturn(1);
+        when(harness.taskStateMapper.markCorrupted(anyString(), anyInt(), anyString(), anyString(), any(), anyString())).thenReturn(1);
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> harness.service.resumeTask("task_resume", 42L, request)
+        );
+
+        assertEquals(502, exception.getStatusCode().value());
+        verify(harness.validationClient, never()).validatePrimitive(any());
+        verify(harness.pass2Client, never()).runPass2(any());
+        verify(harness.jobRuntimeClient, never()).createJob(any());
+        verify(harness.taskStateMapper).markCorrupted(anyString(), anyInt(), anyString(), anyString(), any(), anyString());
+    }
+
+    @Test
     void runPass2ProjectsAttachmentCatalogFactsIntoRequest() throws Exception {
         Harness harness = new Harness(objectMapper);
         TaskState waitingTask = waitingTaskState();
@@ -272,7 +315,7 @@ class TaskServiceGovernanceTest {
 
         when(harness.taskStateMapper.findByTaskId("task_resume")).thenReturn(waitingTask, resumedTask, resumedTask);
         when(harness.repairRecordMapper.findByTaskIdAndResumeRequestId("task_resume", "resume_catalog_projection")).thenReturn(null);
-        when(harness.repairDispatcherService.decide(any(), any(), any())).thenReturn(readyDecision());
+        when(harness.repairDispatcherService.decide(any(), any(), any(), any())).thenReturn(readyDecision());
         when(harness.taskStateMapper.acceptResume(anyString(), anyInt(), anyString(), anyString(), anyString(), anyInt(), anyInt()))
                 .thenReturn(1);
         when(harness.cognitionPassBClient.runPassB(any())).thenReturn(passBResponse());
@@ -303,6 +346,46 @@ class TaskServiceGovernanceTest {
     }
 
     @Test
+    void resumeTaskPersistsFrozenCatalogSummaryOnManifestCandidate() throws Exception {
+        Harness harness = new Harness(objectMapper);
+        TaskState waitingTask = waitingTaskState();
+        TaskState resumedTask = resumingTaskState();
+        ResumeTaskRequest request = resumeRequest("resume_manifest_catalog");
+        AtomicReference<AnalysisManifest> insertedManifest = new AtomicReference<>();
+
+        when(harness.taskStateMapper.findByTaskId("task_resume")).thenReturn(waitingTask, resumedTask, resumedTask);
+        when(harness.repairRecordMapper.findByTaskIdAndResumeRequestId("task_resume", "resume_manifest_catalog")).thenReturn(null);
+        when(harness.repairDispatcherService.decide(any(), any(), any(), any())).thenReturn(readyDecision());
+        when(harness.taskStateMapper.acceptResume(anyString(), anyInt(), anyString(), anyString(), anyString(), anyInt(), anyInt()))
+                .thenReturn(1);
+        when(harness.cognitionPassBClient.runPassB(any())).thenReturn(passBResponse());
+        when(harness.validationClient.validatePrimitive(any())).thenReturn(validValidation());
+        when(harness.pass2Client.runPass2(any())).thenReturn(pass2Response());
+        when(harness.analysisManifestMapper.insert(any())).thenAnswer(invocation -> {
+            insertedManifest.set(invocation.getArgument(0));
+            return 1;
+        });
+        when(harness.analysisManifestMapper.updateFreezeStatus(anyString(), anyString(), anyString())).thenReturn(1);
+        when(harness.jobRuntimeClient.createJob(any())).thenReturn(createJobResponse("job_resume_manifest_catalog"));
+        when(harness.taskStateMapper.updateResumeTransaction(eq("task_resume"), anyString())).thenReturn(1);
+        when(harness.taskStateMapper.commitQueuedWithGovernance(
+                anyString(), anyInt(), anyString(), anyString(), anyString(), anyString(), anyInt(), anyInt(), anyInt(), anyInt(), anyString(), anyString()
+        )).thenReturn(1);
+        when(harness.taskAttachmentMapper.findByTaskId("task_resume")).thenReturn(List.of(readyAttachment("precipitation")));
+
+        ResumeTaskResponse response = harness.service.resumeTask("task_resume", 42L, request);
+
+        assertEquals(TaskStatus.QUEUED.name(), response.getState());
+        assertNotNull(insertedManifest.get());
+        JsonNode frozenCatalog = objectMapper.readTree(insertedManifest.get().getCatalogSummaryJson());
+        assertEquals(1, frozenCatalog.path("catalog_asset_count").asInt());
+        assertEquals(1, frozenCatalog.path("catalog_ready_asset_count").asInt());
+        assertEquals(7, frozenCatalog.path("catalog_revision").asInt());
+        assertEquals(64, frozenCatalog.path("catalog_fingerprint").asText().length());
+        assertEquals("precipitation", frozenCatalog.path("catalog_ready_role_names").get(0).asText());
+    }
+
+    @Test
     void getTaskManifestSupportsLegacyManifestWithNullGovernanceFields() {
         Harness harness = new Harness(objectMapper);
         TaskState taskState = succeededTaskState();
@@ -310,6 +393,7 @@ class TaskServiceGovernanceTest {
 
         when(harness.taskStateMapper.findByTaskId("task_legacy")).thenReturn(taskState);
         when(harness.analysisManifestMapper.findByManifestId("manifest_legacy")).thenReturn(manifest);
+        when(harness.taskAttachmentMapper.findByTaskId("task_legacy")).thenReturn(List.of(readyAttachment("precipitation")));
 
         TaskManifestResponse response = harness.service.getTaskManifest("task_legacy", 42L);
 
@@ -317,8 +401,64 @@ class TaskServiceGovernanceTest {
         assertEquals("FROZEN", response.getFreezeStatus());
         assertNull(response.getGraphDigest());
         assertEquals(Map.of(), response.getPlanningSummary());
+        assertEquals(1, response.getCatalogSummary().get("catalog_asset_count"));
+        assertEquals(List.of("precipitation"), response.getCatalogSummary().get("catalog_ready_role_names"));
         assertNull(response.getCanonicalizationSummary());
         assertNull(response.getRewriteSummary());
+    }
+
+    @Test
+    void getTaskManifestPrefersFrozenCatalogSummaryFromManifest() {
+        Harness harness = new Harness(objectMapper);
+        TaskState taskState = succeededTaskState();
+        AnalysisManifest manifest = legacyManifest();
+        manifest.setCatalogSummaryJson("""
+                {
+                  "catalog_asset_count": 2,
+                  "catalog_ready_asset_count": 1,
+                  "catalog_blacklisted_asset_count": 0,
+                  "catalog_role_coverage_count": 1,
+                  "catalog_ready_role_names": ["eto"],
+                  "catalog_revision": 5,
+                  "catalog_fingerprint": "frozen_manifest_catalog_fp",
+                  "catalog_source": "frozen_manifest"
+                }
+                """);
+
+        when(harness.taskStateMapper.findByTaskId("task_legacy")).thenReturn(taskState);
+        when(harness.analysisManifestMapper.findByManifestId("manifest_legacy")).thenReturn(manifest);
+        when(harness.taskAttachmentMapper.findByTaskId("task_legacy")).thenReturn(List.of(readyAttachment("precipitation")));
+
+        TaskManifestResponse response = harness.service.getTaskManifest("task_legacy", 42L);
+
+        assertEquals(2, response.getCatalogSummary().get("catalog_asset_count"));
+        assertEquals(List.of("eto"), response.getCatalogSummary().get("catalog_ready_role_names"));
+        assertEquals(5, response.getCatalogSummary().get("catalog_revision"));
+        assertEquals("frozen_manifest_catalog_fp", response.getCatalogSummary().get("catalog_fingerprint"));
+        assertEquals("frozen_manifest", response.getCatalogSummary().get("catalog_source"));
+    }
+
+    @Test
+    void getTaskManifestProjectsCatalogConsistencyAgainstSlotBindings() {
+        Harness harness = new Harness(objectMapper);
+        TaskState taskState = succeededTaskState();
+        AnalysisManifest manifest = legacyManifest();
+        manifest.setSlotBindingsJson("""
+                [
+                  {"role_name": "precipitation", "slot_name": "precipitation", "source": "task_attachment"}
+                ]
+                """);
+
+        when(harness.taskStateMapper.findByTaskId("task_legacy")).thenReturn(taskState);
+        when(harness.analysisManifestMapper.findByManifestId("manifest_legacy")).thenReturn(manifest);
+        when(harness.taskAttachmentMapper.findByTaskId("task_legacy")).thenReturn(List.of(readyAttachment("precipitation")));
+
+        TaskManifestResponse response = harness.service.getTaskManifest("task_legacy", 42L);
+
+        assertEquals("manifest_slot_bindings", response.getCatalogConsistency().get("scope"));
+        assertEquals(true, response.getCatalogConsistency().get("covered"));
+        assertEquals(List.of("precipitation"), response.getCatalogConsistency().get("expected_role_names"));
+        assertEquals(List.of(), response.getCatalogConsistency().get("missing_catalog_roles"));
     }
 
     @Test
@@ -329,6 +469,7 @@ class TaskServiceGovernanceTest {
 
         when(harness.taskStateMapper.findByTaskId("task_legacy")).thenReturn(taskState);
         when(harness.analysisManifestMapper.findByManifestId("manifest_legacy")).thenReturn(manifest);
+        when(harness.taskAttachmentMapper.findByTaskId("task_legacy")).thenReturn(List.of(readyAttachment("precipitation")));
 
         TaskResultResponse response = harness.service.getTaskResult("task_legacy", 42L);
 
@@ -337,8 +478,131 @@ class TaskServiceGovernanceTest {
         assertEquals("FROZEN", response.getFreezeStatus());
         assertNull(response.getGraphDigest());
         assertEquals(Map.of(), response.getPlanningSummary());
+        assertEquals(1, response.getCatalogSummary().get("catalog_asset_count"));
+        assertEquals(List.of("precipitation"), response.getCatalogSummary().get("catalog_ready_role_names"));
         assertNull(response.getCanonicalizationSummary());
         assertNull(response.getRewriteSummary());
+    }
+
+    @Test
+    void getTaskResultProjectsCatalogConsistencyAgainstRuntimeInputBindings() {
+        Harness harness = new Harness(objectMapper);
+        TaskState taskState = succeededTaskState();
+        taskState.setJobId("job_legacy");
+        AnalysisManifest manifest = legacyManifest();
+        JobRecord jobRecord = new JobRecord();
+        jobRecord.setJobId("job_legacy");
+        jobRecord.setJobState(JobState.SUCCEEDED.name());
+        jobRecord.setDockerRuntimeEvidenceJson("""
+                {
+                  "input_bindings": [
+                    {
+                      "role_name": "precipitation",
+                      "slot_name": "precipitation",
+                      "source": "task_attachment",
+                      "arg_key": "precipitation",
+                      "provider_input_path": "/workspace/input/precipitation.tif",
+                      "source_ref": "att_precipitation"
+                    }
+                  ]
+                }
+                """);
+
+        when(harness.taskStateMapper.findByTaskId("task_legacy")).thenReturn(taskState);
+        when(harness.analysisManifestMapper.findByManifestId("manifest_legacy")).thenReturn(manifest);
+        when(harness.taskAttachmentMapper.findByTaskId("task_legacy")).thenReturn(List.of(readyAttachment("precipitation")));
+        when(harness.jobRecordMapper.findByJobId("job_legacy")).thenReturn(jobRecord);
+
+        TaskResultResponse response = harness.service.getTaskResult("task_legacy", 42L);
+
+        assertEquals("result_input_bindings", response.getCatalogConsistency().get("scope"));
+        assertEquals(true, response.getCatalogConsistency().get("covered"));
+        assertEquals(List.of("precipitation"), response.getCatalogConsistency().get("expected_role_names"));
+        assertEquals(List.of(), response.getCatalogConsistency().get("missing_catalog_roles"));
+    }
+
+    @Test
+    void getTaskResultPrefersFrozenCatalogSummaryFromManifest() {
+        Harness harness = new Harness(objectMapper);
+        TaskState taskState = succeededTaskState();
+        AnalysisManifest manifest = legacyManifest();
+        manifest.setCatalogSummaryJson("""
+                {
+                  "catalog_asset_count": 2,
+                  "catalog_ready_asset_count": 1,
+                  "catalog_blacklisted_asset_count": 0,
+                  "catalog_role_coverage_count": 1,
+                  "catalog_ready_role_names": ["eto"],
+                  "catalog_revision": 5,
+                  "catalog_fingerprint": "frozen_manifest_catalog_fp",
+                  "catalog_source": "frozen_manifest"
+                }
+                """);
+
+        when(harness.taskStateMapper.findByTaskId("task_legacy")).thenReturn(taskState);
+        when(harness.analysisManifestMapper.findByManifestId("manifest_legacy")).thenReturn(manifest);
+        when(harness.taskAttachmentMapper.findByTaskId("task_legacy")).thenReturn(List.of(readyAttachment("precipitation")));
+
+        TaskResultResponse response = harness.service.getTaskResult("task_legacy", 42L);
+
+        assertEquals(2, response.getCatalogSummary().get("catalog_asset_count"));
+        assertEquals(List.of("eto"), response.getCatalogSummary().get("catalog_ready_role_names"));
+        assertEquals(5, response.getCatalogSummary().get("catalog_revision"));
+        assertEquals("frozen_manifest_catalog_fp", response.getCatalogSummary().get("catalog_fingerprint"));
+        assertEquals("frozen_manifest", response.getCatalogSummary().get("catalog_source"));
+    }
+
+    @Test
+    void syncActiveJobsMissingQueryJobStatusContractMarksCorruptedWithoutPollingRuntime() throws Exception {
+        Harness harness = new Harness(objectMapper);
+        JobRecord activeJob = activeJobRecord("job_active_query_contract");
+        TaskState runningTask = runningTaskState();
+        runningTask.setPass1ResultJson(samplePass1JsonWithoutContract("query_job_status"));
+
+        when(harness.jobRecordMapper.findActiveJobs()).thenReturn(List.of(activeJob));
+        when(harness.taskStateMapper.findByTaskId("task_running")).thenReturn(runningTask);
+        when(harness.taskStateMapper.markCorrupted(anyString(), anyInt(), anyString(), anyString(), any(), anyString())).thenReturn(1);
+
+        harness.service.syncActiveJobs();
+
+        verify(harness.jobRuntimeClient, never()).getJob(anyString());
+        verify(harness.taskStateMapper).markCorrupted(
+                eq("task_running"),
+                eq(5),
+                eq(TaskStatus.STATE_CORRUPTED.name()),
+                eq("CAPABILITY_CONTRACT_UNAVAILABLE: query_job_status"),
+                any(),
+                anyString()
+        );
+    }
+
+    @Test
+    void syncActiveJobsMissingCollectResultBundleContractMarksCorruptedBeforePromotion() throws Exception {
+        Harness harness = new Harness(objectMapper);
+        JobRecord activeJob = activeJobRecord("job_active_collect_contract");
+        TaskState runningTask = runningTaskState();
+        runningTask.setJobId("job_active_collect_contract");
+        runningTask.setPass1ResultJson(samplePass1JsonWithoutContract("collect_result_bundle"));
+        JobStatusResponse succeededStatus = succeededJobStatus("job_active_collect_contract");
+
+        when(harness.jobRecordMapper.findActiveJobs()).thenReturn(List.of(activeJob));
+        when(harness.taskStateMapper.findByTaskId("task_running")).thenReturn(runningTask, runningTask);
+        when(harness.jobRuntimeClient.getJob("job_active_collect_contract")).thenReturn(succeededStatus);
+        when(harness.jobRecordMapper.findByJobId("job_active_collect_contract")).thenReturn(activeJob);
+        when(harness.taskStateMapper.updateState("task_running", 5, TaskStatus.ARTIFACT_PROMOTING.name())).thenReturn(1);
+        when(harness.taskStateMapper.markCorrupted(anyString(), anyInt(), anyString(), anyString(), any(), anyString())).thenReturn(1);
+
+        harness.service.syncActiveJobs();
+
+        verify(harness.workspaceTraceService, never()).persistSuccess(any(), any(), any(), any(), any());
+        verify(harness.taskStateMapper).markCorrupted(
+                eq("task_running"),
+                eq(6),
+                eq(TaskStatus.STATE_CORRUPTED.name()),
+                eq("ARTIFACT_PROMOTION_FAILED: CAPABILITY_CONTRACT_UNAVAILABLE: collect_result_bundle"),
+                any(),
+                anyString()
+        );
     }
 
     private TaskState waitingTaskState() {
@@ -423,6 +687,21 @@ class TaskServiceGovernanceTest {
         return taskState;
     }
 
+    private TaskState runningTaskState() {
+        TaskState taskState = new TaskState();
+        taskState.setTaskId("task_running");
+        taskState.setUserId(42L);
+        taskState.setCurrentState(TaskStatus.RUNNING.name());
+        taskState.setStateVersion(5);
+        taskState.setActiveAttemptNo(1);
+        taskState.setPlanningRevision(1);
+        taskState.setCheckpointVersion(1);
+        taskState.setJobId("job_active_query_contract");
+        taskState.setPass1ResultJson(samplePass1Json());
+        taskState.setResumeTxnJson("{\"status\":\"COMMITTED\"}");
+        return taskState;
+    }
+
     private AnalysisManifest legacyManifest() {
         AnalysisManifest manifest = new AnalysisManifest();
         manifest.setManifestId("manifest_legacy");
@@ -489,6 +768,26 @@ class TaskServiceGovernanceTest {
         response.setMissingParams(List.of());
         response.setInvalidBindings(List.of());
         response.setErrorCode("NONE");
+        return response;
+    }
+
+    private JobRecord activeJobRecord(String jobId) {
+        JobRecord jobRecord = new JobRecord();
+        jobRecord.setJobId(jobId);
+        jobRecord.setTaskId("task_running");
+        jobRecord.setJobState(JobState.RUNNING.name());
+        return jobRecord;
+    }
+
+    private JobStatusResponse succeededJobStatus(String jobId) {
+        JobStatusResponse response = new JobStatusResponse();
+        response.setJobId(jobId);
+        response.setJobState(JobState.SUCCEEDED.name());
+        response.setResultObject(objectMapper.createObjectNode().put("result_id", "result_001"));
+        response.setResultBundle(objectMapper.createObjectNode().put("result_id", "bundle_001"));
+        response.setArtifactCatalog(objectMapper.createArrayNode());
+        response.setWorkspaceSummary(objectMapper.createObjectNode().put("workspace_id", "ws_001"));
+        response.setDockerRuntimeEvidence(objectMapper.createObjectNode().put("runtime_profile", "docker-invest-real"));
         return response;
     }
 
@@ -575,7 +874,45 @@ class TaskServiceGovernanceTest {
                   "capability_facts": {
                     "runtime_profile_hint": "docker-local",
                     "validation_hints": [],
-                    "repair_hints": []
+                    "repair_hints": [],
+                    "contracts": {
+                      "validate_bindings": {
+                        "input_schema": "slot_bindings_validation_v1",
+                        "output_schema": "binding_validation_summary_v1",
+                        "caller_scope": "control_or_planning",
+                        "side_effect_level": "read_only"
+                      },
+                      "validate_args": {
+                        "input_schema": "args_draft_validation_v1",
+                        "output_schema": "arg_validation_summary_v1",
+                        "caller_scope": "control_or_planning",
+                        "side_effect_level": "read_only"
+                      },
+                      "checkpoint_resume_ack": {
+                        "input_schema": "checkpoint_resume_request_v1",
+                        "output_schema": "checkpoint_resume_ack_v1",
+                        "caller_scope": "control_only",
+                        "side_effect_level": "workflow_checkpoint"
+                      },
+                      "submit_job": {
+                        "input_schema": "create_job_request_v1",
+                        "output_schema": "create_job_response_v1",
+                        "caller_scope": "control_only",
+                        "side_effect_level": "runtime_submission"
+                      },
+                      "query_job_status": {
+                        "input_schema": "job_status_request_v1",
+                        "output_schema": "job_status_response_v1",
+                        "caller_scope": "control_or_presentation",
+                        "side_effect_level": "read_only"
+                      },
+                      "collect_result_bundle": {
+                        "input_schema": "result_bundle_collection_request_v1",
+                        "output_schema": "result_bundle_collection_response_v1",
+                        "caller_scope": "control_only",
+                        "side_effect_level": "artifact_collection"
+                      }
+                    }
                   },
                   "logical_input_roles": [],
                   "role_arg_mappings": [],
@@ -584,6 +921,12 @@ class TaskServiceGovernanceTest {
                   }
                 }
                 """;
+    }
+
+    private String samplePass1JsonWithoutContract(String contractName) throws Exception {
+        JsonNode root = objectMapper.readTree(samplePass1Json());
+        ((com.fasterxml.jackson.databind.node.ObjectNode) root.path("capability_facts").path("contracts")).remove(contractName);
+        return objectMapper.writeValueAsString(root);
     }
 
     private static final class Harness {
@@ -706,7 +1049,45 @@ class TaskServiceGovernanceTest {
                       "capability_facts": {
                         "runtime_profile_hint": "docker-local",
                         "validation_hints": [],
-                        "repair_hints": []
+                        "repair_hints": [],
+                        "contracts": {
+                          "validate_bindings": {
+                            "input_schema": "slot_bindings_validation_v1",
+                            "output_schema": "binding_validation_summary_v1",
+                            "caller_scope": "control_or_planning",
+                            "side_effect_level": "read_only"
+                          },
+                          "validate_args": {
+                            "input_schema": "args_draft_validation_v1",
+                            "output_schema": "arg_validation_summary_v1",
+                            "caller_scope": "control_or_planning",
+                            "side_effect_level": "read_only"
+                          },
+                          "checkpoint_resume_ack": {
+                            "input_schema": "checkpoint_resume_request_v1",
+                            "output_schema": "checkpoint_resume_ack_v1",
+                            "caller_scope": "control_only",
+                            "side_effect_level": "workflow_checkpoint"
+                          },
+                          "submit_job": {
+                            "input_schema": "create_job_request_v1",
+                            "output_schema": "create_job_response_v1",
+                            "caller_scope": "control_only",
+                            "side_effect_level": "runtime_submission"
+                          },
+                          "query_job_status": {
+                            "input_schema": "job_status_request_v1",
+                            "output_schema": "job_status_response_v1",
+                            "caller_scope": "control_or_presentation",
+                            "side_effect_level": "read_only"
+                          },
+                          "collect_result_bundle": {
+                            "input_schema": "result_bundle_collection_request_v1",
+                            "output_schema": "result_bundle_collection_response_v1",
+                            "caller_scope": "control_only",
+                            "side_effect_level": "artifact_collection"
+                          }
+                        }
                       },
                       "logical_input_roles": [],
                       "role_arg_mappings": [],

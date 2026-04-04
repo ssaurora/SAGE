@@ -14,6 +14,7 @@ public class AnalysisManifest {
     private Integer checkpointVersion;
     private String graphDigest;
     private String planningSummaryJson;
+    private String catalogSummaryJson;
     private String capabilityKey;
     private String selectedTemplate;
     private String templateVersion;
@@ -48,6 +49,8 @@ public class AnalysisManifest {
     public void setGraphDigest(String graphDigest) { this.graphDigest = graphDigest; }
     public String getPlanningSummaryJson() { return planningSummaryJson; }
     public void setPlanningSummaryJson(String planningSummaryJson) { this.planningSummaryJson = planningSummaryJson; }
+    public String getCatalogSummaryJson() { return catalogSummaryJson; }
+    public void setCatalogSummaryJson(String catalogSummaryJson) { this.catalogSummaryJson = catalogSummaryJson; }
     public String getCapabilityKey() { return capabilityKey; }
     public void setCapabilityKey(String capabilityKey) { this.capabilityKey = capabilityKey; }
     public String getSelectedTemplate() { return selectedTemplate; }

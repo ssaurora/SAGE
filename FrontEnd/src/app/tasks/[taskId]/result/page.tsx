@@ -4,9 +4,19 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
-import { ArtifactMeta, CognitionMetadataDto, getTaskResult, TaskResultResponse } from "@/lib/api";
+import {
+  ArtifactMeta,
+  CatalogConsistencyDto,
+  CatalogSummaryDto,
+  CognitionMetadataDto,
+  getTaskResult,
+  TaskResultResponse,
+} from "@/lib/api";
 import { getAccessToken } from "@/lib/auth";
 import DebugJsonPanel from "@/components/DebugJsonPanel";
+
+type CatalogSummaryView = CatalogSummaryDto;
+type CatalogConsistencyView = CatalogConsistencyDto;
 
 function formatValue(value: unknown): string {
   if (value === null || value === undefined) {
@@ -101,6 +111,66 @@ function StringList({ values, emptyText }: { values?: string[]; emptyText: strin
         <li key={`${value}-${index}`}>{value}</li>
       ))}
     </ul>
+  );
+}
+
+function CatalogSummaryPanel({
+  summary,
+  emptyText,
+}: {
+  summary?: CatalogSummaryView;
+  emptyText: string;
+}) {
+  if (!summary) {
+    return <p className="muted">{emptyText}</p>;
+  }
+
+  return (
+    <>
+      <div className="kv-grid">
+        <div className="kv-item"><span className="kv-key">catalog_asset_count</span><span className="kv-value">{formatValue(summary.catalog_asset_count)}</span></div>
+        <div className="kv-item"><span className="kv-key">catalog_ready_asset_count</span><span className="kv-value">{formatValue(summary.catalog_ready_asset_count)}</span></div>
+        <div className="kv-item"><span className="kv-key">catalog_blacklisted_asset_count</span><span className="kv-value">{formatValue(summary.catalog_blacklisted_asset_count)}</span></div>
+        <div className="kv-item"><span className="kv-key">catalog_role_coverage_count</span><span className="kv-value">{formatValue(summary.catalog_role_coverage_count)}</span></div>
+        <div className="kv-item"><span className="kv-key">catalog_source</span><span className="kv-value">{summary.catalog_source ?? "-"}</span></div>
+      </div>
+      <h3>Catalog Ready Roles</h3>
+      <StringList values={summary.catalog_ready_role_names} emptyText="No catalog-ready roles." />
+    </>
+  );
+}
+
+function CatalogConsistencyPanel({
+  consistency,
+  emptyText,
+}: {
+  consistency?: CatalogConsistencyView;
+  emptyText: string;
+}) {
+  if (!consistency) {
+    return <p className="muted">{emptyText}</p>;
+  }
+
+  return (
+    <>
+      <div className="kv-grid">
+        <div className="kv-item"><span className="kv-key">scope</span><span className="kv-value">{consistency.scope ?? "-"}</span></div>
+        <div className="kv-item"><span className="kv-key">covered</span><span className="kv-value">{formatValue(consistency.covered)}</span></div>
+        <div className="kv-item"><span className="kv-key">catalog_source</span><span className="kv-value">{consistency.catalog_source ?? "-"}</span></div>
+        <div className="kv-item"><span className="kv-key">current_catalog_source</span><span className="kv-value">{consistency.current_catalog_source ?? "-"}</span></div>
+        <div className="kv-item"><span className="kv-key">waiting_context_catalog_present</span><span className="kv-value">{formatValue(consistency.waiting_context_catalog_present)}</span></div>
+        <div className="kv-item"><span className="kv-key">waiting_context_matches_current_catalog</span><span className="kv-value">{formatValue(consistency.waiting_context_matches_current_catalog)}</span></div>
+        <div className="kv-item"><span className="kv-key">waiting_context_catalog_source</span><span className="kv-value">{consistency.waiting_context_catalog_source ?? "-"}</span></div>
+      </div>
+      <h3>Catalog Ready Roles</h3>
+      <StringList values={consistency.catalog_ready_role_names} emptyText="No catalog-ready roles." />
+      <h3>Expected Role Names</h3>
+      <StringList values={consistency.expected_role_names} emptyText="No expected roles." />
+      <h3>Missing Catalog Roles</h3>
+      <StringList values={consistency.missing_catalog_roles} emptyText="No missing catalog roles." />
+      <h3>Stale Missing Slots</h3>
+      <StringList values={consistency.stale_missing_slots} emptyText="No stale missing slots." />
+    </>
   );
 }
 
@@ -769,6 +839,10 @@ export default function TaskResultPage() {
         <RuntimeEvidencePanel evidence={runtimeEvidence} />
         <h3>Provider Input Bindings</h3>
         <InputBindingList items={runtimeEvidence?.input_bindings} />
+        <h3>Result Catalog Summary</h3>
+        <CatalogSummaryPanel summary={result?.catalog_summary} emptyText="No result catalog summary available." />
+        <h3>Result Catalog Coverage</h3>
+        <CatalogConsistencyPanel consistency={result?.catalog_consistency} emptyText="No result catalog coverage available." />
       </div>
 
       <div className="card">

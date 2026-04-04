@@ -3,12 +3,12 @@ package com.sage.backend.repair;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.sage.backend.model.TaskAttachment;
 import com.sage.backend.planning.Pass1FactHelper;
+import com.sage.backend.task.AttachmentCatalogProjector;
 import com.sage.backend.repair.dto.RepairProposalRequest;
 import com.sage.backend.validationgate.dto.PrimitiveValidationResponse;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -16,12 +16,12 @@ import java.util.Set;
 public class RepairDispatcherService {
 
     public RepairDecision decide(PrimitiveValidationResponse validationSummary, JsonNode pass1Result, List<TaskAttachment> attachments) {
-        Set<String> assignedSlots = new HashSet<>();
-        for (TaskAttachment attachment : attachments) {
-            if (attachment.getLogicalSlot() != null && !attachment.getLogicalSlot().isBlank()) {
-                assignedSlots.add(attachment.getLogicalSlot());
-            }
-        }
+        return decide(validationSummary, pass1Result, attachments, null);
+    }
+
+    public RepairDecision decide(PrimitiveValidationResponse validationSummary, JsonNode pass1Result, List<TaskAttachment> attachments, Integer catalogRevision) {
+        Set<String> assignedSlots = AttachmentCatalogProjector.resolveReadyRoleNames(attachments);
+        var catalogSummary = AttachmentCatalogProjector.buildCatalogSummary(attachments, catalogRevision);
 
         List<String> missingRoles = safeList(validationSummary == null ? null : validationSummary.getMissingRoles());
         List<String> missingParams = safeList(validationSummary == null ? null : validationSummary.getMissingParams());
@@ -62,6 +62,7 @@ public class RepairDispatcherService {
         waitingContext.setRequiredUserActions(requiredActions);
         waitingContext.setResumeHint(canResume ? "All required actions are complete. You can resume now." : "Complete required actions before resuming.");
         waitingContext.setCanResume(canResume);
+        waitingContext.setCatalogSummary(catalogSummary);
 
         String routing = "WAITING_USER";
         String severity = "RECOVERABLE";
