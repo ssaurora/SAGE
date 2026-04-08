@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -106,6 +108,7 @@ class ContractSpecAsset(BaseModel):
 
 
 class McpToolsMapAsset(BaseModel):
+    contract_version: str
     contracts: dict[str, ContractSpecAsset] = Field(default_factory=dict)
 
 
@@ -163,9 +166,12 @@ def build_skill_definition_from_bundle(bundle: SkillAssetBundle) -> SkillDefinit
     parameter_schema = bundle.parameter_schema
     validation_policy = bundle.validation_policy
     repair_policy = bundle.repair_policy
+    contract_fingerprint = _compute_contract_fingerprint(bundle.mcp_tools_map)
     capability = CapabilityDefinitionLite(
         capability_key=profile.capability_key,
         display_name=profile.display_name,
+        contract_version=bundle.mcp_tools_map.contract_version,
+        contract_fingerprint=contract_fingerprint,
         validation_hints=[
             CapabilityValidationHint(role_name=item.role_name, expected_slot_type=item.expected_slot_type)
             for item in validation_policy.validation_hints
@@ -220,6 +226,18 @@ def build_skill_definition_from_bundle(bundle: SkillAssetBundle) -> SkillDefinit
         ],
         stable_defaults=parameter_schema.stable_defaults,
     )
+
+
+def _compute_contract_fingerprint(mcp_tools_map: McpToolsMapAsset) -> str:
+    canonical_payload = {
+        "contract_version": mcp_tools_map.contract_version,
+        "contracts": {
+            name: contract.model_dump(mode="json")
+            for name, contract in sorted(mcp_tools_map.contracts.items())
+        },
+    }
+    canonical_json = json.dumps(canonical_payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
 
 
 def _build_repair_hint(role_name: str) -> CapabilityRepairHint:

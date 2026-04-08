@@ -49,6 +49,8 @@ def _build_legacy_skill_definition() -> SkillDefinition:
     capability = CapabilityDefinitionLite(
         capability_key=CANONICAL_CAPABILITY_KEY,
         display_name="Water Yield",
+        contract_version="legacy_water_yield_contracts_v0",
+        contract_fingerprint="legacy-skill-catalog-fallback",
         validation_hints=[
             CapabilityValidationHint(role_name="watersheds", expected_slot_type="vector"),
             CapabilityValidationHint(role_name="lulc", expected_slot_type="raster"),

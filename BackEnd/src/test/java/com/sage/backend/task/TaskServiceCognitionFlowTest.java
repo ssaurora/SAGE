@@ -15,6 +15,7 @@ import com.sage.backend.mapper.JobRecordMapper;
 import com.sage.backend.mapper.RepairRecordMapper;
 import com.sage.backend.mapper.TaskAttachmentMapper;
 import com.sage.backend.mapper.TaskAttemptMapper;
+import com.sage.backend.mapper.TaskCatalogSnapshotMapper;
 import com.sage.backend.mapper.TaskStateMapper;
 import com.sage.backend.model.TaskAttachment;
 import com.sage.backend.model.TaskState;
@@ -288,10 +289,20 @@ class TaskServiceCognitionFlowTest {
         assertEquals(1, response.getCatalogSummary().get("catalog_asset_count"));
         assertEquals(1, response.getCatalogSummary().get("catalog_ready_asset_count"));
         assertEquals(List.of("precipitation"), response.getCatalogSummary().get("catalog_ready_role_names"));
-        assertEquals("task_attachment_projection", response.getCatalogSummary().get("catalog_source"));
+        assertEquals("task_catalog_snapshot", response.getCatalogSummary().get("catalog_source"));
         assertEquals("waiting_context", response.getCatalogConsistency().get("scope"));
         assertEquals(false, response.getCatalogConsistency().get("waiting_context_catalog_present"));
         assertEquals(List.of("precipitation"), response.getCatalogConsistency().get("stale_missing_slots"));
+        assertEquals("task_contract", response.getContractConsistency().get("scope"));
+        assertEquals("FROZEN_CONTRACT_MISSING", response.getContractConsistency().get("mismatch_code"));
+        assertEquals("FROZEN_CONTRACT_MISSING", response.getContractConsistency().get("consistency_code"));
+        assertEquals("IDENTITY_INCOMPLETE", response.getContractConsistency().get("compatibility_code"));
+        assertEquals("REBUILD_FROZEN_CONTRACT_IDENTITY", response.getContractConsistency().get("migration_hint"));
+        assertEquals("task_contract_governance", response.getContractGovernance().getScope());
+        assertEquals("IDENTITY_INCOMPLETE", response.getContractGovernance().getConsistency().getCompatibilityCode());
+        assertEquals(true, response.getContractConsistency().get("current_contract_present"));
+        assertEquals(false, response.getContractConsistency().get("frozen_contract_present"));
+        assertEquals("water_yield_contracts_v1", response.getContractConsistency().get("current_contract_version"));
     }
 
     private CognitionGoalRouteResponse goalRouteResponse(String status) throws Exception {
@@ -484,6 +495,8 @@ class TaskServiceCognitionFlowTest {
                   "selected_template": "water_yield_v1",
                   "template_version": "1.0.0",
                   "capability_facts": {
+                    "contract_version": "water_yield_contracts_v1",
+                    "contract_fingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
                     "runtime_profile_hint": "docker-local",
                     "validation_hints": [],
                     "repair_hints": [],
@@ -512,6 +525,12 @@ class TaskServiceCognitionFlowTest {
                         "caller_scope": "control_only",
                         "side_effect_level": "runtime_submission"
                       },
+                      "cancel_job": {
+                        "input_schema": "cancel_job_request_v1",
+                        "output_schema": "cancel_job_response_v1",
+                        "caller_scope": "control_only",
+                        "side_effect_level": "runtime_cancellation"
+                      },
                       "query_job_status": {
                         "input_schema": "job_status_request_v1",
                         "output_schema": "job_status_response_v1",
@@ -523,6 +542,18 @@ class TaskServiceCognitionFlowTest {
                         "output_schema": "result_bundle_collection_response_v1",
                         "caller_scope": "control_only",
                         "side_effect_level": "artifact_collection"
+                      },
+                      "index_artifacts": {
+                        "input_schema": "artifact_index_request_v1",
+                        "output_schema": "artifact_index_response_v1",
+                        "caller_scope": "control_only",
+                        "side_effect_level": "artifact_indexing"
+                      },
+                      "record_audit": {
+                        "input_schema": "audit_record_request_v1",
+                        "output_schema": "audit_record_response_v1",
+                        "caller_scope": "control_only",
+                        "side_effect_level": "audit_write"
                       }
                     }
                   },
@@ -607,6 +638,8 @@ class TaskServiceCognitionFlowTest {
         private final TaskAttachmentMapper taskAttachmentMapper = mock(TaskAttachmentMapper.class);
         private final RepairRecordMapper repairRecordMapper = mock(RepairRecordMapper.class);
         private final TaskAttemptMapper taskAttemptMapper = mock(TaskAttemptMapper.class);
+        private final TaskCatalogSnapshotMapper taskCatalogSnapshotMapper = mock(TaskCatalogSnapshotMapper.class);
+        private final TaskCatalogSnapshotService taskCatalogSnapshotService;
         private final EventService eventService = mock(EventService.class);
         private final AuditService auditService = mock(AuditService.class);
         private final CognitionFinalExplanationClient cognitionFinalExplanationClient = mock(CognitionFinalExplanationClient.class);
@@ -623,6 +656,7 @@ class TaskServiceCognitionFlowTest {
         private final TaskService service;
 
         private Harness(ObjectMapper objectMapper) {
+            this.taskCatalogSnapshotService = new TaskCatalogSnapshotService(taskCatalogSnapshotMapper, objectMapper);
             when(taskStateMapper.insert(any())).thenReturn(1);
             when(taskStateMapper.updateState(anyString(), anyInt(), anyString())).thenReturn(1);
             when(taskStateMapper.updateGoalAndRoute(anyString(), anyString(), anyString())).thenReturn(1);
@@ -633,6 +667,8 @@ class TaskServiceCognitionFlowTest {
             when(taskAttemptMapper.insert(any())).thenReturn(1);
             when(repairProposalService.generate(any(), any(), any(), any())).thenReturn(new RepairProposalResponse());
             when(taskAttachmentMapper.findByTaskId(anyString())).thenReturn(List.of());
+            when(taskCatalogSnapshotMapper.findByTaskIdAndInventoryVersion(anyString(), anyInt())).thenReturn(null);
+            when(taskCatalogSnapshotMapper.insert(any())).thenReturn(1);
             when(registryService.resolve(any(), any(), any()))
                     .thenReturn(new RegistryService.ProviderResolution("water_yield", "planning-pass1-local", "docker-local"));
 
@@ -643,6 +679,7 @@ class TaskServiceCognitionFlowTest {
                     taskAttachmentMapper,
                     repairRecordMapper,
                     taskAttemptMapper,
+                    taskCatalogSnapshotService,
                     eventService,
                     auditService,
                     cognitionFinalExplanationClient,

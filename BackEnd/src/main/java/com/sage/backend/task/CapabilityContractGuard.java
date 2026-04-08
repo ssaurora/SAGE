@@ -20,6 +20,10 @@ public final class CapabilityContractGuard {
         requireContract(pass1Node, "submit_job", "control_only", "runtime_submission");
     }
 
+    public static void requireCancelJobContract(JsonNode pass1Node) {
+        requireContract(pass1Node, "cancel_job", "control_only", "runtime_cancellation");
+    }
+
     public static void requireQueryJobStatusContract(JsonNode pass1Node) {
         requireContract(pass1Node, "query_job_status", "control_or_presentation", "read_only");
     }
@@ -28,12 +32,21 @@ public final class CapabilityContractGuard {
         requireContract(pass1Node, "collect_result_bundle", "control_only", "artifact_collection");
     }
 
+    public static void requireIndexArtifactsContract(JsonNode pass1Node) {
+        requireContract(pass1Node, "index_artifacts", "control_only", "artifact_indexing");
+    }
+
+    public static void requireRecordAuditContract(JsonNode pass1Node) {
+        requireContract(pass1Node, "record_audit", "control_only", "audit_write");
+    }
+
     private static void requireContract(
             JsonNode pass1Node,
             String contractName,
             String expectedCallerScope,
             String expectedSideEffectLevel
     ) {
+        requireContractMetadata(pass1Node);
         JsonNode contractsNode = pass1Node == null
                 ? null
                 : pass1Node.path("capability_facts").path("contracts");
@@ -54,6 +67,16 @@ public final class CapabilityContractGuard {
         }
         if (safeString(contractNode.path("output_schema").asText(null)).isBlank()) {
             throw new IllegalStateException("CAPABILITY_CONTRACT_MISMATCH: " + contractName + " output_schema");
+        }
+    }
+
+    private static void requireContractMetadata(JsonNode pass1Node) {
+        JsonNode capabilityFacts = pass1Node == null ? null : pass1Node.path("capability_facts");
+        if (safeString(capabilityFacts == null ? null : capabilityFacts.path("contract_version").asText(null)).isBlank()) {
+            throw new IllegalStateException("CAPABILITY_CONTRACT_METADATA_UNAVAILABLE: contract_version");
+        }
+        if (safeString(capabilityFacts == null ? null : capabilityFacts.path("contract_fingerprint").asText(null)).isBlank()) {
+            throw new IllegalStateException("CAPABILITY_CONTRACT_METADATA_UNAVAILABLE: contract_fingerprint");
         }
     }
 

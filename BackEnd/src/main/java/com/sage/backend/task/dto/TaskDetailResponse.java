@@ -96,6 +96,15 @@ public class TaskDetailResponse {
     @JsonProperty("catalog_consistency")
     private Map<String, Object> catalogConsistency;
 
+    @JsonProperty("catalog_governance")
+    private CatalogGovernanceView catalogGovernance;
+
+    @JsonProperty("contract_consistency")
+    private Map<String, Object> contractConsistency;
+
+    @JsonProperty("contract_governance")
+    private ContractGovernanceView contractGovernance;
+
     @JsonProperty("planning_intent_status")
     private String planningIntentStatus;
 
@@ -389,6 +398,30 @@ public class TaskDetailResponse {
         this.catalogConsistency = catalogConsistency;
     }
 
+    public CatalogGovernanceView getCatalogGovernance() {
+        return catalogGovernance;
+    }
+
+    public void setCatalogGovernance(CatalogGovernanceView catalogGovernance) {
+        this.catalogGovernance = catalogGovernance;
+    }
+
+    public Map<String, Object> getContractConsistency() {
+        return contractConsistency;
+    }
+
+    public void setContractConsistency(Map<String, Object> contractConsistency) {
+        this.contractConsistency = contractConsistency;
+    }
+
+    public ContractGovernanceView getContractGovernance() {
+        return contractGovernance;
+    }
+
+    public void setContractGovernance(ContractGovernanceView contractGovernance) {
+        this.contractGovernance = contractGovernance;
+    }
+
     public String getPlanningIntentStatus() {
         return planningIntentStatus;
     }
@@ -616,6 +649,12 @@ public class TaskDetailResponse {
         @JsonProperty("contract_names")
         private java.util.List<String> contractNames;
 
+        @JsonProperty("contract_version")
+        private String contractVersion;
+
+        @JsonProperty("contract_fingerprint")
+        private String contractFingerprint;
+
         @JsonProperty("stable_defaults")
         private StableDefaults stableDefaults;
 
@@ -689,6 +728,22 @@ public class TaskDetailResponse {
 
         public void setContractNames(java.util.List<String> contractNames) {
             this.contractNames = contractNames;
+        }
+
+        public String getContractVersion() {
+            return contractVersion;
+        }
+
+        public void setContractVersion(String contractVersion) {
+            this.contractVersion = contractVersion;
+        }
+
+        public String getContractFingerprint() {
+            return contractFingerprint;
+        }
+
+        public void setContractFingerprint(String contractFingerprint) {
+            this.contractFingerprint = contractFingerprint;
         }
 
         public StableDefaults getStableDefaults() {

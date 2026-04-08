@@ -15,6 +15,7 @@ public class AnalysisManifest {
     private String graphDigest;
     private String planningSummaryJson;
     private String catalogSummaryJson;
+    private String contractSummaryJson;
     private String capabilityKey;
     private String selectedTemplate;
     private String templateVersion;
@@ -51,6 +52,8 @@ public class AnalysisManifest {
     public void setPlanningSummaryJson(String planningSummaryJson) { this.planningSummaryJson = planningSummaryJson; }
     public String getCatalogSummaryJson() { return catalogSummaryJson; }
     public void setCatalogSummaryJson(String catalogSummaryJson) { this.catalogSummaryJson = catalogSummaryJson; }
+    public String getContractSummaryJson() { return contractSummaryJson; }
+    public void setContractSummaryJson(String contractSummaryJson) { this.contractSummaryJson = contractSummaryJson; }
     public String getCapabilityKey() { return capabilityKey; }
     public void setCapabilityKey(String capabilityKey) { this.capabilityKey = capabilityKey; }
     public String getSelectedTemplate() { return selectedTemplate; }

@@ -3,6 +3,9 @@ package com.sage.backend.mapper;
 import com.sage.backend.model.AuditRecord;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Select;
+
+import java.util.List;
 
 @Mapper
 public interface AuditRecordMapper {
@@ -12,5 +15,12 @@ public interface AuditRecordMapper {
             VALUES(#{taskId}, #{actionType}, #{actionResult}, #{traceId}, #{detailJson})
             """)
     int insert(AuditRecord auditRecord);
-}
 
+    @Select("""
+            SELECT id, task_id, action_type, action_result, trace_id, detail_json, created_at
+            FROM audit_record
+            WHERE task_id = #{taskId}
+            ORDER BY id DESC
+            """)
+    List<AuditRecord> findByTaskId(String taskId);
+}

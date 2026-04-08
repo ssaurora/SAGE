@@ -17,6 +17,9 @@ public class ResumeTransactionView {
     @JsonProperty("candidate_inventory_version")
     private Integer candidateInventoryVersion;
 
+    @JsonProperty("base_catalog_inventory_version")
+    private Integer baseCatalogInventoryVersion;
+
     @JsonProperty("base_catalog_revision")
     private Integer baseCatalogRevision;
 
@@ -29,6 +32,9 @@ public class ResumeTransactionView {
     @JsonProperty("candidate_catalog_fingerprint")
     private String candidateCatalogFingerprint;
 
+    @JsonProperty("candidate_catalog_inventory_version")
+    private Integer candidateCatalogInventoryVersion;
+
     @JsonProperty("candidate_manifest_id")
     private String candidateManifestId;
 
@@ -40,6 +46,21 @@ public class ResumeTransactionView {
 
     @JsonProperty("failure_reason")
     private String failureReason;
+
+    @JsonProperty("failure_code")
+    private String failureCode;
+
+    @JsonProperty("base_contract_version")
+    private String baseContractVersion;
+
+    @JsonProperty("base_contract_fingerprint")
+    private String baseContractFingerprint;
+
+    @JsonProperty("candidate_contract_version")
+    private String candidateContractVersion;
+
+    @JsonProperty("candidate_contract_fingerprint")
+    private String candidateContractFingerprint;
 
     @JsonProperty("updated_at")
     private String updatedAt;
@@ -92,6 +113,14 @@ public class ResumeTransactionView {
         this.baseCatalogRevision = baseCatalogRevision;
     }
 
+    public Integer getBaseCatalogInventoryVersion() {
+        return baseCatalogInventoryVersion;
+    }
+
+    public void setBaseCatalogInventoryVersion(Integer baseCatalogInventoryVersion) {
+        this.baseCatalogInventoryVersion = baseCatalogInventoryVersion;
+    }
+
     public String getBaseCatalogFingerprint() {
         return baseCatalogFingerprint;
     }
@@ -114,6 +143,14 @@ public class ResumeTransactionView {
 
     public void setCandidateCatalogFingerprint(String candidateCatalogFingerprint) {
         this.candidateCatalogFingerprint = candidateCatalogFingerprint;
+    }
+
+    public Integer getCandidateCatalogInventoryVersion() {
+        return candidateCatalogInventoryVersion;
+    }
+
+    public void setCandidateCatalogInventoryVersion(Integer candidateCatalogInventoryVersion) {
+        this.candidateCatalogInventoryVersion = candidateCatalogInventoryVersion;
     }
 
     public String getCandidateManifestId() {
@@ -146,6 +183,46 @@ public class ResumeTransactionView {
 
     public void setFailureReason(String failureReason) {
         this.failureReason = failureReason;
+    }
+
+    public String getFailureCode() {
+        return failureCode;
+    }
+
+    public void setFailureCode(String failureCode) {
+        this.failureCode = failureCode;
+    }
+
+    public String getBaseContractVersion() {
+        return baseContractVersion;
+    }
+
+    public void setBaseContractVersion(String baseContractVersion) {
+        this.baseContractVersion = baseContractVersion;
+    }
+
+    public String getBaseContractFingerprint() {
+        return baseContractFingerprint;
+    }
+
+    public void setBaseContractFingerprint(String baseContractFingerprint) {
+        this.baseContractFingerprint = baseContractFingerprint;
+    }
+
+    public String getCandidateContractVersion() {
+        return candidateContractVersion;
+    }
+
+    public void setCandidateContractVersion(String candidateContractVersion) {
+        this.candidateContractVersion = candidateContractVersion;
+    }
+
+    public String getCandidateContractFingerprint() {
+        return candidateContractFingerprint;
+    }
+
+    public void setCandidateContractFingerprint(String candidateContractFingerprint) {
+        this.candidateContractFingerprint = candidateContractFingerprint;
     }
 
     public String getUpdatedAt() {

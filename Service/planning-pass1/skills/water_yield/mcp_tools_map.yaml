@@ -1,3 +1,4 @@
+contract_version: water_yield_contracts_v1
 contracts:
   inspect_asset_facts:
     capability_key: water_yield
@@ -44,6 +45,15 @@ contracts:
     idempotency: idempotent_with_task_attempt_key
     cancel_semantics: delegated_to_job_runtime
     audit_requirement: record_job_submission
+  cancel_job:
+    capability_key: water_yield
+    input_schema: cancel_job_request_v1
+    output_schema: cancel_job_response_v1
+    side_effect_level: runtime_cancellation
+    caller_scope: control_only
+    idempotency: idempotent_after_terminal
+    cancel_semantics: not_applicable
+    audit_requirement: record_cancellation_request
   query_job_status:
     capability_key: water_yield
     input_schema: job_status_request_v1
@@ -62,3 +72,21 @@ contracts:
     idempotency: idempotent_after_promotion
     cancel_semantics: bounded_by_job_terminal_state
     audit_requirement: record_result_bundle_promotion
+  index_artifacts:
+    capability_key: water_yield
+    input_schema: artifact_index_request_v1
+    output_schema: artifact_index_response_v1
+    side_effect_level: artifact_indexing
+    caller_scope: control_only
+    idempotency: idempotent_after_promotion
+    cancel_semantics: bounded_by_job_terminal_state
+    audit_requirement: record_artifact_index
+  record_audit:
+    capability_key: water_yield
+    input_schema: audit_record_request_v1
+    output_schema: audit_record_response_v1
+    side_effect_level: audit_write
+    caller_scope: control_only
+    idempotency: append_only
+    cancel_semantics: not_applicable
+    audit_requirement: self_describing

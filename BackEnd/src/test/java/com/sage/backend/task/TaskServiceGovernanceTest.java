@@ -10,6 +10,7 @@ import com.sage.backend.cognition.dto.CognitionGoalRouteResponse;
 import com.sage.backend.cognition.dto.CognitionPassBResponse;
 import com.sage.backend.event.EventService;
 import com.sage.backend.execution.JobRuntimeClient;
+import com.sage.backend.execution.dto.CancelJobResponse;
 import com.sage.backend.execution.dto.CreateJobResponse;
 import com.sage.backend.execution.dto.JobStatusResponse;
 import com.sage.backend.mapper.AnalysisManifestMapper;
@@ -17,11 +18,14 @@ import com.sage.backend.mapper.JobRecordMapper;
 import com.sage.backend.mapper.RepairRecordMapper;
 import com.sage.backend.mapper.TaskAttachmentMapper;
 import com.sage.backend.mapper.TaskAttemptMapper;
+import com.sage.backend.mapper.TaskCatalogSnapshotMapper;
 import com.sage.backend.mapper.TaskStateMapper;
 import com.sage.backend.model.AnalysisManifest;
+import com.sage.backend.model.AuditRecord;
 import com.sage.backend.model.JobRecord;
 import com.sage.backend.model.TaskAttachment;
 import com.sage.backend.model.JobState;
+import com.sage.backend.model.TaskCatalogSnapshot;
 import com.sage.backend.model.TaskState;
 import com.sage.backend.model.TaskStatus;
 import com.sage.backend.planning.Pass1Client;
@@ -34,13 +38,18 @@ import com.sage.backend.repair.RepairDispatcherService;
 import com.sage.backend.repair.RepairProposalService;
 import com.sage.backend.repair.dto.RepairProposalRequest;
 import com.sage.backend.repair.dto.RepairProposalResponse;
+import com.sage.backend.task.dto.CancelTaskResponse;
 import com.sage.backend.task.dto.ResumeTaskRequest;
 import com.sage.backend.task.dto.ResumeTaskResponse;
+import com.sage.backend.task.dto.UploadAttachmentResponse;
+import com.sage.backend.task.dto.TaskDetailResponse;
 import com.sage.backend.task.dto.TaskManifestResponse;
 import com.sage.backend.task.dto.TaskResultResponse;
 import com.sage.backend.validationgate.ValidationClient;
 import com.sage.backend.validationgate.dto.PrimitiveValidationResponse;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -52,6 +61,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -143,6 +153,37 @@ class TaskServiceGovernanceTest {
                 .updateFreezeStatus(anyString(), eq("CANDIDATE"), eq("FROZEN"));
         inOrder(harness.taskStateMapper, harness.analysisManifestMapper).verify(harness.taskStateMapper)
                 .commitQueuedWithGovernance(eq("task_resume"), eq(6), eq(TaskStatus.QUEUED.name()), anyString(), eq("job_resume_acked"), anyString(), eq(1), eq(4), eq(4), eq(8), anyString(), anyString());
+    }
+
+    @Test
+    void uploadAttachmentPersistsCatalogSnapshotForIncrementedInventoryVersion() throws Exception {
+        Harness harness = new Harness(objectMapper);
+        TaskState waitingTask = waitingTaskState();
+        TaskState refreshedTask = waitingTaskState();
+        refreshedTask.setInventoryVersion(8);
+        when(harness.taskStateMapper.findByTaskId("task_resume"))
+                .thenReturn(waitingTask, refreshedTask, refreshedTask, refreshedTask);
+        when(harness.taskAttachmentMapper.insert(any())).thenReturn(1);
+        when(harness.taskStateMapper.incrementInventoryVersion("task_resume")).thenReturn(1);
+        when(harness.repairDispatcherService.decide(any(), any(), any(), any())).thenReturn(recoverableDecision());
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "precipitation.tif",
+                "image/tiff",
+                "fake-raster".getBytes()
+        );
+
+        UploadAttachmentResponse response = harness.service.uploadAttachment("task_resume", 42L, file, "precipitation");
+
+        assertEquals("ASSIGNED", response.getAssignmentStatus());
+        verify(harness.taskCatalogSnapshotMapper).insert(argThat(snapshot ->
+                snapshot != null
+                        && "task_resume".equals(snapshot.getTaskId())
+                        && Integer.valueOf(8).equals(snapshot.getInventoryVersion())
+                        && snapshot.getCatalogSummaryJson() != null
+                        && snapshot.getCatalogFactsJson() != null
+        ));
     }
 
     @Test
@@ -306,6 +347,180 @@ class TaskServiceGovernanceTest {
     }
 
     @Test
+    void resumeTaskContractVersionMismatchMarksCorruptedBeforeValidation() throws Exception {
+        Harness harness = new Harness(objectMapper);
+        TaskState waitingTask = waitingTaskState();
+        TaskState resumedTask = resumingTaskState();
+        ResumeTaskRequest request = resumeRequest("resume_contract_mismatch");
+
+        when(harness.taskStateMapper.findByTaskId("task_resume")).thenReturn(waitingTask, resumedTask);
+        when(harness.repairRecordMapper.findByTaskIdAndResumeRequestId("task_resume", "resume_contract_mismatch")).thenReturn(null);
+        when(harness.repairDispatcherService.decide(any(), any(), any(), any())).thenReturn(readyDecision());
+        when(harness.taskStateMapper.acceptResume(anyString(), anyInt(), anyString(), anyString(), anyString(), anyInt(), anyInt()))
+                .thenReturn(1);
+        when(harness.taskStateMapper.markCorrupted(anyString(), anyInt(), anyString(), anyString(), any(), anyString())).thenReturn(1);
+        when(harness.pass1Client.runPass1(any())).thenReturn(pass1ResponseWithContractIdentity(
+                "water_yield_contracts_v2",
+                "9999999999999999999999999999999999999999999999999999999999999999"
+        ));
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> harness.service.resumeTask("task_resume", 42L, request)
+        );
+
+        assertEquals(409, exception.getStatusCode().value());
+        assertEquals("Contract version mismatch", exception.getReason());
+        verify(harness.validationClient, never()).validatePrimitive(any());
+        verify(harness.jobRuntimeClient, never()).createJob(any());
+        ArgumentCaptor<String> corruptedTxnCaptor = ArgumentCaptor.forClass(String.class);
+        verify(harness.taskStateMapper).markCorrupted(
+                eq("task_resume"),
+                eq(5),
+                eq(TaskStatus.STATE_CORRUPTED.name()),
+                argThat(reason -> reason != null && reason.startsWith("CONTRACT_VERSION_MISMATCH: frozen=water_yield_contracts_v1/")),
+                any(),
+                corruptedTxnCaptor.capture()
+        );
+        JsonNode resumeTxn = objectMapper.readTree(corruptedTxnCaptor.getValue());
+        assertEquals("CONTRACT_VERSION_MISMATCH", resumeTxn.path("failure_code").asText());
+        assertEquals("water_yield_contracts_v1", resumeTxn.path("base_contract_version").asText());
+        assertEquals("water_yield_contracts_v2", resumeTxn.path("candidate_contract_version").asText());
+        ArgumentCaptor<String> auditDetailCaptor = ArgumentCaptor.forClass(String.class);
+        verify(harness.auditService).appendAudit(
+                eq("task_resume"),
+                eq("TASK_RESUME"),
+                eq("REJECTED"),
+                eq("resume_contract_mismatch"),
+                auditDetailCaptor.capture()
+        );
+        JsonNode auditDetail = objectMapper.readTree(auditDetailCaptor.getValue());
+        assertEquals("CONTRACT_VERSION_MISMATCH", auditDetail.path("failure_code").asText());
+        assertEquals("CONTRACT_VERSION_MISMATCH", auditDetail.path("mismatch_code").asText());
+        assertEquals("INCOMPATIBLE", auditDetail.path("compatibility_code").asText());
+        assertEquals("REGENERATE_PASS1_AND_REFREEZE", auditDetail.path("migration_hint").asText());
+        assertEquals("water_yield_contracts_v1", auditDetail.path("frozen_contract_version").asText());
+        assertEquals("water_yield_contracts_v2", auditDetail.path("current_contract_version").asText());
+    }
+
+    @Test
+    void resumeTaskContractFingerprintMismatchUsesStructuredFingerprintCode() throws Exception {
+        Harness harness = new Harness(objectMapper);
+        TaskState waitingTask = waitingTaskState();
+        ResumeTaskRequest request = resumeRequest("resume_contract_fingerprint_mismatch");
+
+        when(harness.taskStateMapper.findByTaskId("task_resume")).thenReturn(waitingTask);
+        when(harness.repairRecordMapper.findByTaskIdAndResumeRequestId("task_resume", "resume_contract_fingerprint_mismatch")).thenReturn(null);
+        when(harness.repairDispatcherService.decide(any(), any(), any(), any())).thenReturn(readyDecision());
+        when(harness.taskStateMapper.acceptResume(anyString(), anyInt(), anyString(), anyString(), anyString(), anyInt(), anyInt()))
+                .thenReturn(1);
+        when(harness.taskStateMapper.markCorrupted(anyString(), anyInt(), anyString(), anyString(), any(), anyString())).thenReturn(1);
+        when(harness.pass1Client.runPass1(any())).thenReturn(pass1ResponseWithContractIdentity(
+                "water_yield_contracts_v1",
+                "9999999999999999999999999999999999999999999999999999999999999999"
+        ));
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> harness.service.resumeTask("task_resume", 42L, request)
+        );
+
+        assertEquals(409, exception.getStatusCode().value());
+        assertEquals("Contract fingerprint mismatch", exception.getReason());
+        ArgumentCaptor<String> corruptedTxnCaptor = ArgumentCaptor.forClass(String.class);
+        verify(harness.taskStateMapper).markCorrupted(
+                eq("task_resume"),
+                eq(4),
+                eq(TaskStatus.STATE_CORRUPTED.name()),
+                argThat(reason -> reason != null && reason.startsWith("CONTRACT_FINGERPRINT_MISMATCH: frozen=water_yield_contracts_v1/")),
+                any(),
+                corruptedTxnCaptor.capture()
+        );
+        JsonNode resumeTxn = objectMapper.readTree(corruptedTxnCaptor.getValue());
+        assertEquals("CONTRACT_FINGERPRINT_MISMATCH", resumeTxn.path("failure_code").asText());
+        ArgumentCaptor<String> auditDetailCaptor = ArgumentCaptor.forClass(String.class);
+        verify(harness.auditService).appendAudit(
+                eq("task_resume"),
+                eq("TASK_RESUME"),
+                eq("REJECTED"),
+                eq("resume_contract_fingerprint_mismatch"),
+                auditDetailCaptor.capture()
+        );
+        JsonNode auditDetail = objectMapper.readTree(auditDetailCaptor.getValue());
+        assertEquals("CONTRACT_FINGERPRINT_MISMATCH", auditDetail.path("failure_code").asText());
+        assertEquals("INCOMPATIBLE", auditDetail.path("compatibility_code").asText());
+        assertEquals("REFREEZE_REQUIRED", auditDetail.path("migration_hint").asText());
+    }
+
+    @Test
+    void getTaskProjectsStructuredContractMismatchCodeFromResumeTransaction() {
+        Harness harness = new Harness(objectMapper);
+        TaskState taskState = succeededTaskState();
+        taskState.setResumeTxnJson("""
+                {
+                  "resume_request_id": "resume_contract_drift",
+                  "status": "CORRUPTED",
+                  "failure_code": "CONTRACT_VERSION_MISMATCH",
+                  "base_contract_version": "water_yield_contracts_v1",
+                  "base_contract_fingerprint": "1111111111111111111111111111111111111111111111111111111111111111",
+                  "candidate_contract_version": "water_yield_contracts_v2",
+                  "candidate_contract_fingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
+                }
+                """);
+        when(harness.taskStateMapper.findByTaskId("task_legacy")).thenReturn(taskState);
+        when(harness.taskAttachmentMapper.findByTaskId("task_legacy")).thenReturn(List.of(readyAttachment("precipitation")));
+
+        TaskDetailResponse response = harness.service.getTask("task_legacy", 42L);
+
+        assertEquals("CONTRACT_VERSION_MISMATCH", response.getContractConsistency().get("resume_mismatch_code"));
+        assertEquals(true, response.getContractConsistency().get("resume_detected_contract_drift"));
+        assertEquals("INCOMPATIBLE", response.getContractConsistency().get("resume_compatibility_code"));
+        assertEquals("REGENERATE_PASS1_AND_REFREEZE", response.getContractConsistency().get("resume_migration_hint"));
+        assertEquals("task_contract_governance", response.getContractGovernance().getScope());
+        assertEquals("CONTRACT_VERSION_MISMATCH", response.getContractGovernance().getResumeContractEvaluation().getMismatchCode());
+    }
+
+    @Test
+    void getTaskAuditProjectsContractGovernanceFromAuditDetail() throws Exception {
+        Harness harness = new Harness(objectMapper);
+        TaskState taskState = succeededTaskState();
+        AuditRecord record = new AuditRecord();
+        record.setId(11L);
+        record.setTaskId("task_legacy");
+        record.setActionType("TASK_RESUME");
+        record.setActionResult("REJECTED");
+        record.setTraceId("resume_contract_audit");
+        record.setCreatedAt(OffsetDateTime.of(2026, 4, 4, 20, 30, 0, 0, ZoneOffset.UTC));
+        record.setDetailJson(objectMapper.writeValueAsString(Map.of(
+                "contract_identity", Map.of(
+                        "contract_version", "water_yield_contracts_v2",
+                        "contract_fingerprint", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                ),
+                "frozen_contract_version", "water_yield_contracts_v1",
+                "frozen_contract_fingerprint", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "failure_code", "CONTRACT_VERSION_MISMATCH",
+                "mismatch_code", "CONTRACT_VERSION_MISMATCH",
+                "compatibility_code", "INCOMPATIBLE",
+                "migration_hint", "REGENERATE_PASS1_AND_REFREEZE"
+        )));
+
+        when(harness.taskStateMapper.findByTaskId("task_legacy")).thenReturn(taskState);
+        when(harness.auditService.findByTaskId("task_legacy")).thenReturn(List.of(record));
+
+        var response = harness.service.getTaskAudit("task_legacy", 42L);
+
+        assertEquals("task_legacy", response.getTaskId());
+        assertEquals(1, response.getItems().size());
+        var item = response.getItems().get(0);
+        assertEquals("audit_contract_governance", item.getContractGovernance().getScope());
+        assertEquals("water_yield_contracts_v1", item.getContractGovernance().getFrozenContractSummary().getContractVersion());
+        assertEquals("water_yield_contracts_v2", item.getContractGovernance().getCurrentContractSummary().getContractVersion());
+        assertEquals("CONTRACT_VERSION_MISMATCH", item.getContractGovernance().getConsistency().getMismatchCode());
+        assertEquals("INCOMPATIBLE", item.getContractGovernance().getConsistency().getCompatibilityCode());
+        assertEquals("REGENERATE_PASS1_AND_REFREEZE", item.getContractGovernance().getResumeContractEvaluation().getMigrationHint());
+    }
+
+    @Test
     void runPass2ProjectsAttachmentCatalogFactsIntoRequest() throws Exception {
         Harness harness = new Harness(objectMapper);
         TaskState waitingTask = waitingTaskState();
@@ -442,11 +657,21 @@ class TaskServiceGovernanceTest {
     void getTaskManifestProjectsCatalogConsistencyAgainstSlotBindings() {
         Harness harness = new Harness(objectMapper);
         TaskState taskState = succeededTaskState();
+        taskState.setPass1ResultJson(samplePass1Json());
         AnalysisManifest manifest = legacyManifest();
         manifest.setSlotBindingsJson("""
                 [
                   {"role_name": "precipitation", "slot_name": "precipitation", "source": "task_attachment"}
                 ]
+                """);
+        manifest.setContractSummaryJson("""
+                {
+                  "contract_version": "water_yield_contracts_v1",
+                  "contract_fingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
+                  "contract_count": 9,
+                  "contract_names": ["cancel_job", "checkpoint_resume_ack"],
+                  "contract_present": true
+                }
                 """);
 
         when(harness.taskStateMapper.findByTaskId("task_legacy")).thenReturn(taskState);
@@ -459,6 +684,16 @@ class TaskServiceGovernanceTest {
         assertEquals(true, response.getCatalogConsistency().get("covered"));
         assertEquals(List.of("precipitation"), response.getCatalogConsistency().get("expected_role_names"));
         assertEquals(List.of(), response.getCatalogConsistency().get("missing_catalog_roles"));
+        assertEquals("manifest_contract", response.getContractConsistency().get("scope"));
+        assertEquals(true, response.getContractConsistency().get("frozen_contract_present"));
+        assertEquals(true, response.getContractConsistency().get("current_contract_present"));
+        assertEquals(true, response.getContractConsistency().get("matches_current_contract"));
+        assertEquals("CONTRACT_MATCHED", response.getContractConsistency().get("consistency_code"));
+        assertEquals(null, response.getContractConsistency().get("mismatch_code"));
+        assertEquals("COMPATIBLE", response.getContractConsistency().get("compatibility_code"));
+        assertEquals("NO_ACTION", response.getContractConsistency().get("migration_hint"));
+        assertEquals("manifest_contract_governance", response.getContractGovernance().getScope());
+        assertEquals("COMPATIBLE", response.getContractGovernance().getConsistency().getCompatibilityCode());
     }
 
     @Test
@@ -488,8 +723,18 @@ class TaskServiceGovernanceTest {
     void getTaskResultProjectsCatalogConsistencyAgainstRuntimeInputBindings() {
         Harness harness = new Harness(objectMapper);
         TaskState taskState = succeededTaskState();
+        taskState.setPass1ResultJson(samplePass1Json());
         taskState.setJobId("job_legacy");
         AnalysisManifest manifest = legacyManifest();
+        manifest.setContractSummaryJson("""
+                {
+                  "contract_version": "water_yield_contracts_v1",
+                  "contract_fingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
+                  "contract_count": 9,
+                  "contract_names": ["cancel_job", "checkpoint_resume_ack"],
+                  "contract_present": true
+                }
+                """);
         JobRecord jobRecord = new JobRecord();
         jobRecord.setJobId("job_legacy");
         jobRecord.setJobState(JobState.SUCCEEDED.name());
@@ -519,6 +764,15 @@ class TaskServiceGovernanceTest {
         assertEquals(true, response.getCatalogConsistency().get("covered"));
         assertEquals(List.of("precipitation"), response.getCatalogConsistency().get("expected_role_names"));
         assertEquals(List.of(), response.getCatalogConsistency().get("missing_catalog_roles"));
+        assertEquals("result_manifest_contract", response.getContractConsistency().get("scope"));
+        assertEquals(true, response.getContractConsistency().get("frozen_contract_present"));
+        assertEquals(true, response.getContractConsistency().get("matches_current_contract"));
+        assertEquals("CONTRACT_MATCHED", response.getContractConsistency().get("consistency_code"));
+        assertEquals(null, response.getContractConsistency().get("mismatch_code"));
+        assertEquals("COMPATIBLE", response.getContractConsistency().get("compatibility_code"));
+        assertEquals("NO_ACTION", response.getContractConsistency().get("migration_hint"));
+        assertEquals("result_contract_governance", response.getContractGovernance().getScope());
+        assertEquals("COMPATIBLE", response.getContractGovernance().getConsistency().getCompatibilityCode());
     }
 
     @Test
@@ -603,6 +857,67 @@ class TaskServiceGovernanceTest {
                 any(),
                 anyString()
         );
+    }
+
+    @Test
+    void cancelTaskMissingCancelJobContractFailsBeforeRuntimeCancel() throws Exception {
+        Harness harness = new Harness(objectMapper);
+        TaskState cancelTask = cancelableTaskState();
+        cancelTask.setPass1ResultJson(samplePass1JsonWithoutContract("cancel_job"));
+        when(harness.taskStateMapper.findByTaskId("task_running")).thenReturn(cancelTask);
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> harness.service.cancelTask("task_running", 42L)
+        );
+
+        assertEquals(502, exception.getStatusCode().value());
+        verify(harness.jobRuntimeClient, never()).cancelJob(anyString(), anyString());
+        verify(harness.auditService, never()).appendAudit(anyString(), anyString(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void cancelTaskSuccessWritesAuditWithContractIdentity() throws Exception {
+        Harness harness = new Harness(objectMapper);
+        TaskState cancelTask = cancelableTaskState();
+        CancelJobResponse cancelJobResponse = new CancelJobResponse();
+        cancelJobResponse.setAccepted(true);
+        when(harness.taskStateMapper.findByTaskId("task_running")).thenReturn(cancelTask, cancelTask);
+        when(harness.jobRuntimeClient.cancelJob("job_cancel_target", "USER_REQUESTED")).thenReturn(cancelJobResponse);
+        when(harness.jobRecordMapper.findByJobId("job_cancel_target")).thenReturn(null);
+
+        CancelTaskResponse response = harness.service.cancelTask("task_running", 42L);
+
+        assertEquals(true, response.getAccepted());
+        ArgumentCaptor<String> auditDetailCaptor = ArgumentCaptor.forClass(String.class);
+        verify(harness.auditService).appendAudit(
+                eq("task_running"),
+                eq("TASK_CANCEL"),
+                eq("REQUESTED"),
+                eq("task_running"),
+                auditDetailCaptor.capture()
+        );
+        JsonNode auditDetail = objectMapper.readTree(auditDetailCaptor.getValue());
+        assertEquals("water_yield_contracts_v1", auditDetail.path("contract_identity").path("contract_version").asText());
+        assertEquals(9, auditDetail.path("contract_identity").path("contract_count").asInt());
+        assertEquals(true, auditDetail.path("contract_identity").path("contract_present").asBoolean());
+    }
+
+    @Test
+    void cancelTaskMissingRecordAuditContractFailsBeforeRuntimeCancel() throws Exception {
+        Harness harness = new Harness(objectMapper);
+        TaskState cancelTask = cancelableTaskState();
+        cancelTask.setPass1ResultJson(samplePass1JsonWithoutContract("record_audit"));
+        when(harness.taskStateMapper.findByTaskId("task_running")).thenReturn(cancelTask);
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> harness.service.cancelTask("task_running", 42L)
+        );
+
+        assertEquals(502, exception.getStatusCode().value());
+        verify(harness.jobRuntimeClient, never()).cancelJob(anyString(), anyString());
+        verify(harness.auditService, never()).appendAudit(anyString(), anyString(), anyString(), anyString(), anyString());
     }
 
     private TaskState waitingTaskState() {
@@ -702,6 +1017,13 @@ class TaskServiceGovernanceTest {
         return taskState;
     }
 
+    private TaskState cancelableTaskState() {
+        TaskState taskState = runningTaskState();
+        taskState.setCurrentState(TaskStatus.RUNNING.name());
+        taskState.setJobId("job_cancel_target");
+        return taskState;
+    }
+
     private AnalysisManifest legacyManifest() {
         AnalysisManifest manifest = new AnalysisManifest();
         manifest.setManifestId("manifest_legacy");
@@ -791,6 +1113,12 @@ class TaskServiceGovernanceTest {
         return response;
     }
 
+    private CancelJobResponse acceptedCancelResponse() {
+        CancelJobResponse response = new CancelJobResponse();
+        response.setAccepted(true);
+        return response;
+    }
+
     private PrimitiveValidationResponse recoverableValidation() {
         PrimitiveValidationResponse response = new PrimitiveValidationResponse();
         response.setIsValid(false);
@@ -872,6 +1200,8 @@ class TaskServiceGovernanceTest {
                   "selected_template": "water_yield_v1",
                   "template_version": "1.0.0",
                   "capability_facts": {
+                    "contract_version": "water_yield_contracts_v1",
+                    "contract_fingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
                     "runtime_profile_hint": "docker-local",
                     "validation_hints": [],
                     "repair_hints": [],
@@ -900,6 +1230,12 @@ class TaskServiceGovernanceTest {
                         "caller_scope": "control_only",
                         "side_effect_level": "runtime_submission"
                       },
+                      "cancel_job": {
+                        "input_schema": "cancel_job_request_v1",
+                        "output_schema": "cancel_job_response_v1",
+                        "caller_scope": "control_only",
+                        "side_effect_level": "runtime_cancellation"
+                      },
                       "query_job_status": {
                         "input_schema": "job_status_request_v1",
                         "output_schema": "job_status_response_v1",
@@ -911,6 +1247,18 @@ class TaskServiceGovernanceTest {
                         "output_schema": "result_bundle_collection_response_v1",
                         "caller_scope": "control_only",
                         "side_effect_level": "artifact_collection"
+                      },
+                      "index_artifacts": {
+                        "input_schema": "artifact_index_request_v1",
+                        "output_schema": "artifact_index_response_v1",
+                        "caller_scope": "control_only",
+                        "side_effect_level": "artifact_indexing"
+                      },
+                      "record_audit": {
+                        "input_schema": "audit_record_request_v1",
+                        "output_schema": "audit_record_response_v1",
+                        "caller_scope": "control_only",
+                        "side_effect_level": "audit_write"
                       }
                     }
                   },
@@ -929,6 +1277,13 @@ class TaskServiceGovernanceTest {
         return objectMapper.writeValueAsString(root);
     }
 
+    private Pass1Response pass1ResponseWithContractIdentity(String contractVersion, String contractFingerprint) throws Exception {
+        JsonNode root = objectMapper.readTree(samplePass1Json());
+        ((com.fasterxml.jackson.databind.node.ObjectNode) root.path("capability_facts")).put("contract_version", contractVersion);
+        ((com.fasterxml.jackson.databind.node.ObjectNode) root.path("capability_facts")).put("contract_fingerprint", contractFingerprint);
+        return objectMapper.readValue(objectMapper.writeValueAsString(root), Pass1Response.class);
+    }
+
     private static final class Harness {
         private final TaskStateMapper taskStateMapper = mock(TaskStateMapper.class);
         private final AnalysisManifestMapper analysisManifestMapper = mock(AnalysisManifestMapper.class);
@@ -936,6 +1291,8 @@ class TaskServiceGovernanceTest {
         private final TaskAttachmentMapper taskAttachmentMapper = mock(TaskAttachmentMapper.class);
         private final RepairRecordMapper repairRecordMapper = mock(RepairRecordMapper.class);
         private final TaskAttemptMapper taskAttemptMapper = mock(TaskAttemptMapper.class);
+        private final TaskCatalogSnapshotMapper taskCatalogSnapshotMapper = mock(TaskCatalogSnapshotMapper.class);
+        private final TaskCatalogSnapshotService taskCatalogSnapshotService;
         private final EventService eventService = mock(EventService.class);
         private final AuditService auditService = mock(AuditService.class);
         private final CognitionFinalExplanationClient cognitionFinalExplanationClient = mock(CognitionFinalExplanationClient.class);
@@ -952,7 +1309,10 @@ class TaskServiceGovernanceTest {
         private final TaskService service;
 
         private Harness(ObjectMapper objectMapper) {
+            this.taskCatalogSnapshotService = new TaskCatalogSnapshotService(taskCatalogSnapshotMapper, objectMapper);
             when(taskAttachmentMapper.findByTaskId(anyString())).thenReturn(List.of());
+            when(taskCatalogSnapshotMapper.findByTaskIdAndInventoryVersion(anyString(), anyInt())).thenReturn(null);
+            when(taskCatalogSnapshotMapper.insert(any())).thenReturn(1);
             when(taskAttemptMapper.updateSnapshotAndJob(anyString(), anyInt(), any(), anyString(), any())).thenReturn(1);
             when(taskAttemptMapper.insert(any())).thenReturn(1);
             when(jobRecordMapper.insert(any())).thenReturn(1);
@@ -960,6 +1320,7 @@ class TaskServiceGovernanceTest {
             when(taskStateMapper.updateGoalAndRoute(anyString(), anyString(), anyString())).thenReturn(1);
             when(taskStateMapper.updateCognitionVerdict(anyString(), anyString())).thenReturn(1);
             when(taskStateMapper.updateInputChainSnapshot(anyString(), anyString(), anyString(), anyString(), anyString(), anyString())).thenReturn(1);
+            when(taskStateMapper.updateWaitingContext(anyString(), anyString(), anyString())).thenReturn(1);
             when(repairProposalService.generate(any(), any(), any(), any())).thenReturn(new RepairProposalResponse());
             when(taskStateMapper.updateResumeTransaction(anyString(), anyString())).thenReturn(1);
             when(taskStateMapper.markCorrupted(anyString(), anyInt(), anyString(), anyString(), any(), anyString())).thenReturn(1);
@@ -975,6 +1336,7 @@ class TaskServiceGovernanceTest {
                     taskAttachmentMapper,
                     repairRecordMapper,
                     taskAttemptMapper,
+                    taskCatalogSnapshotService,
                     eventService,
                     auditService,
                     cognitionFinalExplanationClient,
@@ -1047,6 +1409,8 @@ class TaskServiceGovernanceTest {
                       "selected_template": "water_yield_v1",
                       "template_version": "1.0.0",
                       "capability_facts": {
+                        "contract_version": "water_yield_contracts_v1",
+                        "contract_fingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
                         "runtime_profile_hint": "docker-local",
                         "validation_hints": [],
                         "repair_hints": [],
@@ -1075,6 +1439,12 @@ class TaskServiceGovernanceTest {
                             "caller_scope": "control_only",
                             "side_effect_level": "runtime_submission"
                           },
+                          "cancel_job": {
+                            "input_schema": "cancel_job_request_v1",
+                            "output_schema": "cancel_job_response_v1",
+                            "caller_scope": "control_only",
+                            "side_effect_level": "runtime_cancellation"
+                          },
                           "query_job_status": {
                             "input_schema": "job_status_request_v1",
                             "output_schema": "job_status_response_v1",
@@ -1086,6 +1456,18 @@ class TaskServiceGovernanceTest {
                             "output_schema": "result_bundle_collection_response_v1",
                             "caller_scope": "control_only",
                             "side_effect_level": "artifact_collection"
+                          },
+                          "index_artifacts": {
+                            "input_schema": "artifact_index_request_v1",
+                            "output_schema": "artifact_index_response_v1",
+                            "caller_scope": "control_only",
+                            "side_effect_level": "artifact_indexing"
+                          },
+                          "record_audit": {
+                            "input_schema": "audit_record_request_v1",
+                            "output_schema": "audit_record_response_v1",
+                            "caller_scope": "control_only",
+                            "side_effect_level": "audit_write"
                           }
                         }
                       },

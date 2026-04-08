@@ -60,6 +60,15 @@ public class TaskResultResponse {
     @JsonProperty("catalog_consistency")
     private Map<String, Object> catalogConsistency;
 
+    @JsonProperty("catalog_governance")
+    private CatalogGovernanceView catalogGovernance;
+
+    @JsonProperty("contract_consistency")
+    private Map<String, Object> contractConsistency;
+
+    @JsonProperty("contract_governance")
+    private ContractGovernanceView contractGovernance;
+
     @JsonProperty("canonicalization_summary")
     private Map<String, Object> canonicalizationSummary;
 
@@ -274,6 +283,30 @@ public class TaskResultResponse {
 
     public void setCatalogConsistency(Map<String, Object> catalogConsistency) {
         this.catalogConsistency = catalogConsistency;
+    }
+
+    public CatalogGovernanceView getCatalogGovernance() {
+        return catalogGovernance;
+    }
+
+    public void setCatalogGovernance(CatalogGovernanceView catalogGovernance) {
+        this.catalogGovernance = catalogGovernance;
+    }
+
+    public Map<String, Object> getContractConsistency() {
+        return contractConsistency;
+    }
+
+    public void setContractConsistency(Map<String, Object> contractConsistency) {
+        this.contractConsistency = contractConsistency;
+    }
+
+    public ContractGovernanceView getContractGovernance() {
+        return contractGovernance;
+    }
+
+    public void setContractGovernance(ContractGovernanceView contractGovernance) {
+        this.contractGovernance = contractGovernance;
     }
 
     public Map<String, Object> getCanonicalizationSummary() {

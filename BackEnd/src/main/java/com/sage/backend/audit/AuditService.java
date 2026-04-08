@@ -4,6 +4,8 @@ import com.sage.backend.mapper.AuditRecordMapper;
 import com.sage.backend.model.AuditRecord;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
 @Service
 public class AuditService {
 
@@ -22,5 +24,8 @@ public class AuditService {
         auditRecord.setDetailJson(detailJson);
         auditRecordMapper.insert(auditRecord);
     }
-}
 
+    public List<AuditRecord> findByTaskId(String taskId) {
+        return auditRecordMapper.findByTaskId(taskId);
+    }
+}

@@ -84,6 +84,7 @@ public final class AttachmentCatalogProjector {
         summary.put("catalog_blacklisted_asset_count", blacklistedAssetCount);
         summary.put("catalog_role_coverage_count", readyRoleNames.size());
         summary.put("catalog_ready_role_names", sortedReadyRoleNames);
+        summary.put("catalog_inventory_version", catalogRevision == null ? 0 : catalogRevision);
         summary.put("catalog_revision", catalogRevision == null ? 0 : catalogRevision);
         summary.put("catalog_fingerprint", buildCatalogFingerprint(facts, catalogRevision));
         summary.put("catalog_source", facts.isEmpty() ? "none" : "task_attachment_projection");
@@ -153,6 +154,7 @@ public final class AttachmentCatalogProjector {
         Map<String, Object> consistency = new LinkedHashMap<>();
         consistency.put("scope", safeString(scope));
         consistency.put("catalog_source", catalogSummary == null ? "" : safeString(stringValue(catalogSummary.get("catalog_source"))));
+        consistency.put("catalog_inventory_version", extractCatalogInventoryVersion(catalogSummary));
         consistency.put("catalog_revision", extractCatalogRevision(catalogSummary));
         consistency.put("catalog_fingerprint", extractCatalogFingerprint(catalogSummary));
         consistency.put("catalog_ready_role_names", readyRoleNames);
@@ -178,6 +180,24 @@ public final class AttachmentCatalogProjector {
             }
         }
         return null;
+    }
+
+    public static Integer extractCatalogInventoryVersion(Map<String, Object> catalogSummary) {
+        if (catalogSummary == null) {
+            return null;
+        }
+        Object value = catalogSummary.get("catalog_inventory_version");
+        if (value instanceof Number numberValue) {
+            return numberValue.intValue();
+        }
+        if (value instanceof String stringValue && !stringValue.isBlank()) {
+            try {
+                return Integer.parseInt(stringValue);
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return extractCatalogRevision(catalogSummary);
     }
 
     public static String extractCatalogFingerprint(Map<String, Object> catalogSummary) {

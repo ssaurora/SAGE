@@ -24,6 +24,8 @@ class TaskProjectionBuilderTest {
                   "capability_key": "water_yield",
                   "selected_template": "water_yield_v1",
                   "capability_facts": {
+                    "contract_version": "water_yield_contracts_v1",
+                    "contract_fingerprint": "4444444444444444444444444444444444444444444444444444444444444444",
                     "contracts": {
                       "validate_args": {
                         "input_schema": "args_draft_validation_v1"
@@ -61,6 +63,8 @@ class TaskProjectionBuilderTest {
         assertEquals("v1", summary.getSlotSchemaViewVersion());
         assertEquals(2, summary.getContractCount());
         assertEquals(List.of("submit_job", "validate_args"), summary.getContractNames());
+        assertEquals("water_yield_contracts_v1", summary.getContractVersion());
+        assertEquals("4444444444444444444444444444444444444444444444444444444444444444", summary.getContractFingerprint());
         assertEquals("water_yield_v1", summary.getStableDefaults().getAnalysisTemplate());
         assertEquals(0.8, summary.getStableDefaults().getRootDepthFactor());
         assertEquals(0.85, summary.getStableDefaults().getPawcFactor());
@@ -310,6 +314,31 @@ class TaskProjectionBuilderTest {
     }
 
     @Test
+    void buildResumeTransactionPreservesStructuredContractMismatchFacts() throws Exception {
+        JsonNode resumeTransaction = objectMapper.readTree("""
+                {
+                  "resume_request_id": "resume_002",
+                  "status": "CORRUPTED",
+                  "failure_reason": "CONTRACT_VERSION_MISMATCH: frozen=v1/f1 current=v2/f2",
+                  "failure_code": "CONTRACT_VERSION_MISMATCH",
+                  "base_contract_version": "water_yield_contracts_v1",
+                  "base_contract_fingerprint": "1111111111111111111111111111111111111111111111111111111111111111",
+                  "candidate_contract_version": "water_yield_contracts_v2",
+                  "candidate_contract_fingerprint": "9999999999999999999999999999999999999999999999999999999999999999",
+                  "updated_at": "2026-04-05T10:05:00Z"
+                }
+                """);
+
+        ResumeTransactionView view = TaskProjectionBuilder.buildResumeTransaction(resumeTransaction);
+
+        assertEquals("CONTRACT_VERSION_MISMATCH", view.getFailureCode());
+        assertEquals("water_yield_contracts_v1", view.getBaseContractVersion());
+        assertEquals("1111111111111111111111111111111111111111111111111111111111111111", view.getBaseContractFingerprint());
+        assertEquals("water_yield_contracts_v2", view.getCandidateContractVersion());
+        assertEquals("9999999999999999999999999999999999999999999999999999999999999999", view.getCandidateContractFingerprint());
+    }
+
+    @Test
     void buildResultObjectSummaryPreservesArtifactFacts() throws Exception {
         JsonNode resultObjectSummary = objectMapper.readTree("""
                 {
@@ -518,6 +547,8 @@ class TaskProjectionBuilderTest {
                   "capability_facts": {
                     "capability_key": "water_yield",
                     "display_name": "Water Yield",
+                    "contract_version": "water_yield_contracts_v1",
+                    "contract_fingerprint": "5555555555555555555555555555555555555555555555555555555555555555",
                     "contracts": {
                       "validate_args": {
                         "input_schema": "args_draft_validation_v1",
@@ -546,6 +577,8 @@ class TaskProjectionBuilderTest {
 
         assertEquals("water_yield", response.getCapabilityKey());
         assertEquals("Water Yield", response.getCapabilityFacts().getDisplayName());
+        assertEquals("water_yield_contracts_v1", response.getCapabilityFacts().getContractVersion());
+        assertEquals("5555555555555555555555555555555555555555555555555555555555555555", response.getCapabilityFacts().getContractFingerprint());
         Map<?, ?> contracts = (Map<?, ?>) response.getCapabilityFacts().getContracts();
         Map<?, ?> validateArgsContract = (Map<?, ?>) contracts.get("validate_args");
         assertEquals("args_draft_validation_v1", validateArgsContract.get("input_schema"));

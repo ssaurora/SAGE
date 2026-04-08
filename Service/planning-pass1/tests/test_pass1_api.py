@@ -301,7 +301,20 @@ def test_planning_pass1_response_schema(monkeypatch, tmp_path: Path) -> None:
     assert {"watershed_results", "water_yield_raster", "aet_raster"} == primary_logical_names
     assert {"run_manifest", "runtime_request"} == audit_logical_names
     capability_contracts = body["capability_facts"]["contracts"]
-    assert {"inspect_asset_facts", "validate_bindings", "validate_args", "checkpoint_resume_ack", "submit_job", "query_job_status", "collect_result_bundle"} == set(capability_contracts.keys())
+    assert body["capability_facts"]["contract_version"] == "water_yield_contracts_v1"
+    assert len(body["capability_facts"]["contract_fingerprint"]) == 64
+    assert {
+        "inspect_asset_facts",
+        "validate_bindings",
+        "validate_args",
+        "checkpoint_resume_ack",
+        "submit_job",
+        "cancel_job",
+        "query_job_status",
+        "collect_result_bundle",
+        "index_artifacts",
+        "record_audit",
+    } == set(capability_contracts.keys())
     assert capability_contracts["validate_args"]["input_schema"] == "args_draft_validation_v1"
     assert capability_contracts["submit_job"]["side_effect_level"] == "runtime_submission"
     assert body["graph_skeleton"]["nodes"]

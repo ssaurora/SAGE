@@ -39,6 +39,15 @@ public class TaskManifestResponse {
     @JsonProperty("catalog_consistency")
     private Map<String, Object> catalogConsistency;
 
+    @JsonProperty("catalog_governance")
+    private CatalogGovernanceView catalogGovernance;
+
+    @JsonProperty("contract_consistency")
+    private Map<String, Object> contractConsistency;
+
+    @JsonProperty("contract_governance")
+    private ContractGovernanceView contractGovernance;
+
     @JsonProperty("canonicalization_summary")
     private Map<String, Object> canonicalizationSummary;
 
@@ -169,6 +178,13 @@ public class TaskManifestResponse {
     public void setCatalogSummary(Map<String, Object> catalogSummary) { this.catalogSummary = catalogSummary; }
     public Map<String, Object> getCatalogConsistency() { return catalogConsistency; }
     public void setCatalogConsistency(Map<String, Object> catalogConsistency) { this.catalogConsistency = catalogConsistency; }
+    public CatalogGovernanceView getCatalogGovernance() { return catalogGovernance; }
+    public void setCatalogGovernance(CatalogGovernanceView catalogGovernance) { this.catalogGovernance = catalogGovernance; }
+    public Map<String, Object> getContractConsistency() { return contractConsistency; }
+    public void setContractConsistency(Map<String, Object> contractConsistency) { this.contractConsistency = contractConsistency; }
+
+    public ContractGovernanceView getContractGovernance() { return contractGovernance; }
+    public void setContractGovernance(ContractGovernanceView contractGovernance) { this.contractGovernance = contractGovernance; }
     public Map<String, Object> getCanonicalizationSummary() { return canonicalizationSummary; }
     public void setCanonicalizationSummary(Map<String, Object> canonicalizationSummary) { this.canonicalizationSummary = canonicalizationSummary; }
     public Map<String, Object> getRewriteSummary() { return rewriteSummary; }
@@ -346,6 +362,12 @@ public class TaskManifestResponse {
         @JsonProperty("display_name")
         private String displayName;
 
+        @JsonProperty("contract_version")
+        private String contractVersion;
+
+        @JsonProperty("contract_fingerprint")
+        private String contractFingerprint;
+
         @JsonProperty("validation_hints")
         private List<CapabilityValidationHint> validationHints;
 
@@ -365,6 +387,10 @@ public class TaskManifestResponse {
         public void setCapabilityKey(String capabilityKey) { this.capabilityKey = capabilityKey; }
         public String getDisplayName() { return displayName; }
         public void setDisplayName(String displayName) { this.displayName = displayName; }
+        public String getContractVersion() { return contractVersion; }
+        public void setContractVersion(String contractVersion) { this.contractVersion = contractVersion; }
+        public String getContractFingerprint() { return contractFingerprint; }
+        public void setContractFingerprint(String contractFingerprint) { this.contractFingerprint = contractFingerprint; }
         public List<CapabilityValidationHint> getValidationHints() { return validationHints; }
         public void setValidationHints(List<CapabilityValidationHint> validationHints) { this.validationHints = validationHints; }
         public List<CapabilityRepairHint> getRepairHints() { return repairHints; }

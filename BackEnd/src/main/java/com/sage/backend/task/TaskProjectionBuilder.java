@@ -126,6 +126,8 @@ final class TaskProjectionBuilder {
         Collections.sort(contractNames);
         summary.setContractCount(contractNames.size());
         summary.setContractNames(contractNames);
+        summary.setContractVersion(root.path("capability_facts").path("contract_version").asText(null));
+        summary.setContractFingerprint(root.path("capability_facts").path("contract_fingerprint").asText(null));
         summary.setStableDefaults(buildPass1StableDefaults(root.path("stable_defaults")));
         return summary;
     }
@@ -334,14 +336,21 @@ final class TaskProjectionBuilder {
         view.setBaseCheckpointVersion(root.path("base_checkpoint_version").isNumber() ? root.path("base_checkpoint_version").asInt() : null);
         view.setCandidateCheckpointVersion(root.path("candidate_checkpoint_version").isNumber() ? root.path("candidate_checkpoint_version").asInt() : null);
         view.setCandidateInventoryVersion(root.path("candidate_inventory_version").isNumber() ? root.path("candidate_inventory_version").asInt() : null);
+        view.setBaseCatalogInventoryVersion(root.path("base_catalog_inventory_version").isNumber() ? root.path("base_catalog_inventory_version").asInt() : null);
         view.setBaseCatalogRevision(root.path("base_catalog_revision").isNumber() ? root.path("base_catalog_revision").asInt() : null);
         view.setBaseCatalogFingerprint(root.path("base_catalog_fingerprint").asText(null));
+        view.setCandidateCatalogInventoryVersion(root.path("candidate_catalog_inventory_version").isNumber() ? root.path("candidate_catalog_inventory_version").asInt() : null);
         view.setCandidateCatalogRevision(root.path("candidate_catalog_revision").isNumber() ? root.path("candidate_catalog_revision").asInt() : null);
         view.setCandidateCatalogFingerprint(root.path("candidate_catalog_fingerprint").asText(null));
         view.setCandidateManifestId(root.path("candidate_manifest_id").asText(null));
         view.setCandidateAttemptNo(root.path("candidate_attempt_no").isNumber() ? root.path("candidate_attempt_no").asInt() : null);
         view.setCandidateJobId(root.path("candidate_job_id").asText(null));
         view.setFailureReason(root.path("failure_reason").asText(null));
+        view.setFailureCode(root.path("failure_code").asText(null));
+        view.setBaseContractVersion(root.path("base_contract_version").asText(null));
+        view.setBaseContractFingerprint(root.path("base_contract_fingerprint").asText(null));
+        view.setCandidateContractVersion(root.path("candidate_contract_version").asText(null));
+        view.setCandidateContractFingerprint(root.path("candidate_contract_fingerprint").asText(null));
         view.setUpdatedAt(root.path("updated_at").asText(null));
         return view;
     }
@@ -576,6 +585,8 @@ final class TaskProjectionBuilder {
         TaskManifestResponse.CapabilityFacts facts = new TaskManifestResponse.CapabilityFacts();
         facts.setCapabilityKey(root.path("capability_key").asText(null));
         facts.setDisplayName(root.path("display_name").asText(null));
+        facts.setContractVersion(root.path("contract_version").asText(null));
+        facts.setContractFingerprint(root.path("contract_fingerprint").asText(null));
         facts.setValidationHints(buildManifestValidationHints(root.path("validation_hints")));
         facts.setRepairHints(buildManifestRepairHints(root.path("repair_hints")));
         facts.setContracts(buildJsonObjectView(root.path("contracts"), null));

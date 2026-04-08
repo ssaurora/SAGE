@@ -9,6 +9,7 @@ import com.sage.backend.task.dto.ForceRevertCheckpointResponse;
 import com.sage.backend.task.dto.TaskDetailResponse;
 import com.sage.backend.task.dto.TaskEventsResponse;
 import com.sage.backend.task.dto.TaskArtifactsResponse;
+import com.sage.backend.task.dto.TaskAuditResponse;
 import com.sage.backend.task.dto.ResumeTaskRequest;
 import com.sage.backend.task.dto.ResumeTaskResponse;
 import com.sage.backend.task.dto.TaskResultResponse;
@@ -83,6 +84,12 @@ public class TaskController {
     public ResponseEntity<TaskArtifactsResponse> getTaskArtifacts(@PathVariable String taskId, Authentication authentication) {
         CurrentUser currentUser = (CurrentUser) authentication.getPrincipal();
         return ResponseEntity.ok(taskService.getTaskArtifacts(taskId, currentUser.userId()));
+    }
+
+    @GetMapping("/{taskId}/audit")
+    public ResponseEntity<TaskAuditResponse> getTaskAudit(@PathVariable String taskId, Authentication authentication) {
+        CurrentUser currentUser = (CurrentUser) authentication.getPrincipal();
+        return ResponseEntity.ok(taskService.getTaskAudit(taskId, currentUser.userId()));
     }
 
     @PostMapping("/{taskId}/cancel")

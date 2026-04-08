@@ -122,6 +122,8 @@ class CapabilityOutputContract(BaseModel):
 class CapabilityDefinitionLite(BaseModel):
     capability_key: str = Field(min_length=1)
     display_name: str = Field(min_length=1)
+    contract_version: str = Field(min_length=1)
+    contract_fingerprint: str = Field(min_length=1)
     validation_hints: list[CapabilityValidationHint] = Field(default_factory=list)
     repair_hints: list[CapabilityRepairHint] = Field(default_factory=list)
     contracts: dict[str, CapabilityContractSpec] = Field(default_factory=dict)

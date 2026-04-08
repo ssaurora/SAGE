@@ -18,8 +18,11 @@ class CapabilityContractGuardTest {
         assertDoesNotThrow(() -> CapabilityContractGuard.requireResumeAckContract(pass1Node));
         assertDoesNotThrow(() -> CapabilityContractGuard.requireValidationContracts(pass1Node));
         assertDoesNotThrow(() -> CapabilityContractGuard.requireSubmitJobContract(pass1Node));
+        assertDoesNotThrow(() -> CapabilityContractGuard.requireCancelJobContract(pass1Node));
         assertDoesNotThrow(() -> CapabilityContractGuard.requireQueryJobStatusContract(pass1Node));
         assertDoesNotThrow(() -> CapabilityContractGuard.requireCollectResultBundleContract(pass1Node));
+        assertDoesNotThrow(() -> CapabilityContractGuard.requireIndexArtifactsContract(pass1Node));
+        assertDoesNotThrow(() -> CapabilityContractGuard.requireRecordAuditContract(pass1Node));
     }
 
     @Test
@@ -27,6 +30,8 @@ class CapabilityContractGuardTest {
         JsonNode pass1Node = objectMapper.readTree("""
                 {
                   "capability_facts": {
+                    "contract_version": "water_yield_contracts_v1",
+                    "contract_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     "contracts": {
                       "validate_bindings": {
                         "input_schema": "slot_bindings_validation_v1",
@@ -52,6 +57,8 @@ class CapabilityContractGuardTest {
         JsonNode pass1Node = objectMapper.readTree("""
                 {
                   "capability_facts": {
+                    "contract_version": "water_yield_contracts_v1",
+                    "contract_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
                     "contracts": {
                       "checkpoint_resume_ack": {
                         "input_schema": "checkpoint_resume_request_v1",
@@ -72,10 +79,37 @@ class CapabilityContractGuardTest {
         assertEquals("CAPABILITY_CONTRACT_MISMATCH: checkpoint_resume_ack caller_scope", exception.getMessage());
     }
 
+    @Test
+    void failsWhenContractMetadataMissing() throws Exception {
+        JsonNode pass1Node = objectMapper.readTree("""
+                {
+                  "capability_facts": {
+                    "contracts": {
+                      "submit_job": {
+                        "input_schema": "create_job_request_v1",
+                        "output_schema": "create_job_response_v1",
+                        "caller_scope": "control_only",
+                        "side_effect_level": "runtime_submission"
+                      }
+                    }
+                  }
+                }
+                """);
+
+        IllegalStateException exception = assertThrows(
+                IllegalStateException.class,
+                () -> CapabilityContractGuard.requireSubmitJobContract(pass1Node)
+        );
+
+        assertEquals("CAPABILITY_CONTRACT_METADATA_UNAVAILABLE: contract_version", exception.getMessage());
+    }
+
     private String samplePass1Json() {
         return """
                 {
                   "capability_facts": {
+                    "contract_version": "water_yield_contracts_v1",
+                    "contract_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
                     "contracts": {
                       "validate_bindings": {
                         "input_schema": "slot_bindings_validation_v1",
@@ -101,6 +135,12 @@ class CapabilityContractGuardTest {
                         "caller_scope": "control_only",
                         "side_effect_level": "runtime_submission"
                       },
+                      "cancel_job": {
+                        "input_schema": "cancel_job_request_v1",
+                        "output_schema": "cancel_job_response_v1",
+                        "caller_scope": "control_only",
+                        "side_effect_level": "runtime_cancellation"
+                      },
                       "query_job_status": {
                         "input_schema": "job_status_request_v1",
                         "output_schema": "job_status_response_v1",
@@ -112,6 +152,18 @@ class CapabilityContractGuardTest {
                         "output_schema": "result_bundle_collection_response_v1",
                         "caller_scope": "control_only",
                         "side_effect_level": "artifact_collection"
+                      },
+                      "index_artifacts": {
+                        "input_schema": "artifact_index_request_v1",
+                        "output_schema": "artifact_index_response_v1",
+                        "caller_scope": "control_only",
+                        "side_effect_level": "artifact_indexing"
+                      },
+                      "record_audit": {
+                        "input_schema": "audit_record_request_v1",
+                        "output_schema": "audit_record_response_v1",
+                        "caller_scope": "control_only",
+                        "side_effect_level": "audit_write"
                       }
                     }
                   }

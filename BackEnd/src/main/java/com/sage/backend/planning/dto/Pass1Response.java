@@ -268,6 +268,12 @@ public class Pass1Response {
         @JsonProperty("display_name")
         private String displayName;
 
+        @JsonProperty("contract_version")
+        private String contractVersion;
+
+        @JsonProperty("contract_fingerprint")
+        private String contractFingerprint;
+
         @JsonProperty("validation_hints")
         private List<ValidationHint> validationHints;
 
@@ -297,6 +303,22 @@ public class Pass1Response {
 
         public void setDisplayName(String displayName) {
             this.displayName = displayName;
+        }
+
+        public String getContractVersion() {
+            return contractVersion;
+        }
+
+        public void setContractVersion(String contractVersion) {
+            this.contractVersion = contractVersion;
+        }
+
+        public String getContractFingerprint() {
+            return contractFingerprint;
+        }
+
+        public void setContractFingerprint(String contractFingerprint) {
+            this.contractFingerprint = contractFingerprint;
         }
 
         public List<ValidationHint> getValidationHints() {
