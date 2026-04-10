@@ -43,6 +43,7 @@ import com.sage.backend.task.dto.ResumeTaskRequest;
 import com.sage.backend.task.dto.ResumeTaskResponse;
 import com.sage.backend.task.dto.UploadAttachmentResponse;
 import com.sage.backend.task.dto.TaskDetailResponse;
+import com.sage.backend.task.dto.TaskCatalogResponse;
 import com.sage.backend.task.dto.TaskManifestResponse;
 import com.sage.backend.task.dto.TaskResultResponse;
 import com.sage.backend.validationgate.ValidationClient;
@@ -555,6 +556,72 @@ class TaskServiceGovernanceTest {
         assertEquals(8, item.getCatalogGovernance().getCurrentCatalogSummary().getCatalogRevision());
         assertEquals("CATALOG_REVISION_MISMATCH", item.getCatalogGovernance().getConsistency().getMismatchCode());
         assertEquals(true, item.getCatalogGovernance().getConsistency().getDriftDetected());
+    }
+
+    @Test
+    void getTaskCatalogProjectsQueryGovernanceSnapshotAndCatalogAuditItems() throws Exception {
+        Harness harness = new Harness(objectMapper);
+        TaskState taskState = succeededTaskState();
+        taskState.setInventoryVersion(8);
+        TaskCatalogSnapshot snapshot = new TaskCatalogSnapshot();
+        snapshot.setId(88L);
+        snapshot.setTaskId("task_legacy");
+        snapshot.setInventoryVersion(8);
+        snapshot.setCatalogRevision(8);
+        snapshot.setCatalogFingerprint("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+        snapshot.setCatalogSource("task_attachment_projection");
+        snapshot.setCreatedAt(OffsetDateTime.of(2026, 4, 4, 22, 30, 0, 0, ZoneOffset.UTC));
+        snapshot.setCatalogSummaryJson(objectMapper.writeValueAsString(Map.of(
+                "catalog_source", "task_catalog_snapshot",
+                "catalog_inventory_version", 8,
+                "catalog_revision", 8,
+                "catalog_fingerprint", "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "catalog_asset_count", 1,
+                "catalog_ready_asset_count", 1,
+                "catalog_blacklisted_asset_count", 0,
+                "catalog_role_coverage_count", 1,
+                "catalog_ready_role_names", List.of("precipitation")
+        )));
+        AuditRecord catalogAudit = new AuditRecord();
+        catalogAudit.setId(13L);
+        catalogAudit.setTaskId("task_legacy");
+        catalogAudit.setActionType("TASK_RESUME");
+        catalogAudit.setActionResult("ACKED");
+        catalogAudit.setTraceId("resume_catalog_query_audit");
+        catalogAudit.setCreatedAt(OffsetDateTime.of(2026, 4, 4, 23, 30, 0, 0, ZoneOffset.UTC));
+        catalogAudit.setDetailJson(objectMapper.writeValueAsString(Map.of(
+                "candidate_catalog_inventory_version", 7,
+                "candidate_catalog_revision", 7,
+                "candidate_catalog_fingerprint", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        )));
+        AuditRecord nonCatalogAudit = new AuditRecord();
+        nonCatalogAudit.setId(14L);
+        nonCatalogAudit.setTaskId("task_legacy");
+        nonCatalogAudit.setActionType("TASK_CANCEL");
+        nonCatalogAudit.setActionResult("FAILED");
+        nonCatalogAudit.setTraceId("no_catalog");
+        nonCatalogAudit.setDetailJson(objectMapper.writeValueAsString(Map.of("failure_code", "CANCEL_FAILED")));
+
+        when(harness.taskStateMapper.findByTaskId("task_legacy")).thenReturn(taskState);
+        when(harness.taskAttachmentMapper.findByTaskId("task_legacy")).thenReturn(List.of(readyAttachment("precipitation")));
+        when(harness.taskCatalogSnapshotMapper.findByTaskIdAndInventoryVersion("task_legacy", 8)).thenReturn(snapshot);
+        when(harness.taskCatalogSnapshotMapper.findLatestByTaskId("task_legacy")).thenReturn(snapshot);
+        when(harness.auditService.findByTaskId("task_legacy")).thenReturn(List.of(catalogAudit, nonCatalogAudit));
+
+        TaskCatalogResponse response = harness.service.getTaskCatalog("task_legacy", 42L);
+
+        assertEquals("task_legacy", response.getTaskId());
+        assertEquals(8, response.getInventoryVersion());
+        assertEquals("task_catalog_snapshot", response.getCatalogSummary().get("catalog_source"));
+        assertEquals(1, response.getCatalogFacts().size());
+        assertEquals("READY", response.getCatalogFacts().get(0).get("availability_status"));
+        assertEquals(8, response.getLatestSnapshot().getCatalogRevision());
+        assertEquals("task_catalog_query_governance", response.getCatalogGovernance().getScope());
+        assertEquals(false, response.getCatalogGovernance().getConsistency().getDriftDetected());
+        assertEquals(1, response.getAuditItems().size());
+        assertEquals("resume_catalog_query_audit", response.getAuditItems().get(0).getTraceId());
+        assertEquals("CATALOG_REVISION_MISMATCH", response.getAuditItems().get(0).getCatalogGovernance().getConsistency().getMismatchCode());
+        assertEquals(true, response.getAuditItems().get(0).getCatalogGovernance().getConsistency().getDriftDetected());
     }
 
     @Test

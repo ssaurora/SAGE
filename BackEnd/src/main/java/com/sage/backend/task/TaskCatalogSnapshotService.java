@@ -72,6 +72,13 @@ public class TaskCatalogSnapshotService {
         return snapshot;
     }
 
+    public TaskCatalogSnapshot findLatestCatalogSnapshot(String taskId) {
+        if (taskId == null || taskId.isBlank()) {
+            return null;
+        }
+        return taskCatalogSnapshotMapper.findLatestByTaskId(taskId);
+    }
+
     private TaskCatalogSnapshot resolveCatalogSnapshot(String taskId, List<TaskAttachment> attachments, int inventoryVersion) {
         if (taskId == null || taskId.isBlank()) {
             return null;

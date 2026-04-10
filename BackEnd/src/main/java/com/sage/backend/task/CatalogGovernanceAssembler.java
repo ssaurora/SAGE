@@ -35,6 +35,10 @@ final class CatalogGovernanceAssembler {
         return build("audit_catalog_governance", auditCatalogSummary, currentCatalogSummary, consistency);
     }
 
+    static boolean hasAuditCatalogEvidence(Map<String, Object> detail) {
+        return !resolveAuditCatalogSummary(detail).isEmpty();
+    }
+
     private static Map<String, Object> resolveAuditCatalogSummary(Map<String, Object> detail) {
         if (detail == null || detail.isEmpty()) {
             return Map.of();

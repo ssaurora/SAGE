@@ -37,6 +37,7 @@ import com.sage.backend.model.JobState;
 import com.sage.backend.model.RepairRecord;
 import com.sage.backend.model.TaskAttachment;
 import com.sage.backend.model.TaskAttempt;
+import com.sage.backend.model.TaskCatalogSnapshot;
 import com.sage.backend.model.TaskState;
 import com.sage.backend.model.TaskStatus;
 import com.sage.backend.planning.Pass1Client;
@@ -56,6 +57,7 @@ import com.sage.backend.task.dto.ResumeTaskResponse;
 import com.sage.backend.task.dto.TaskDetailResponse;
 import com.sage.backend.task.dto.TaskArtifactsResponse;
 import com.sage.backend.task.dto.TaskAuditResponse;
+import com.sage.backend.task.dto.TaskCatalogResponse;
 import com.sage.backend.task.dto.TaskEventsResponse;
 import com.sage.backend.task.dto.TaskManifestResponse;
 import com.sage.backend.task.dto.TaskResultResponse;
@@ -890,6 +892,48 @@ public class TaskService {
             item.setContractGovernance(ContractGovernanceAssembler.buildAudit(detail));
             item.setCatalogGovernance(CatalogGovernanceAssembler.buildAudit(detail, currentCatalogSummary));
             response.getItems().add(item);
+        }
+        return response;
+    }
+
+    public TaskCatalogResponse getTaskCatalog(String taskId, Long userId) {
+        TaskState taskState = getOwnedTask(taskId, userId);
+        List<TaskAttachment> attachments = taskAttachmentMapper.findByTaskId(taskId);
+        Map<String, Object> currentCatalogSummary = buildCatalogSummary(taskId, attachments, taskState);
+        TaskCatalogResponse response = new TaskCatalogResponse();
+        response.setTaskId(taskId);
+        response.setInventoryVersion(currentInventoryVersion(taskState));
+        response.setCatalogSummary(currentCatalogSummary);
+        response.setCatalogFacts(AttachmentCatalogProjector.project(attachments));
+
+        TaskCatalogSnapshot latestSnapshot = taskCatalogSnapshotService.findLatestCatalogSnapshot(taskId);
+        Map<String, Object> latestSnapshotSummary = readJsonMap(latestSnapshot == null ? null : latestSnapshot.getCatalogSummaryJson());
+        response.setLatestSnapshot(buildCatalogSnapshotView(latestSnapshot, latestSnapshotSummary));
+        Map<String, Object> queryCatalogConsistency = CatalogConsistencyProjector.buildFrozenCatalogConsistency(
+                "task_catalog_query",
+                latestSnapshotSummary,
+                currentCatalogSummary
+        );
+        response.setCatalogGovernance(CatalogGovernanceAssembler.build(
+                "task_catalog_query_governance",
+                latestSnapshotSummary,
+                currentCatalogSummary,
+                queryCatalogConsistency
+        ));
+
+        for (AuditRecord auditRecord : auditService.findByTaskId(taskId)) {
+            Map<String, Object> detail = readJsonMap(auditRecord.getDetailJson());
+            if (!CatalogGovernanceAssembler.hasAuditCatalogEvidence(detail)) {
+                continue;
+            }
+            TaskCatalogResponse.AuditCatalogItem item = new TaskCatalogResponse.AuditCatalogItem();
+            item.setId(auditRecord.getId());
+            item.setActionType(auditRecord.getActionType());
+            item.setActionResult(auditRecord.getActionResult());
+            item.setTraceId(auditRecord.getTraceId());
+            item.setCreatedAt(auditRecord.getCreatedAt() == null ? null : auditRecord.getCreatedAt().toString());
+            item.setCatalogGovernance(CatalogGovernanceAssembler.buildAudit(detail, currentCatalogSummary));
+            response.getAuditItems().add(item);
         }
         return response;
     }
@@ -3817,6 +3861,24 @@ public class TaskService {
 
     private Map<String, Object> buildCatalogSummary(String taskId, List<TaskAttachment> attachments, TaskState taskState) {
         return taskCatalogSnapshotService.resolveCatalogSummary(taskId, attachments, currentInventoryVersion(taskState));
+    }
+
+    private TaskCatalogResponse.SnapshotView buildCatalogSnapshotView(
+            TaskCatalogSnapshot snapshot,
+            Map<String, Object> catalogSummary
+    ) {
+        if (snapshot == null) {
+            return null;
+        }
+        TaskCatalogResponse.SnapshotView view = new TaskCatalogResponse.SnapshotView();
+        view.setId(snapshot.getId());
+        view.setInventoryVersion(snapshot.getInventoryVersion());
+        view.setCatalogRevision(snapshot.getCatalogRevision());
+        view.setCatalogFingerprint(snapshot.getCatalogFingerprint());
+        view.setCatalogSource(snapshot.getCatalogSource());
+        view.setCreatedAt(snapshot.getCreatedAt() == null ? null : snapshot.getCreatedAt().toString());
+        view.setCatalogSummary(catalogSummary);
+        return view;
     }
 
     private Map<String, Object> resolveManifestCatalogSummary(
