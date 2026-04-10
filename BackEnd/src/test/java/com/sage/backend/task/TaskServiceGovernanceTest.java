@@ -492,12 +492,10 @@ class TaskServiceGovernanceTest {
         record.setTraceId("resume_contract_audit");
         record.setCreatedAt(OffsetDateTime.of(2026, 4, 4, 20, 30, 0, 0, ZoneOffset.UTC));
         record.setDetailJson(objectMapper.writeValueAsString(Map.of(
-                "contract_identity", Map.of(
-                        "contract_version", "water_yield_contracts_v2",
-                        "contract_fingerprint", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-                ),
                 "frozen_contract_version", "water_yield_contracts_v1",
                 "frozen_contract_fingerprint", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "current_contract_version", "water_yield_contracts_v2",
+                "current_contract_fingerprint", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
                 "failure_code", "CONTRACT_VERSION_MISMATCH",
                 "mismatch_code", "CONTRACT_VERSION_MISMATCH",
                 "compatibility_code", "INCOMPATIBLE",
@@ -518,6 +516,45 @@ class TaskServiceGovernanceTest {
         assertEquals("CONTRACT_VERSION_MISMATCH", item.getContractGovernance().getConsistency().getMismatchCode());
         assertEquals("INCOMPATIBLE", item.getContractGovernance().getConsistency().getCompatibilityCode());
         assertEquals("REGENERATE_PASS1_AND_REFREEZE", item.getContractGovernance().getResumeContractEvaluation().getMigrationHint());
+    }
+
+    @Test
+    void getTaskAuditProjectsCatalogGovernanceFromResumeCatalogDetail() throws Exception {
+        Harness harness = new Harness(objectMapper);
+        TaskState taskState = succeededTaskState();
+        taskState.setInventoryVersion(8);
+        AuditRecord record = new AuditRecord();
+        record.setId(12L);
+        record.setTaskId("task_legacy");
+        record.setActionType("TASK_RESUME");
+        record.setActionResult("ACKED");
+        record.setTraceId("resume_catalog_audit");
+        record.setCreatedAt(OffsetDateTime.of(2026, 4, 4, 21, 30, 0, 0, ZoneOffset.UTC));
+        record.setDetailJson(objectMapper.writeValueAsString(Map.of(
+                "resume_request_id", "resume_catalog_audit",
+                "base_catalog_inventory_version", 6,
+                "base_catalog_revision", 6,
+                "base_catalog_fingerprint", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "candidate_catalog_inventory_version", 7,
+                "candidate_catalog_revision", 7,
+                "candidate_catalog_fingerprint", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        )));
+
+        when(harness.taskStateMapper.findByTaskId("task_legacy")).thenReturn(taskState);
+        when(harness.taskAttachmentMapper.findByTaskId("task_legacy")).thenReturn(List.of(readyAttachment("precipitation")));
+        when(harness.auditService.findByTaskId("task_legacy")).thenReturn(List.of(record));
+
+        var response = harness.service.getTaskAudit("task_legacy", 42L);
+
+        assertEquals(1, response.getItems().size());
+        var item = response.getItems().get(0);
+        assertEquals("audit_catalog_governance", item.getCatalogGovernance().getScope());
+        assertEquals("audit_candidate_catalog_identity", item.getCatalogGovernance().getBaselineCatalogSummary().getCatalogSource());
+        assertEquals(7, item.getCatalogGovernance().getBaselineCatalogSummary().getCatalogRevision());
+        assertEquals("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", item.getCatalogGovernance().getBaselineCatalogSummary().getCatalogFingerprint());
+        assertEquals(8, item.getCatalogGovernance().getCurrentCatalogSummary().getCatalogRevision());
+        assertEquals("CATALOG_REVISION_MISMATCH", item.getCatalogGovernance().getConsistency().getMismatchCode());
+        assertEquals(true, item.getCatalogGovernance().getConsistency().getDriftDetected());
     }
 
     @Test

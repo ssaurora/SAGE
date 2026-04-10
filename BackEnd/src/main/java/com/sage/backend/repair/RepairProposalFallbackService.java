@@ -18,9 +18,9 @@ public class RepairProposalFallbackService {
 
         RepairProposalResponse proposal = new RepairProposalResponse();
         proposal.setAvailable(false);
-        proposal.setUserFacingReason(null);
-        proposal.setResumeHint(null);
-        proposal.setActionExplanations(List.of());
+        proposal.setUserFacingReason(buildUserFacingReason(request));
+        proposal.setResumeHint(buildResumeHint(request));
+        proposal.setActionExplanations(buildActionExplanations(request));
 
         List<String> notes = new ArrayList<>();
         notes.add(note);
@@ -49,12 +49,102 @@ public class RepairProposalFallbackService {
         metadata.put("provider", "glm");
         metadata.put("model", null);
         metadata.put("prompt_version", "repair_proposal_v1");
-        metadata.put("fallback_used", false);
+        metadata.put("fallback_used", true);
         metadata.put("schema_valid", false);
         metadata.put("response_id", null);
         metadata.put("status", "COGNITION_UNAVAILABLE");
         metadata.put("failure_code", failureCode);
         metadata.put("failure_message", failureMessage);
         return metadata;
+    }
+
+    private String buildUserFacingReason(RepairProposalRequest request) {
+        RepairProposalRequest.WaitingContext waitingContext = request == null ? null : request.getWaitingContext();
+        if (waitingContext == null) {
+            return "Task requires additional user actions before it can continue.";
+        }
+        List<RepairProposalRequest.MissingSlot> missingSlots = waitingContext.getMissingSlots();
+        if (missingSlots != null && !missingSlots.isEmpty()) {
+            List<String> labels = missingSlots.stream()
+                    .map(this::missingSlotLabel)
+                    .filter(value -> value != null && !value.isBlank())
+                    .toList();
+            if (!labels.isEmpty()) {
+                return "Required inputs are still missing: " + String.join(", ", labels) + ".";
+            }
+        }
+        List<String> invalidBindings = waitingContext.getInvalidBindings();
+        if (invalidBindings != null && !invalidBindings.isEmpty()) {
+            return "Some provided bindings are invalid and must be corrected: "
+                    + String.join(", ", invalidBindings)
+                    + ".";
+        }
+        return "Task requires additional user actions before it can continue.";
+    }
+
+    private String missingSlotLabel(RepairProposalRequest.MissingSlot missingSlot) {
+        if (missingSlot == null) {
+            return "";
+        }
+        String slotName = missingSlot.getSlotName();
+        String expectedType = missingSlot.getExpectedType();
+        if (slotName == null || slotName.isBlank()) {
+            return "";
+        }
+        if (expectedType == null || expectedType.isBlank()) {
+            return slotName;
+        }
+        return slotName + " (" + expectedType + ")";
+    }
+
+    private String buildResumeHint(RepairProposalRequest request) {
+        RepairProposalRequest.WaitingContext waitingContext = request == null ? null : request.getWaitingContext();
+        if (waitingContext != null
+                && waitingContext.getResumeHint() != null
+                && !waitingContext.getResumeHint().isBlank()) {
+            return waitingContext.getResumeHint();
+        }
+        return "Complete required actions and try resume.";
+    }
+
+    private List<RepairProposalResponse.ActionExplanation> buildActionExplanations(RepairProposalRequest request) {
+        RepairProposalRequest.WaitingContext waitingContext = request == null ? null : request.getWaitingContext();
+        if (waitingContext == null
+                || waitingContext.getRequiredUserActions() == null
+                || waitingContext.getRequiredUserActions().isEmpty()) {
+            return List.of();
+        }
+        return waitingContext.getRequiredUserActions().stream()
+                .map(this::buildActionExplanation)
+                .toList();
+    }
+
+    private RepairProposalResponse.ActionExplanation buildActionExplanation(RepairProposalRequest.RequiredUserAction action) {
+        RepairProposalResponse.ActionExplanation explanation = new RepairProposalResponse.ActionExplanation();
+        if (action == null) {
+            explanation.setKey("");
+            explanation.setMessage("Complete required action.");
+            return explanation;
+        }
+        explanation.setKey(action.getKey());
+        String label = action.getLabel();
+        if (label != null && !label.isBlank()) {
+            explanation.setMessage(ensurePeriod(label));
+            return explanation;
+        }
+        String key = action.getKey();
+        if (key != null && !key.isBlank()) {
+            explanation.setMessage("Complete action: " + key);
+            return explanation;
+        }
+        explanation.setMessage("Complete required action.");
+        return explanation;
+    }
+
+    private String ensurePeriod(String value) {
+        if (value.endsWith(".")) {
+            return value;
+        }
+        return value + ".";
     }
 }

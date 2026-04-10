@@ -43,15 +43,17 @@ final class ContractGovernanceAssembler {
         Map<String, Object> currentContractIdentity = detail.get("contract_identity") instanceof Map<?, ?> map
                 ? (Map<String, Object>) map
                 : Map.of();
+        if (currentContractIdentity.isEmpty()) {
+            currentContractIdentity = contractIdentityFromDetail(
+                    detail,
+                    "current_contract_version",
+                    "current_contract_fingerprint"
+            );
+        }
         String frozenVersion = objectStringValue(detail.get("frozen_contract_version"));
         String frozenFingerprint = objectStringValue(detail.get("frozen_contract_fingerprint"));
 
-        Map<String, Object> frozenContractIdentity = new LinkedHashMap<>();
-        frozenContractIdentity.put("contract_version", frozenVersion);
-        frozenContractIdentity.put("contract_fingerprint", frozenFingerprint);
-        frozenContractIdentity.put("contract_count", 0);
-        frozenContractIdentity.put("contract_names", List.of());
-        frozenContractIdentity.put("contract_present", !safeString(frozenVersion).isBlank() || !safeString(frozenFingerprint).isBlank());
+        Map<String, Object> frozenContractIdentity = contractIdentityFromValues(frozenVersion, frozenFingerprint);
 
         view.setFrozenContractSummary(toContractIdentityView(frozenContractIdentity));
         view.setCurrentContractSummary(toContractIdentityView(currentContractIdentity));
@@ -81,6 +83,27 @@ final class ContractGovernanceAssembler {
         view.setConsistency(toContractConsistencyView(consistency));
         view.setResumeContractEvaluation(toAuditResumeContractEvaluation(detail, frozenVersion, frozenFingerprint, currentVersion, currentFingerprint, mismatchCode));
         return view;
+    }
+
+    private static Map<String, Object> contractIdentityFromDetail(
+            Map<String, Object> detail,
+            String versionField,
+            String fingerprintField
+    ) {
+        return contractIdentityFromValues(
+                objectStringValue(detail.get(versionField)),
+                objectStringValue(detail.get(fingerprintField))
+        );
+    }
+
+    private static Map<String, Object> contractIdentityFromValues(String contractVersion, String contractFingerprint) {
+        Map<String, Object> contractIdentity = new LinkedHashMap<>();
+        contractIdentity.put("contract_version", contractVersion);
+        contractIdentity.put("contract_fingerprint", contractFingerprint);
+        contractIdentity.put("contract_count", 0);
+        contractIdentity.put("contract_names", List.of());
+        contractIdentity.put("contract_present", !safeString(contractVersion).isBlank() || !safeString(contractFingerprint).isBlank());
+        return contractIdentity;
     }
 
     private static ContractGovernanceView.ResumeContractEvaluationView toResumeContractEvaluation(

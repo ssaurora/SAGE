@@ -48,6 +48,9 @@ public class TaskAuditResponse {
         @JsonProperty("contract_governance")
         private ContractGovernanceView contractGovernance;
 
+        @JsonProperty("catalog_governance")
+        private CatalogGovernanceView catalogGovernance;
+
         public Long getId() {
             return id;
         }
@@ -102,6 +105,14 @@ public class TaskAuditResponse {
 
         public void setContractGovernance(ContractGovernanceView contractGovernance) {
             this.contractGovernance = contractGovernance;
+        }
+
+        public CatalogGovernanceView getCatalogGovernance() {
+            return catalogGovernance;
+        }
+
+        public void setCatalogGovernance(CatalogGovernanceView catalogGovernance) {
+            this.catalogGovernance = catalogGovernance;
         }
     }
 }

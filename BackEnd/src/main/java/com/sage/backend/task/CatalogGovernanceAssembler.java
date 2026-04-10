@@ -2,6 +2,7 @@ package com.sage.backend.task;
 
 import com.sage.backend.task.dto.CatalogGovernanceView;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -22,6 +23,62 @@ final class CatalogGovernanceAssembler {
         view.setCurrentCatalogSummary(toCatalogIdentityView(currentCatalogSummary));
         view.setConsistency(toCatalogConsistencyView(catalogConsistency));
         return view;
+    }
+
+    static CatalogGovernanceView buildAudit(Map<String, Object> detail, Map<String, Object> currentCatalogSummary) {
+        Map<String, Object> auditCatalogSummary = resolveAuditCatalogSummary(detail);
+        Map<String, Object> consistency = CatalogConsistencyProjector.buildFrozenCatalogConsistency(
+                "audit_catalog",
+                auditCatalogSummary,
+                currentCatalogSummary
+        );
+        return build("audit_catalog_governance", auditCatalogSummary, currentCatalogSummary, consistency);
+    }
+
+    private static Map<String, Object> resolveAuditCatalogSummary(Map<String, Object> detail) {
+        if (detail == null || detail.isEmpty()) {
+            return Map.of();
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> catalogSummary = detail.get("catalog_summary") instanceof Map<?, ?> map
+                ? (Map<String, Object>) map
+                : Map.of();
+        if (!catalogSummary.isEmpty()) {
+            return catalogSummary;
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> catalogIdentity = detail.get("catalog_identity") instanceof Map<?, ?> map
+                ? (Map<String, Object>) map
+                : Map.of();
+        if (!catalogIdentity.isEmpty()) {
+            return catalogIdentity;
+        }
+        Map<String, Object> candidateCatalogSummary = catalogSummaryFromPrefixedFields(detail, "candidate");
+        if (!candidateCatalogSummary.isEmpty()) {
+            return candidateCatalogSummary;
+        }
+        return catalogSummaryFromPrefixedFields(detail, "base");
+    }
+
+    private static Map<String, Object> catalogSummaryFromPrefixedFields(Map<String, Object> detail, String prefix) {
+        String prefixWithSeparator = prefix + "_";
+        Object inventoryVersion = detail.get(prefixWithSeparator + "catalog_inventory_version");
+        Object revision = detail.get(prefixWithSeparator + "catalog_revision");
+        Object fingerprint = detail.get(prefixWithSeparator + "catalog_fingerprint");
+        if (inventoryVersion == null && revision == null && fingerprint == null) {
+            return Map.of();
+        }
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("catalog_source", "audit_" + prefix + "_catalog_identity");
+        summary.put("catalog_inventory_version", inventoryVersion);
+        summary.put("catalog_revision", revision);
+        summary.put("catalog_fingerprint", fingerprint);
+        summary.put("catalog_asset_count", 0);
+        summary.put("catalog_ready_asset_count", 0);
+        summary.put("catalog_blacklisted_asset_count", 0);
+        summary.put("catalog_role_coverage_count", 0);
+        summary.put("catalog_ready_role_names", List.of());
+        return summary;
     }
 
     private static CatalogGovernanceView.CatalogIdentityView toCatalogIdentityView(Map<String, Object> summary) {

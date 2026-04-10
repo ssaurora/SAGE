@@ -7,6 +7,8 @@ import com.sage.backend.repair.dto.RepairProposalResponse;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -97,8 +99,10 @@ class RepairProposalServiceTest {
         RepairProposalService service = new RepairProposalService(client, fallbackService);
 
         RepairProposalResponse success = new RepairProposalResponse();
+        success.setAvailable(true);
         success.setUserFacingReason("typed reason");
         success.setResumeHint("typed hint");
+        success.setCognitionMetadata(Map.of("source", "mock"));
         when(client.generate(any())).thenReturn(success);
 
         RepairProposalRequest.WaitingContext waitingContext = new RepairProposalRequest.WaitingContext();

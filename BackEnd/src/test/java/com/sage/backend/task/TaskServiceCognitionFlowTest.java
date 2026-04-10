@@ -290,18 +290,18 @@ class TaskServiceCognitionFlowTest {
         assertEquals(1, response.getCatalogSummary().get("catalog_ready_asset_count"));
         assertEquals(List.of("precipitation"), response.getCatalogSummary().get("catalog_ready_role_names"));
         assertEquals("task_catalog_snapshot", response.getCatalogSummary().get("catalog_source"));
-        assertEquals("waiting_context", response.getCatalogConsistency().get("scope"));
-        assertEquals(false, response.getCatalogConsistency().get("waiting_context_catalog_present"));
+        assertEquals("waiting_context_catalog", response.getCatalogConsistency().get("scope"));
+        assertEquals(false, response.getCatalogConsistency().get("baseline_catalog_present"));
         assertEquals(List.of("precipitation"), response.getCatalogConsistency().get("stale_missing_slots"));
         assertEquals("task_contract", response.getContractConsistency().get("scope"));
-        assertEquals("FROZEN_CONTRACT_MISSING", response.getContractConsistency().get("mismatch_code"));
-        assertEquals("FROZEN_CONTRACT_MISSING", response.getContractConsistency().get("consistency_code"));
-        assertEquals("IDENTITY_INCOMPLETE", response.getContractConsistency().get("compatibility_code"));
-        assertEquals("REBUILD_FROZEN_CONTRACT_IDENTITY", response.getContractConsistency().get("migration_hint"));
+        assertEquals(null, response.getContractConsistency().get("mismatch_code"));
+        assertEquals("CONTRACT_MATCHED", response.getContractConsistency().get("consistency_code"));
+        assertEquals("COMPATIBLE", response.getContractConsistency().get("compatibility_code"));
+        assertEquals("NO_ACTION", response.getContractConsistency().get("migration_hint"));
         assertEquals("task_contract_governance", response.getContractGovernance().getScope());
-        assertEquals("IDENTITY_INCOMPLETE", response.getContractGovernance().getConsistency().getCompatibilityCode());
+        assertEquals("COMPATIBLE", response.getContractGovernance().getConsistency().getCompatibilityCode());
         assertEquals(true, response.getContractConsistency().get("current_contract_present"));
-        assertEquals(false, response.getContractConsistency().get("frozen_contract_present"));
+        assertEquals(true, response.getContractConsistency().get("frozen_contract_present"));
         assertEquals("water_yield_contracts_v1", response.getContractConsistency().get("current_contract_version"));
     }
 

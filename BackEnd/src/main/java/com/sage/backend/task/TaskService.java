@@ -873,7 +873,9 @@ public class TaskService {
     }
 
     public TaskAuditResponse getTaskAudit(String taskId, Long userId) {
-        getOwnedTask(taskId, userId);
+        TaskState taskState = getOwnedTask(taskId, userId);
+        List<TaskAttachment> attachments = taskAttachmentMapper.findByTaskId(taskId);
+        Map<String, Object> currentCatalogSummary = buildCatalogSummary(taskId, attachments, taskState);
         TaskAuditResponse response = new TaskAuditResponse();
         response.setTaskId(taskId);
         for (AuditRecord auditRecord : auditService.findByTaskId(taskId)) {
@@ -886,6 +888,7 @@ public class TaskService {
             Map<String, Object> detail = readJsonMap(auditRecord.getDetailJson());
             item.setDetail(detail == null ? Map.of() : detail);
             item.setContractGovernance(ContractGovernanceAssembler.buildAudit(detail));
+            item.setCatalogGovernance(CatalogGovernanceAssembler.buildAudit(detail, currentCatalogSummary));
             response.getItems().add(item);
         }
         return response;
@@ -1229,8 +1232,8 @@ public class TaskService {
         );
 
         Map<String, Object> currentCatalogSummary = waitingState.waitingContext().getCatalogSummary();
+        CatalogConsistencyProjector.CatalogIdentity currentCatalogIdentity = CatalogConsistencyProjector.catalogIdentity(currentCatalogSummary);
         int candidateCatalogRevision = taskState.getInventoryVersion() == null ? 0 : taskState.getInventoryVersion() + 1;
-        String currentCatalogFingerprint = AttachmentCatalogProjector.extractCatalogFingerprint(currentCatalogSummary);
 
         String resumeTxnJson = writeJson(buildResumeTransactionPayload(
                 resumeRequestId,
@@ -1238,12 +1241,12 @@ public class TaskService {
                 taskState.getCheckpointVersion(),
                 taskState.getCheckpointVersion() == null ? 1 : taskState.getCheckpointVersion() + 1,
                 taskState.getInventoryVersion() == null ? 0 : taskState.getInventoryVersion() + 1,
-                AttachmentCatalogProjector.extractCatalogInventoryVersion(currentCatalogSummary),
-                AttachmentCatalogProjector.extractCatalogRevision(currentCatalogSummary),
-                currentCatalogFingerprint,
+                currentCatalogIdentity.inventoryVersion(),
+                currentCatalogIdentity.revision(),
+                currentCatalogIdentity.fingerprint(),
                 taskState.getInventoryVersion() == null ? 0 : taskState.getInventoryVersion() + 1,
                 candidateCatalogRevision,
-                currentCatalogFingerprint,
+                currentCatalogIdentity.fingerprint(),
                 null,
                 newAttemptNo,
                 null,
@@ -1347,8 +1350,7 @@ public class TaskService {
         }
 
         Map<String, Object> currentCatalogSummary = buildCatalogSummary(taskId, taskState);
-        String currentCatalogFingerprint = AttachmentCatalogProjector.extractCatalogFingerprint(currentCatalogSummary);
-        Integer currentCatalogRevision = AttachmentCatalogProjector.extractCatalogRevision(currentCatalogSummary);
+        CatalogConsistencyProjector.CatalogIdentity currentCatalogIdentity = CatalogConsistencyProjector.catalogIdentity(currentCatalogSummary);
 
         String resumeTxnJson = writeJson(buildResumeTransactionPayload(
                 request.getRequestId(),
@@ -1356,12 +1358,12 @@ public class TaskService {
                 taskState.getCheckpointVersion(),
                 manifest.getCheckpointVersion(),
                 currentInventoryVersion(taskState),
-                AttachmentCatalogProjector.extractCatalogInventoryVersion(currentCatalogSummary),
-                currentCatalogRevision,
-                currentCatalogFingerprint,
+                currentCatalogIdentity.inventoryVersion(),
+                currentCatalogIdentity.revision(),
+                currentCatalogIdentity.fingerprint(),
                 currentInventoryVersion(taskState),
-                currentCatalogRevision,
-                currentCatalogFingerprint,
+                currentCatalogIdentity.revision(),
+                currentCatalogIdentity.fingerprint(),
                 manifest.getManifestId(),
                 manifest.getAttemptNo(),
                 null,
@@ -1708,9 +1710,10 @@ public class TaskService {
         int candidateCheckpointVersion = baseCheckpointVersion + 1;
         int candidateInventoryVersion = nextResumeInventoryVersion(taskState);
         Map<String, Object> currentCatalogSummary = buildCatalogSummary(taskId, taskState);
-        Integer baseCatalogInventoryVersion = AttachmentCatalogProjector.extractCatalogInventoryVersion(currentCatalogSummary);
-        Integer baseCatalogRevision = AttachmentCatalogProjector.extractCatalogRevision(currentCatalogSummary);
-        String baseCatalogFingerprint = AttachmentCatalogProjector.extractCatalogFingerprint(currentCatalogSummary);
+        CatalogConsistencyProjector.CatalogIdentity baseCatalogIdentity = CatalogConsistencyProjector.catalogIdentity(currentCatalogSummary);
+        Integer baseCatalogInventoryVersion = baseCatalogIdentity.inventoryVersion();
+        Integer baseCatalogRevision = baseCatalogIdentity.revision();
+        String baseCatalogFingerprint = baseCatalogIdentity.fingerprint();
         Integer candidateCatalogRevision = candidateInventoryVersion;
         String candidateCatalogFingerprint = baseCatalogFingerprint;
         PreparedJobSubmission preparedSubmission = null;
@@ -2928,18 +2931,19 @@ public class TaskService {
     ) throws Exception {
         String taskId = taskState.getTaskId();
         Map<String, Object> currentCatalogSummary = buildCatalogSummary(taskId, taskState);
+        CatalogConsistencyProjector.CatalogIdentity currentCatalogIdentity = CatalogConsistencyProjector.catalogIdentity(currentCatalogSummary);
         String rolledBackTxn = writeJson(buildResumeTransactionPayload(
                 request.getResumeRequestId(),
                 "ROLLED_BACK",
                 baseCheckpointVersion,
                 candidateCheckpointVersion,
                 candidateInventoryVersion,
-                AttachmentCatalogProjector.extractCatalogInventoryVersion(currentCatalogSummary),
-                AttachmentCatalogProjector.extractCatalogRevision(currentCatalogSummary),
-                AttachmentCatalogProjector.extractCatalogFingerprint(currentCatalogSummary),
+                currentCatalogIdentity.inventoryVersion(),
+                currentCatalogIdentity.revision(),
+                currentCatalogIdentity.fingerprint(),
                 candidateInventoryVersion,
                 candidateInventoryVersion,
-                AttachmentCatalogProjector.extractCatalogFingerprint(currentCatalogSummary),
+                currentCatalogIdentity.fingerprint(),
                 null,
                 resolveActiveAttemptNo(taskState),
                 null,

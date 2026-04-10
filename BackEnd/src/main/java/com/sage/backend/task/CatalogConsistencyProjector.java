@@ -23,37 +23,44 @@ final class CatalogConsistencyProjector {
         Map<String, Object> consistency = new LinkedHashMap<>();
         boolean baselinePresent = baselineCatalogSummary != null && !baselineCatalogSummary.isEmpty();
         boolean currentPresent = currentCatalogSummary != null && !currentCatalogSummary.isEmpty();
-        Integer baselineInventoryVersion = AttachmentCatalogProjector.extractCatalogInventoryVersion(baselineCatalogSummary);
-        Integer baselineRevision = AttachmentCatalogProjector.extractCatalogRevision(baselineCatalogSummary);
-        String baselineFingerprint = AttachmentCatalogProjector.extractCatalogFingerprint(baselineCatalogSummary);
-        Integer currentInventoryVersion = AttachmentCatalogProjector.extractCatalogInventoryVersion(currentCatalogSummary);
-        Integer currentRevision = AttachmentCatalogProjector.extractCatalogRevision(currentCatalogSummary);
-        String currentFingerprint = AttachmentCatalogProjector.extractCatalogFingerprint(currentCatalogSummary);
+        CatalogIdentity baselineIdentity = catalogIdentity(baselineCatalogSummary);
+        CatalogIdentity currentIdentity = catalogIdentity(currentCatalogSummary);
         boolean matches = baselinePresent && currentPresent && AttachmentCatalogProjector.sameCatalogIdentity(baselineCatalogSummary, currentCatalogSummary);
         String mismatchCode = determineCatalogMismatchCode(
                 baselinePresent,
                 currentPresent,
-                baselineRevision,
-                baselineFingerprint,
-                currentRevision,
-                currentFingerprint
+                baselineIdentity.revision(),
+                baselineIdentity.fingerprint(),
+                currentIdentity.revision(),
+                currentIdentity.fingerprint()
         );
         consistency.put("scope", safeString(scope));
         consistency.put("baseline_catalog_present", baselinePresent);
         consistency.put("current_catalog_present", currentPresent);
         consistency.put("baseline_catalog_source", baselinePresent ? safeString(stringValue(baselineCatalogSummary.get("catalog_source"))) : "");
-        consistency.put("baseline_catalog_inventory_version", baselineInventoryVersion);
-        consistency.put("baseline_catalog_revision", baselineRevision);
-        consistency.put("baseline_catalog_fingerprint", baselineFingerprint);
+        consistency.put("baseline_catalog_inventory_version", baselineIdentity.inventoryVersion());
+        consistency.put("baseline_catalog_revision", baselineIdentity.revision());
+        consistency.put("baseline_catalog_fingerprint", baselineIdentity.fingerprint());
         consistency.put("current_catalog_source", currentPresent ? safeString(stringValue(currentCatalogSummary.get("catalog_source"))) : "");
-        consistency.put("current_catalog_inventory_version", currentInventoryVersion);
-        consistency.put("current_catalog_revision", currentRevision);
-        consistency.put("current_catalog_fingerprint", currentFingerprint);
+        consistency.put("current_catalog_inventory_version", currentIdentity.inventoryVersion());
+        consistency.put("current_catalog_revision", currentIdentity.revision());
+        consistency.put("current_catalog_fingerprint", currentIdentity.fingerprint());
         consistency.put("matches_current_catalog", matches);
         consistency.put("drift_detected", baselinePresent && currentPresent && !matches);
         consistency.put("mismatch_code", mismatchCode);
         consistency.put("consistency_code", matches ? "CATALOG_MATCHED" : mismatchCode);
         return consistency;
+    }
+
+    static CatalogIdentity catalogIdentity(Map<String, Object> catalogSummary) {
+        return new CatalogIdentity(
+                AttachmentCatalogProjector.extractCatalogInventoryVersion(catalogSummary),
+                AttachmentCatalogProjector.extractCatalogRevision(catalogSummary),
+                AttachmentCatalogProjector.extractCatalogFingerprint(catalogSummary)
+        );
+    }
+
+    record CatalogIdentity(Integer inventoryVersion, Integer revision, String fingerprint) {
     }
 
     static Map<String, Object> buildDetailCatalogConsistency(
