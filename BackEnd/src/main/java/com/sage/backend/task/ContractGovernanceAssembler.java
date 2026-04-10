@@ -85,6 +85,24 @@ final class ContractGovernanceAssembler {
         return view;
     }
 
+    static boolean hasAuditContractEvidence(Map<String, Object> detail) {
+        if (detail == null || detail.isEmpty()) {
+            return false;
+        }
+        if (detail.get("contract_identity") instanceof Map<?, ?> map && !map.isEmpty()) {
+            return true;
+        }
+        if (!safeString(objectStringValue(detail.get("frozen_contract_version"))).isBlank()
+                || !safeString(objectStringValue(detail.get("frozen_contract_fingerprint"))).isBlank()
+                || !safeString(objectStringValue(detail.get("current_contract_version"))).isBlank()
+                || !safeString(objectStringValue(detail.get("current_contract_fingerprint"))).isBlank()) {
+            return true;
+        }
+        String mismatchCode = safeString(objectStringValue(detail.get("mismatch_code")));
+        String failureCode = safeString(objectStringValue(detail.get("failure_code")));
+        return mismatchCode.startsWith("CONTRACT_") || failureCode.startsWith("CONTRACT_");
+    }
+
     private static Map<String, Object> contractIdentityFromDetail(
             Map<String, Object> detail,
             String versionField,

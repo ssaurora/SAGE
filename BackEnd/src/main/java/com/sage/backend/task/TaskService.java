@@ -58,6 +58,7 @@ import com.sage.backend.task.dto.TaskDetailResponse;
 import com.sage.backend.task.dto.TaskArtifactsResponse;
 import com.sage.backend.task.dto.TaskAuditResponse;
 import com.sage.backend.task.dto.TaskCatalogResponse;
+import com.sage.backend.task.dto.TaskContractResponse;
 import com.sage.backend.task.dto.TaskEventsResponse;
 import com.sage.backend.task.dto.TaskManifestResponse;
 import com.sage.backend.task.dto.TaskResultResponse;
@@ -933,6 +934,53 @@ public class TaskService {
             item.setTraceId(auditRecord.getTraceId());
             item.setCreatedAt(auditRecord.getCreatedAt() == null ? null : auditRecord.getCreatedAt().toString());
             item.setCatalogGovernance(CatalogGovernanceAssembler.buildAudit(detail, currentCatalogSummary));
+            response.getAuditItems().add(item);
+        }
+        return response;
+    }
+
+    public TaskContractResponse getTaskContract(String taskId, Long userId) {
+        TaskState taskState = getOwnedTask(taskId, userId);
+        AnalysisManifest activeManifest = resolveActiveManifest(taskState);
+        JsonNode pass1Projection = readJsonNode(taskState.getPass1ResultJson());
+        Map<String, Object> manifestContractSummary = readJsonMap(activeManifest == null ? null : activeManifest.getContractSummaryJson());
+        Map<String, Object> frozenContractSummary = ContractConsistencyProjector.resolveManifestContractSummary(
+                manifestContractSummary,
+                pass1Projection
+        );
+        Map<String, Object> currentContractSummary = ContractConsistencyProjector.buildContractSummary(pass1Projection);
+        ResumeTransactionView resumeTransaction = TaskProjectionBuilder.buildResumeTransaction(readJsonNode(taskState.getResumeTxnJson()));
+        Map<String, Object> contractConsistency = ContractConsistencyProjector.buildDetailContractConsistency(
+                frozenContractSummary,
+                currentContractSummary,
+                resumeTransaction
+        );
+
+        TaskContractResponse response = new TaskContractResponse();
+        response.setTaskId(taskId);
+        response.setFrozenContractSummary(frozenContractSummary);
+        response.setCurrentContractSummary(currentContractSummary);
+        response.setActiveManifest(buildManifestContractView(activeManifest, manifestContractSummary));
+        response.setContractGovernance(ContractGovernanceAssembler.build(
+                "task_contract_query_governance",
+                frozenContractSummary,
+                currentContractSummary,
+                contractConsistency,
+                resumeTransaction
+        ));
+
+        for (AuditRecord auditRecord : auditService.findByTaskId(taskId)) {
+            Map<String, Object> detail = readJsonMap(auditRecord.getDetailJson());
+            if (!ContractGovernanceAssembler.hasAuditContractEvidence(detail)) {
+                continue;
+            }
+            TaskContractResponse.AuditContractItem item = new TaskContractResponse.AuditContractItem();
+            item.setId(auditRecord.getId());
+            item.setActionType(auditRecord.getActionType());
+            item.setActionResult(auditRecord.getActionResult());
+            item.setTraceId(auditRecord.getTraceId());
+            item.setCreatedAt(auditRecord.getCreatedAt() == null ? null : auditRecord.getCreatedAt().toString());
+            item.setContractGovernance(ContractGovernanceAssembler.buildAudit(detail));
             response.getAuditItems().add(item);
         }
         return response;
@@ -3878,6 +3926,21 @@ public class TaskService {
         view.setCatalogSource(snapshot.getCatalogSource());
         view.setCreatedAt(snapshot.getCreatedAt() == null ? null : snapshot.getCreatedAt().toString());
         view.setCatalogSummary(catalogSummary);
+        return view;
+    }
+
+    private TaskContractResponse.ManifestContractView buildManifestContractView(
+            AnalysisManifest manifest,
+            Map<String, Object> contractSummary
+    ) {
+        if (manifest == null) {
+            return null;
+        }
+        TaskContractResponse.ManifestContractView view = new TaskContractResponse.ManifestContractView();
+        view.setManifestId(manifest.getManifestId());
+        view.setManifestVersion(manifest.getManifestVersion());
+        view.setFreezeStatus(manifest.getFreezeStatus());
+        view.setContractSummary(contractSummary);
         return view;
     }
 

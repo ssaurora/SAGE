@@ -44,6 +44,7 @@ import com.sage.backend.task.dto.ResumeTaskResponse;
 import com.sage.backend.task.dto.UploadAttachmentResponse;
 import com.sage.backend.task.dto.TaskDetailResponse;
 import com.sage.backend.task.dto.TaskCatalogResponse;
+import com.sage.backend.task.dto.TaskContractResponse;
 import com.sage.backend.task.dto.TaskManifestResponse;
 import com.sage.backend.task.dto.TaskResultResponse;
 import com.sage.backend.validationgate.ValidationClient;
@@ -622,6 +623,75 @@ class TaskServiceGovernanceTest {
         assertEquals("resume_catalog_query_audit", response.getAuditItems().get(0).getTraceId());
         assertEquals("CATALOG_REVISION_MISMATCH", response.getAuditItems().get(0).getCatalogGovernance().getConsistency().getMismatchCode());
         assertEquals(true, response.getAuditItems().get(0).getCatalogGovernance().getConsistency().getDriftDetected());
+    }
+
+    @Test
+    void getTaskContractProjectsQueryGovernanceManifestAndContractAuditItems() throws Exception {
+        Harness harness = new Harness(objectMapper);
+        TaskState taskState = succeededTaskState();
+        taskState.setPass1ResultJson(objectMapper.writeValueAsString(objectMapper.readTree(samplePass1Json())));
+        taskState.setResumeTxnJson("""
+                {
+                  "resume_request_id": "resume_contract_query",
+                  "status": "CORRUPTED",
+                  "failure_code": "CONTRACT_VERSION_MISMATCH",
+                  "base_contract_version": "water_yield_contracts_v1",
+                  "base_contract_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "candidate_contract_version": "water_yield_contracts_v2",
+                  "candidate_contract_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                }
+                """);
+        AnalysisManifest manifest = legacyManifest();
+        manifest.setContractSummaryJson(objectMapper.writeValueAsString(Map.of(
+                "contract_version", "water_yield_contracts_v1",
+                "contract_fingerprint", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "contract_count", 1,
+                "contract_names", List.of("submit_job"),
+                "contract_present", true
+        )));
+        AuditRecord contractAudit = new AuditRecord();
+        contractAudit.setId(15L);
+        contractAudit.setTaskId("task_legacy");
+        contractAudit.setActionType("TASK_RESUME");
+        contractAudit.setActionResult("REJECTED");
+        contractAudit.setTraceId("resume_contract_query_audit");
+        contractAudit.setCreatedAt(OffsetDateTime.of(2026, 4, 5, 0, 30, 0, 0, ZoneOffset.UTC));
+        contractAudit.setDetailJson(objectMapper.writeValueAsString(Map.of(
+                "frozen_contract_version", "water_yield_contracts_v1",
+                "frozen_contract_fingerprint", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "current_contract_version", "water_yield_contracts_v2",
+                "current_contract_fingerprint", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "failure_code", "CONTRACT_VERSION_MISMATCH",
+                "mismatch_code", "CONTRACT_VERSION_MISMATCH",
+                "compatibility_code", "INCOMPATIBLE",
+                "migration_hint", "REGENERATE_PASS1_AND_REFREEZE"
+        )));
+        AuditRecord nonContractAudit = new AuditRecord();
+        nonContractAudit.setId(16L);
+        nonContractAudit.setTaskId("task_legacy");
+        nonContractAudit.setActionType("TASK_CANCEL");
+        nonContractAudit.setActionResult("FAILED");
+        nonContractAudit.setTraceId("no_contract");
+        nonContractAudit.setDetailJson(objectMapper.writeValueAsString(Map.of("failure_code", "CANCEL_FAILED")));
+
+        when(harness.taskStateMapper.findByTaskId("task_legacy")).thenReturn(taskState);
+        when(harness.analysisManifestMapper.findByManifestId("manifest_legacy")).thenReturn(manifest);
+        when(harness.auditService.findByTaskId("task_legacy")).thenReturn(List.of(contractAudit, nonContractAudit));
+
+        TaskContractResponse response = harness.service.getTaskContract("task_legacy", 42L);
+
+        assertEquals("task_legacy", response.getTaskId());
+        assertEquals("water_yield_contracts_v1", response.getFrozenContractSummary().get("contract_version"));
+        assertEquals("water_yield_contracts_v1", response.getActiveManifest().getContractSummary().get("contract_version"));
+        assertEquals("manifest_legacy", response.getActiveManifest().getManifestId());
+        assertEquals("task_contract_query_governance", response.getContractGovernance().getScope());
+        assertEquals("CONTRACT_FINGERPRINT_MISMATCH", response.getContractGovernance().getConsistency().getMismatchCode());
+        assertEquals("CONTRACT_VERSION_MISMATCH", response.getContractGovernance().getResumeContractEvaluation().getMismatchCode());
+        assertEquals("INCOMPATIBLE", response.getContractGovernance().getResumeContractEvaluation().getCompatibilityCode());
+        assertEquals(1, response.getAuditItems().size());
+        assertEquals("resume_contract_query_audit", response.getAuditItems().get(0).getTraceId());
+        assertEquals("CONTRACT_VERSION_MISMATCH", response.getAuditItems().get(0).getContractGovernance().getConsistency().getMismatchCode());
+        assertEquals("REGENERATE_PASS1_AND_REFREEZE", response.getAuditItems().get(0).getContractGovernance().getResumeContractEvaluation().getMigrationHint());
     }
 
     @Test
