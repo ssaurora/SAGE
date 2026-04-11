@@ -653,10 +653,14 @@ class TaskServiceCognitionFlowTest {
         private final RepairProposalService repairProposalService = mock(RepairProposalService.class);
         private final RegistryService registryService = mock(RegistryService.class);
         private final WorkspaceTraceService workspaceTraceService = mock(WorkspaceTraceService.class);
+        private final TaskCatalogQueryService taskCatalogQueryService;
+        private final TaskContractQueryService taskContractQueryService;
         private final TaskService service;
 
         private Harness(ObjectMapper objectMapper) {
             this.taskCatalogSnapshotService = new TaskCatalogSnapshotService(taskCatalogSnapshotMapper, objectMapper);
+            this.taskCatalogQueryService = new TaskCatalogQueryService(taskCatalogSnapshotService, objectMapper);
+            this.taskContractQueryService = new TaskContractQueryService(objectMapper);
             when(taskStateMapper.insert(any())).thenReturn(1);
             when(taskStateMapper.updateState(anyString(), anyInt(), anyString())).thenReturn(1);
             when(taskStateMapper.updateGoalAndRoute(anyString(), anyString(), anyString())).thenReturn(1);
@@ -696,6 +700,8 @@ class TaskServiceCognitionFlowTest {
                     new ExecutionContractAssembler(objectMapper),
                     registryService,
                     workspaceTraceService,
+                    taskCatalogQueryService,
+                    taskContractQueryService,
                     objectMapper,
                     "BackEnd/runtime/test-uploads"
             );

@@ -37,7 +37,6 @@ import com.sage.backend.model.JobState;
 import com.sage.backend.model.RepairRecord;
 import com.sage.backend.model.TaskAttachment;
 import com.sage.backend.model.TaskAttempt;
-import com.sage.backend.model.TaskCatalogSnapshot;
 import com.sage.backend.model.TaskState;
 import com.sage.backend.model.TaskStatus;
 import com.sage.backend.planning.Pass1Client;
@@ -139,6 +138,8 @@ public class TaskService {
     private final ExecutionContractAssembler executionContractAssembler;
     private final RegistryService registryService;
     private final WorkspaceTraceService workspaceTraceService;
+    private final TaskCatalogQueryService taskCatalogQueryService;
+    private final TaskContractQueryService taskContractQueryService;
     private final ObjectMapper objectMapper;
     private final Path uploadRoot;
     private final ExecutorService streamExecutor = Executors.newCachedThreadPool();
@@ -167,6 +168,8 @@ public class TaskService {
             ExecutionContractAssembler executionContractAssembler,
             RegistryService registryService,
             WorkspaceTraceService workspaceTraceService,
+            TaskCatalogQueryService taskCatalogQueryService,
+            TaskContractQueryService taskContractQueryService,
             ObjectMapper objectMapper,
             @Value("${sage.upload.root:BackEnd/runtime/uploads}") String uploadRoot
     ) {
@@ -193,6 +196,8 @@ public class TaskService {
         this.executionContractAssembler = executionContractAssembler;
         this.registryService = registryService;
         this.workspaceTraceService = workspaceTraceService;
+        this.taskCatalogQueryService = taskCatalogQueryService;
+        this.taskContractQueryService = taskContractQueryService;
         this.objectMapper = objectMapper;
         this.uploadRoot = Path.of(uploadRoot).toAbsolutePath().normalize();
     }
@@ -900,90 +905,23 @@ public class TaskService {
     public TaskCatalogResponse getTaskCatalog(String taskId, Long userId) {
         TaskState taskState = getOwnedTask(taskId, userId);
         List<TaskAttachment> attachments = taskAttachmentMapper.findByTaskId(taskId);
-        Map<String, Object> currentCatalogSummary = buildCatalogSummary(taskId, attachments, taskState);
-        TaskCatalogResponse response = new TaskCatalogResponse();
-        response.setTaskId(taskId);
-        response.setInventoryVersion(currentInventoryVersion(taskState));
-        response.setCatalogSummary(currentCatalogSummary);
-        response.setCatalogFacts(AttachmentCatalogProjector.project(attachments));
-
-        TaskCatalogSnapshot latestSnapshot = taskCatalogSnapshotService.findLatestCatalogSnapshot(taskId);
-        Map<String, Object> latestSnapshotSummary = readJsonMap(latestSnapshot == null ? null : latestSnapshot.getCatalogSummaryJson());
-        response.setLatestSnapshot(buildCatalogSnapshotView(latestSnapshot, latestSnapshotSummary));
-        Map<String, Object> queryCatalogConsistency = CatalogConsistencyProjector.buildFrozenCatalogConsistency(
-                "task_catalog_query",
-                latestSnapshotSummary,
-                currentCatalogSummary
+        return taskCatalogQueryService.buildTaskCatalogResponse(
+                taskId,
+                taskState,
+                attachments,
+                auditService.findByTaskId(taskId)
         );
-        response.setCatalogGovernance(CatalogGovernanceAssembler.build(
-                "task_catalog_query_governance",
-                latestSnapshotSummary,
-                currentCatalogSummary,
-                queryCatalogConsistency
-        ));
-
-        for (AuditRecord auditRecord : auditService.findByTaskId(taskId)) {
-            Map<String, Object> detail = readJsonMap(auditRecord.getDetailJson());
-            if (!CatalogGovernanceAssembler.hasAuditCatalogEvidence(detail)) {
-                continue;
-            }
-            TaskCatalogResponse.AuditCatalogItem item = new TaskCatalogResponse.AuditCatalogItem();
-            item.setId(auditRecord.getId());
-            item.setActionType(auditRecord.getActionType());
-            item.setActionResult(auditRecord.getActionResult());
-            item.setTraceId(auditRecord.getTraceId());
-            item.setCreatedAt(auditRecord.getCreatedAt() == null ? null : auditRecord.getCreatedAt().toString());
-            item.setCatalogGovernance(CatalogGovernanceAssembler.buildAudit(detail, currentCatalogSummary));
-            response.getAuditItems().add(item);
-        }
-        return response;
     }
 
     public TaskContractResponse getTaskContract(String taskId, Long userId) {
         TaskState taskState = getOwnedTask(taskId, userId);
         AnalysisManifest activeManifest = resolveActiveManifest(taskState);
-        JsonNode pass1Projection = readJsonNode(taskState.getPass1ResultJson());
-        Map<String, Object> manifestContractSummary = readJsonMap(activeManifest == null ? null : activeManifest.getContractSummaryJson());
-        Map<String, Object> frozenContractSummary = ContractConsistencyProjector.resolveManifestContractSummary(
-                manifestContractSummary,
-                pass1Projection
+        return taskContractQueryService.buildTaskContractResponse(
+                taskId,
+                taskState,
+                activeManifest,
+                auditService.findByTaskId(taskId)
         );
-        Map<String, Object> currentContractSummary = ContractConsistencyProjector.buildContractSummary(pass1Projection);
-        ResumeTransactionView resumeTransaction = TaskProjectionBuilder.buildResumeTransaction(readJsonNode(taskState.getResumeTxnJson()));
-        Map<String, Object> contractConsistency = ContractConsistencyProjector.buildDetailContractConsistency(
-                frozenContractSummary,
-                currentContractSummary,
-                resumeTransaction
-        );
-
-        TaskContractResponse response = new TaskContractResponse();
-        response.setTaskId(taskId);
-        response.setFrozenContractSummary(frozenContractSummary);
-        response.setCurrentContractSummary(currentContractSummary);
-        response.setActiveManifest(buildManifestContractView(activeManifest, manifestContractSummary));
-        response.setContractGovernance(ContractGovernanceAssembler.build(
-                "task_contract_query_governance",
-                frozenContractSummary,
-                currentContractSummary,
-                contractConsistency,
-                resumeTransaction
-        ));
-
-        for (AuditRecord auditRecord : auditService.findByTaskId(taskId)) {
-            Map<String, Object> detail = readJsonMap(auditRecord.getDetailJson());
-            if (!ContractGovernanceAssembler.hasAuditContractEvidence(detail)) {
-                continue;
-            }
-            TaskContractResponse.AuditContractItem item = new TaskContractResponse.AuditContractItem();
-            item.setId(auditRecord.getId());
-            item.setActionType(auditRecord.getActionType());
-            item.setActionResult(auditRecord.getActionResult());
-            item.setTraceId(auditRecord.getTraceId());
-            item.setCreatedAt(auditRecord.getCreatedAt() == null ? null : auditRecord.getCreatedAt().toString());
-            item.setContractGovernance(ContractGovernanceAssembler.buildAudit(detail));
-            response.getAuditItems().add(item);
-        }
-        return response;
     }
 
     public TaskManifestResponse getTaskManifest(String taskId, Long userId) {
@@ -3909,39 +3847,6 @@ public class TaskService {
 
     private Map<String, Object> buildCatalogSummary(String taskId, List<TaskAttachment> attachments, TaskState taskState) {
         return taskCatalogSnapshotService.resolveCatalogSummary(taskId, attachments, currentInventoryVersion(taskState));
-    }
-
-    private TaskCatalogResponse.SnapshotView buildCatalogSnapshotView(
-            TaskCatalogSnapshot snapshot,
-            Map<String, Object> catalogSummary
-    ) {
-        if (snapshot == null) {
-            return null;
-        }
-        TaskCatalogResponse.SnapshotView view = new TaskCatalogResponse.SnapshotView();
-        view.setId(snapshot.getId());
-        view.setInventoryVersion(snapshot.getInventoryVersion());
-        view.setCatalogRevision(snapshot.getCatalogRevision());
-        view.setCatalogFingerprint(snapshot.getCatalogFingerprint());
-        view.setCatalogSource(snapshot.getCatalogSource());
-        view.setCreatedAt(snapshot.getCreatedAt() == null ? null : snapshot.getCreatedAt().toString());
-        view.setCatalogSummary(catalogSummary);
-        return view;
-    }
-
-    private TaskContractResponse.ManifestContractView buildManifestContractView(
-            AnalysisManifest manifest,
-            Map<String, Object> contractSummary
-    ) {
-        if (manifest == null) {
-            return null;
-        }
-        TaskContractResponse.ManifestContractView view = new TaskContractResponse.ManifestContractView();
-        view.setManifestId(manifest.getManifestId());
-        view.setManifestVersion(manifest.getManifestVersion());
-        view.setFreezeStatus(manifest.getFreezeStatus());
-        view.setContractSummary(contractSummary);
-        return view;
     }
 
     private Map<String, Object> resolveManifestCatalogSummary(

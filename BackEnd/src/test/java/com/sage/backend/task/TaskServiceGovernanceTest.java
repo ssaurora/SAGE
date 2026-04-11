@@ -1480,10 +1480,14 @@ class TaskServiceGovernanceTest {
         private final RepairProposalService repairProposalService = mock(RepairProposalService.class);
         private final RegistryService registryService = mock(RegistryService.class);
         private final WorkspaceTraceService workspaceTraceService = mock(WorkspaceTraceService.class);
+        private final TaskCatalogQueryService taskCatalogQueryService;
+        private final TaskContractQueryService taskContractQueryService;
         private final TaskService service;
 
         private Harness(ObjectMapper objectMapper) {
             this.taskCatalogSnapshotService = new TaskCatalogSnapshotService(taskCatalogSnapshotMapper, objectMapper);
+            this.taskCatalogQueryService = new TaskCatalogQueryService(taskCatalogSnapshotService, objectMapper);
+            this.taskContractQueryService = new TaskContractQueryService(objectMapper);
             when(taskAttachmentMapper.findByTaskId(anyString())).thenReturn(List.of());
             when(taskCatalogSnapshotMapper.findByTaskIdAndInventoryVersion(anyString(), anyInt())).thenReturn(null);
             when(taskCatalogSnapshotMapper.insert(any())).thenReturn(1);
@@ -1527,6 +1531,8 @@ class TaskServiceGovernanceTest {
                     new ExecutionContractAssembler(objectMapper),
                     registryService,
                     workspaceTraceService,
+                    taskCatalogQueryService,
+                    taskContractQueryService,
                     objectMapper,
                     "BackEnd/runtime/test-uploads"
             );
