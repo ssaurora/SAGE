@@ -86,16 +86,7 @@ public class TaskManifestQueryService {
         );
         response.setCaseProjection(TaskProjectionBuilder.buildCaseProjection(goalParseRoot, passBRoot, objectMapper));
         TaskQuerySupport.applyStageProjection(response, goalParseRoot, skillRouteRoot, passBRoot, objectMapper);
-
-        JsonNode pass2Root = TaskQuerySupport.readJsonNode(taskState.getPass2ResultJson(), objectMapper);
-        response.setCanonicalizationSummary(TaskProjectionBuilder.buildJsonObjectView(
-                pass2Root == null ? null : pass2Root.path("canonicalization_summary"),
-                objectMapper
-        ));
-        response.setRewriteSummary(TaskProjectionBuilder.buildJsonObjectView(
-                pass2Root == null ? null : pass2Root.path("rewrite_summary"),
-                objectMapper
-        ));
+        TaskQuerySupport.applyManifestPass2Projection(response, taskState, objectMapper);
 
         JsonNode pass1Projection = TaskQuerySupport.readJsonNode(taskState.getPass1ResultJson(), objectMapper);
         TaskQuerySupport.ContractProjection contractProjection = TaskQuerySupport.buildFrozenContractProjection(
@@ -153,16 +144,8 @@ public class TaskManifestQueryService {
         ));
         response.setCreatedAt(manifest.getCreatedAt() == null ? null : manifest.getCreatedAt().toString());
 
-        if (latestRepair != null) {
-            JsonNode repairProposalNode = TaskQuerySupport.readJsonNode(latestRepair.getRepairProposalJson(), objectMapper);
-            response.setRepairProposalCognition(TaskProjectionBuilder.buildCognitionView(repairProposalNode, objectMapper));
-            response.setRepairProposalOutput(TaskProjectionBuilder.buildStageOutput(repairProposalNode, objectMapper));
-        }
-        if (jobRecord != null) {
-            JsonNode finalExplanationNode = TaskQuerySupport.readJsonNode(jobRecord.getFinalExplanationJson(), objectMapper);
-            response.setFinalExplanationCognition(TaskProjectionBuilder.buildCognitionView(finalExplanationNode, objectMapper));
-            response.setFinalExplanationOutput(TaskProjectionBuilder.buildStageOutput(finalExplanationNode, objectMapper));
-        }
+        TaskQuerySupport.applyRepairProjection(response, latestRepair, objectMapper);
+        TaskQuerySupport.applyFinalExplanationProjection(response, jobRecord, objectMapper);
         return response;
     }
 }

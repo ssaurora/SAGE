@@ -3,6 +3,8 @@ package com.sage.backend.task;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sage.backend.model.AnalysisManifest;
+import com.sage.backend.model.JobRecord;
+import com.sage.backend.model.RepairRecord;
 import com.sage.backend.model.TaskAttachment;
 import com.sage.backend.model.TaskState;
 import com.sage.backend.model.TaskStatus;
@@ -249,6 +251,186 @@ final class TaskQuerySupport {
             return Collections.emptyMap();
         }
         return summary;
+    }
+
+    static void applyRepairProjection(TaskDetailResponse response, RepairRecord latestRepair, ObjectMapper objectMapper) {
+        if (response == null || latestRepair == null) {
+            return;
+        }
+        JsonNode repairProposalNode = readJsonNode(latestRepair.getRepairProposalJson(), objectMapper);
+        response.setRepairProposal(TaskProjectionBuilder.buildRepairProposal(repairProposalNode));
+        response.setRepairProposalCognition(TaskProjectionBuilder.buildCognitionView(repairProposalNode, objectMapper));
+        response.setRepairProposalOutput(TaskProjectionBuilder.buildStageOutput(repairProposalNode, objectMapper));
+    }
+
+    static void applyRepairProjection(TaskManifestResponse response, RepairRecord latestRepair, ObjectMapper objectMapper) {
+        if (response == null || latestRepair == null) {
+            return;
+        }
+        JsonNode repairProposalNode = readJsonNode(latestRepair.getRepairProposalJson(), objectMapper);
+        response.setRepairProposalCognition(TaskProjectionBuilder.buildCognitionView(repairProposalNode, objectMapper));
+        response.setRepairProposalOutput(TaskProjectionBuilder.buildStageOutput(repairProposalNode, objectMapper));
+    }
+
+    static void applyRepairProjection(TaskResultResponse response, RepairRecord latestRepair, ObjectMapper objectMapper) {
+        if (response == null || latestRepair == null) {
+            return;
+        }
+        JsonNode repairProposalNode = readJsonNode(latestRepair.getRepairProposalJson(), objectMapper);
+        response.setRepairProposalCognition(TaskProjectionBuilder.buildCognitionView(repairProposalNode, objectMapper));
+        response.setRepairProposalOutput(TaskProjectionBuilder.buildStageOutput(repairProposalNode, objectMapper));
+    }
+
+    static void applyJobProjection(
+            TaskDetailResponse response,
+            JobRecord jobRecord,
+            AnalysisManifest activeManifest,
+            ObjectMapper objectMapper
+    ) {
+        if (response == null || jobRecord == null) {
+            return;
+        }
+        TaskDetailResponse.JobSummary jobSummary = new TaskDetailResponse.JobSummary();
+        jobSummary.setJobId(jobRecord.getJobId());
+        jobSummary.setJobState(jobRecord.getJobState());
+        jobSummary.setLastHeartbeatAt(jobRecord.getLastHeartbeatAt() == null ? null : jobRecord.getLastHeartbeatAt().toString());
+        jobSummary.setProviderKey(jobRecord.getProviderKey());
+        jobSummary.setCapabilityKey(jobRecord.getCapabilityKey());
+        jobSummary.setRuntimeProfile(jobRecord.getRuntimeProfile());
+        jobSummary.setCaseId(extractCaseId(activeManifest, objectMapper));
+        response.setJob(jobSummary);
+        applyFinalExplanationProjection(response, jobRecord, objectMapper);
+    }
+
+    static void applyFinalExplanationProjection(TaskDetailResponse response, JobRecord jobRecord, ObjectMapper objectMapper) {
+        if (response == null || jobRecord == null) {
+            return;
+        }
+        JsonNode finalExplanationNode = readJsonNode(jobRecord.getFinalExplanationJson(), objectMapper);
+        response.setFinalExplanationCognition(TaskProjectionBuilder.buildCognitionView(finalExplanationNode, objectMapper));
+        response.setFinalExplanationOutput(TaskProjectionBuilder.buildStageOutput(finalExplanationNode, objectMapper));
+    }
+
+    static void applyFinalExplanationProjection(TaskManifestResponse response, JobRecord jobRecord, ObjectMapper objectMapper) {
+        if (response == null || jobRecord == null) {
+            return;
+        }
+        JsonNode finalExplanationNode = readJsonNode(jobRecord.getFinalExplanationJson(), objectMapper);
+        response.setFinalExplanationCognition(TaskProjectionBuilder.buildCognitionView(finalExplanationNode, objectMapper));
+        response.setFinalExplanationOutput(TaskProjectionBuilder.buildStageOutput(finalExplanationNode, objectMapper));
+    }
+
+    static void applyFinalExplanationProjection(TaskResultResponse response, JobRecord jobRecord, ObjectMapper objectMapper) {
+        if (response == null || jobRecord == null) {
+            return;
+        }
+        JsonNode finalExplanationNode = readJsonNode(jobRecord.getFinalExplanationJson(), objectMapper);
+        response.setFinalExplanation(TaskProjectionBuilder.buildTaskFinalExplanation(finalExplanationNode));
+        response.setFinalExplanationCognition(TaskProjectionBuilder.buildCognitionView(finalExplanationNode, objectMapper));
+        response.setFinalExplanationOutput(TaskProjectionBuilder.buildStageOutput(finalExplanationNode, objectMapper));
+    }
+
+    static void applyDetailOutcomeProjection(TaskDetailResponse response, TaskState taskState, ObjectMapper objectMapper) {
+        if (response == null || taskState == null) {
+            return;
+        }
+        JsonNode pass2Root = readJsonNode(taskState.getPass2ResultJson(), objectMapper);
+        response.setPass2Summary(TaskProjectionBuilder.buildPass2Summary(pass2Root));
+        response.setResultObjectSummary(TaskProjectionBuilder.buildResultObjectSummary(
+                readJsonNode(taskState.getResultObjectSummaryJson(), objectMapper)
+        ));
+        response.setResultBundleSummary(TaskProjectionBuilder.buildResultBundleSummaryView(
+                readJsonNode(taskState.getResultBundleSummaryJson(), objectMapper)
+        ));
+        response.setFinalExplanationSummary(TaskProjectionBuilder.buildFinalExplanationSummary(
+                readJsonNode(taskState.getFinalExplanationSummaryJson(), objectMapper)
+        ));
+        response.setLastFailureSummary(TaskProjectionBuilder.buildFailureSummary(
+                readJsonNode(taskState.getLastFailureSummaryJson(), objectMapper)
+        ));
+        response.setGraphDigest(pass2Root == null ? null : pass2Root.path("graph_digest").asText(null));
+        response.setPlanningSummary(TaskProjectionBuilder.buildJsonObjectView(
+                pass2Root == null ? null : pass2Root.path("planning_summary"),
+                objectMapper
+        ));
+    }
+
+    static void applyManifestPass2Projection(TaskManifestResponse response, TaskState taskState, ObjectMapper objectMapper) {
+        if (response == null || taskState == null) {
+            return;
+        }
+        JsonNode pass2Root = readJsonNode(taskState.getPass2ResultJson(), objectMapper);
+        response.setCanonicalizationSummary(TaskProjectionBuilder.buildJsonObjectView(
+                pass2Root == null ? null : pass2Root.path("canonicalization_summary"),
+                objectMapper
+        ));
+        response.setRewriteSummary(TaskProjectionBuilder.buildJsonObjectView(
+                pass2Root == null ? null : pass2Root.path("rewrite_summary"),
+                objectMapper
+        ));
+    }
+
+    static void applyResultPass2Projection(TaskResultResponse response, TaskState taskState, ObjectMapper objectMapper) {
+        if (response == null || taskState == null) {
+            return;
+        }
+        JsonNode pass2Root = readJsonNode(taskState.getPass2ResultJson(), objectMapper);
+        response.setCanonicalizationSummary(TaskProjectionBuilder.buildJsonObjectView(
+                pass2Root == null ? null : pass2Root.path("canonicalization_summary"),
+                objectMapper
+        ));
+        response.setRewriteSummary(TaskProjectionBuilder.buildJsonObjectView(
+                pass2Root == null ? null : pass2Root.path("rewrite_summary"),
+                objectMapper
+        ));
+        response.setFailureSummary(TaskProjectionBuilder.buildTaskResultFailureSummary(
+                readJsonNode(taskState.getLastFailureSummaryJson(), objectMapper)
+        ));
+    }
+
+    static void applyResultJobProjection(
+            TaskResultResponse response,
+            JobRecord jobRecord,
+            String activeCaseId,
+            ObjectMapper objectMapper
+    ) {
+        if (response == null || jobRecord == null) {
+            return;
+        }
+        response.setJobId(jobRecord.getJobId());
+        response.setJobState(jobRecord.getJobState());
+        response.setProviderKey(jobRecord.getProviderKey());
+        response.setRuntimeProfile(jobRecord.getRuntimeProfile());
+        response.setCaseId(activeCaseId);
+        response.setResultBundle(TaskProjectionBuilder.buildTaskResultBundle(
+                readJsonNode(jobRecord.getResultBundleJson(), objectMapper)
+        ));
+        applyFinalExplanationProjection(response, jobRecord, objectMapper);
+        TaskResultResponse.FailureSummary jobFailureSummary = TaskProjectionBuilder.buildTaskResultFailureSummary(
+                readJsonNode(jobRecord.getFailureSummaryJson(), objectMapper)
+        );
+        if (jobFailureSummary != null) {
+            response.setFailureSummary(jobFailureSummary);
+        }
+        TaskResultResponse.DockerRuntimeEvidence dockerRuntimeEvidence = TaskProjectionBuilder.buildDockerRuntimeEvidence(
+                readJsonNode(jobRecord.getDockerRuntimeEvidenceJson(), objectMapper)
+        );
+        response.setDockerRuntimeEvidence(dockerRuntimeEvidence);
+        if (response.getCaseId() == null && dockerRuntimeEvidence != null) {
+            response.setCaseId(dockerRuntimeEvidence.getCaseId());
+        }
+        response.setWorkspaceSummary(TaskProjectionBuilder.buildWorkspaceSummary(
+                readJsonNode(jobRecord.getWorkspaceSummaryJson(), objectMapper)
+        ));
+        response.setArtifactCatalog(TaskProjectionBuilder.buildArtifactCatalog(
+                readJsonNode(jobRecord.getArtifactCatalogJson(), objectMapper)
+        ));
+        response.setPlanningSummary(resolvePlanningSummary(
+                jobRecord.getPlanningPass2SummaryJson(),
+                null,
+                objectMapper,
+                false
+        ));
     }
 
     static CatalogProjection buildDetailCatalogProjection(

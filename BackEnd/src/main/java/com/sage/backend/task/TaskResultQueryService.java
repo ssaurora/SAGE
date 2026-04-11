@@ -96,56 +96,9 @@ public class TaskResultQueryService {
         );
         TaskQuerySupport.applyContractProjection(response, contractProjection);
         TaskQuerySupport.applyStageProjection(response, goalParseRoot, skillRouteRoot, passBRoot, objectMapper);
-        JsonNode pass2Root = TaskQuerySupport.readJsonNode(taskState.getPass2ResultJson(), objectMapper);
-        response.setCanonicalizationSummary(TaskProjectionBuilder.buildJsonObjectView(
-                pass2Root == null ? null : pass2Root.path("canonicalization_summary"),
-                objectMapper
-        ));
-        response.setRewriteSummary(TaskProjectionBuilder.buildJsonObjectView(
-                pass2Root == null ? null : pass2Root.path("rewrite_summary"),
-                objectMapper
-        ));
-        response.setFailureSummary(TaskProjectionBuilder.buildTaskResultFailureSummary(
-                TaskQuerySupport.readJsonNode(taskState.getLastFailureSummaryJson(), objectMapper)
-        ));
+        TaskQuerySupport.applyResultPass2Projection(response, taskState, objectMapper);
         if (jobRecord != null) {
-            response.setJobId(jobRecord.getJobId());
-            response.setJobState(jobRecord.getJobState());
-            response.setProviderKey(jobRecord.getProviderKey());
-            response.setRuntimeProfile(jobRecord.getRuntimeProfile());
-            response.setCaseId(activeCaseId);
-            response.setResultBundle(TaskProjectionBuilder.buildTaskResultBundle(
-                    TaskQuerySupport.readJsonNode(jobRecord.getResultBundleJson(), objectMapper)
-            ));
-            JsonNode finalExplanationNode = TaskQuerySupport.readJsonNode(jobRecord.getFinalExplanationJson(), objectMapper);
-            response.setFinalExplanation(TaskProjectionBuilder.buildTaskFinalExplanation(finalExplanationNode));
-            response.setFinalExplanationCognition(TaskProjectionBuilder.buildCognitionView(finalExplanationNode, objectMapper));
-            response.setFinalExplanationOutput(TaskProjectionBuilder.buildStageOutput(finalExplanationNode, objectMapper));
-            TaskResultResponse.FailureSummary jobFailureSummary = TaskProjectionBuilder.buildTaskResultFailureSummary(
-                    TaskQuerySupport.readJsonNode(jobRecord.getFailureSummaryJson(), objectMapper)
-            );
-            if (jobFailureSummary != null) {
-                response.setFailureSummary(jobFailureSummary);
-            }
-            TaskResultResponse.DockerRuntimeEvidence dockerRuntimeEvidence = TaskProjectionBuilder.buildDockerRuntimeEvidence(
-                    TaskQuerySupport.readJsonNode(jobRecord.getDockerRuntimeEvidenceJson(), objectMapper)
-            );
-            response.setDockerRuntimeEvidence(dockerRuntimeEvidence);
-            if (response.getCaseId() == null && dockerRuntimeEvidence != null) {
-                response.setCaseId(dockerRuntimeEvidence.getCaseId());
-            }
-            response.setWorkspaceSummary(TaskProjectionBuilder.buildWorkspaceSummary(
-                    TaskQuerySupport.readJsonNode(jobRecord.getWorkspaceSummaryJson(), objectMapper)
-            ));
-            response.setArtifactCatalog(TaskProjectionBuilder.buildArtifactCatalog(
-                    TaskQuerySupport.readJsonNode(jobRecord.getArtifactCatalogJson(), objectMapper)
-            ));
-            response.setPlanningSummary(TaskQuerySupport.resolvePlanningSummary(
-                    jobRecord.getPlanningPass2SummaryJson(),
-                    null,
-                    objectMapper,
-                    false
-            ));
+            TaskQuerySupport.applyResultJobProjection(response, jobRecord, activeCaseId, objectMapper);
             catalogProjection = TaskQuerySupport.buildFrozenCatalogProjection(
                     "result_catalog",
                     "result_catalog_governance",
@@ -157,11 +110,7 @@ public class TaskResultQueryService {
             TaskQuerySupport.applyCatalogProjection(response, catalogProjection);
             response.setCatalogSummary(catalogSummary);
         }
-        if (latestRepair != null) {
-            JsonNode repairProposalNode = TaskQuerySupport.readJsonNode(latestRepair.getRepairProposalJson(), objectMapper);
-            response.setRepairProposalCognition(TaskProjectionBuilder.buildCognitionView(repairProposalNode, objectMapper));
-            response.setRepairProposalOutput(TaskProjectionBuilder.buildStageOutput(repairProposalNode, objectMapper));
-        }
+        TaskQuerySupport.applyRepairProjection(response, latestRepair, objectMapper);
         if (activeManifest != null) {
             response.setFreezeStatus(activeManifest.getFreezeStatus());
             response.setGraphDigest(activeManifest.getGraphDigest());
