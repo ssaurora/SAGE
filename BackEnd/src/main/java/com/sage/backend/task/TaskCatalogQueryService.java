@@ -31,16 +31,19 @@ public class TaskCatalogQueryService {
         Map<String, Object> currentCatalogSummary = taskCatalogSnapshotService.resolveCatalogSummary(
                 taskId,
                 attachments,
-                currentInventoryVersion(taskState)
+                TaskQuerySupport.currentInventoryVersion(taskState)
         );
         TaskCatalogResponse response = new TaskCatalogResponse();
         response.setTaskId(taskId);
-        response.setInventoryVersion(currentInventoryVersion(taskState));
+        response.setInventoryVersion(TaskQuerySupport.currentInventoryVersion(taskState));
         response.setCatalogSummary(currentCatalogSummary);
         response.setCatalogFacts(AttachmentCatalogProjector.project(attachments));
 
         TaskCatalogSnapshot latestSnapshot = taskCatalogSnapshotService.findLatestCatalogSnapshot(taskId);
-        Map<String, Object> latestSnapshotSummary = readJsonMap(latestSnapshot == null ? null : latestSnapshot.getCatalogSummaryJson());
+        Map<String, Object> latestSnapshotSummary = TaskQuerySupport.readJsonMap(
+                latestSnapshot == null ? null : latestSnapshot.getCatalogSummaryJson(),
+                objectMapper
+        );
         response.setLatestSnapshot(buildCatalogSnapshotView(latestSnapshot, latestSnapshotSummary));
         Map<String, Object> queryCatalogConsistency = CatalogConsistencyProjector.buildFrozenCatalogConsistency(
                 "task_catalog_query",
@@ -56,7 +59,7 @@ public class TaskCatalogQueryService {
 
         if (auditRecords != null) {
             for (AuditRecord auditRecord : auditRecords) {
-                Map<String, Object> detail = readJsonMap(auditRecord.getDetailJson());
+                Map<String, Object> detail = TaskQuerySupport.readJsonMap(auditRecord.getDetailJson(), objectMapper);
                 if (!CatalogGovernanceAssembler.hasAuditCatalogEvidence(detail)) {
                     continue;
                 }
@@ -89,25 +92,5 @@ public class TaskCatalogQueryService {
         view.setCreatedAt(snapshot.getCreatedAt() == null ? null : snapshot.getCreatedAt().toString());
         view.setCatalogSummary(catalogSummary);
         return view;
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> readJsonMap(String sourceJson) {
-        if (sourceJson == null || sourceJson.isBlank()) {
-            return null;
-        }
-        try {
-            Object value = objectMapper.readValue(sourceJson, Map.class);
-            return value instanceof Map<?, ?> map ? (Map<String, Object>) map : null;
-        } catch (Exception exception) {
-            return null;
-        }
-    }
-
-    private int currentInventoryVersion(TaskState taskState) {
-        if (taskState == null || taskState.getInventoryVersion() == null) {
-            return 0;
-        }
-        return taskState.getInventoryVersion();
     }
 }

@@ -6,6 +6,7 @@ import com.sage.backend.model.AnalysisManifest;
 import com.sage.backend.model.TaskState;
 import com.sage.backend.model.TaskStatus;
 import com.sage.backend.task.dto.CorruptionStateView;
+import com.sage.backend.task.dto.TaskManifestResponse;
 import com.sage.backend.task.dto.TaskResultResponse;
 
 import java.util.ArrayList;
@@ -85,6 +86,32 @@ final class TaskQuerySupport {
         return taskState.getInventoryVersion();
     }
 
+    static RouteProjection buildRouteProjection(
+            String goalParseJson,
+            String skillRouteJson,
+            JsonNode pass1Projection,
+            GoalRouteService goalRouteService,
+            ObjectMapper objectMapper
+    ) {
+        return new RouteProjection(
+                goalRouteService.enrichGoalParse(readJsonNode(goalParseJson, objectMapper), pass1Projection),
+                goalRouteService.enrichSkillRoute(readJsonNode(skillRouteJson, objectMapper), pass1Projection)
+        );
+    }
+
+    static List<String> extractManifestRoleNames(List<TaskManifestResponse.SlotBinding> slotBindings) {
+        if (slotBindings == null || slotBindings.isEmpty()) {
+            return List.of();
+        }
+        Set<String> roleNames = new LinkedHashSet<>();
+        for (TaskManifestResponse.SlotBinding binding : slotBindings) {
+            if (binding != null && binding.getRoleName() != null && !binding.getRoleName().isBlank()) {
+                roleNames.add(binding.getRoleName());
+            }
+        }
+        return new ArrayList<>(roleNames);
+    }
+
     static List<String> extractResultInputRoleNames(TaskResultResponse response) {
         if (response == null || response.getDockerRuntimeEvidence() == null || response.getDockerRuntimeEvidence().getInputBindings() == null) {
             return List.of();
@@ -96,5 +123,11 @@ final class TaskQuerySupport {
             }
         }
         return new ArrayList<>(roleNames);
+    }
+
+    record RouteProjection(
+            JsonNode goalParse,
+            JsonNode skillRoute
+    ) {
     }
 }

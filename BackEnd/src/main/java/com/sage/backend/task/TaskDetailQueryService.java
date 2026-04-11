@@ -39,10 +39,12 @@ public class TaskDetailQueryService {
     ) {
         String taskId = taskState.getTaskId();
         JsonNode pass1Projection = TaskQuerySupport.readJsonNode(taskState.getPass1ResultJson(), objectMapper);
-        RouteProjection routeProjection = buildRouteProjection(
+        TaskQuerySupport.RouteProjection routeProjection = TaskQuerySupport.buildRouteProjection(
                 taskState.getGoalParseJson(),
                 taskState.getSkillRouteJson(),
-                pass1Projection
+                pass1Projection,
+                goalRouteService,
+                objectMapper
         );
         Map<String, Object> catalogSummary = taskCatalogSnapshotService.resolveCatalogSummary(
                 taskId,
@@ -177,18 +179,5 @@ public class TaskDetailQueryService {
             response.setFinalExplanationOutput(TaskProjectionBuilder.buildStageOutput(finalExplanationNode, objectMapper));
         }
         return response;
-    }
-
-    private RouteProjection buildRouteProjection(String goalParseJson, String skillRouteJson, JsonNode pass1Projection) {
-        return new RouteProjection(
-                goalRouteService.enrichGoalParse(TaskQuerySupport.readJsonNode(goalParseJson, objectMapper), pass1Projection),
-                goalRouteService.enrichSkillRoute(TaskQuerySupport.readJsonNode(skillRouteJson, objectMapper), pass1Projection)
-        );
-    }
-
-    private record RouteProjection(
-            JsonNode goalParse,
-            JsonNode skillRoute
-    ) {
     }
 }

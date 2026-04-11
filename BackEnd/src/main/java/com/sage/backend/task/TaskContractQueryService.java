@@ -27,15 +27,18 @@ public class TaskContractQueryService {
             AnalysisManifest activeManifest,
             List<AuditRecord> auditRecords
     ) {
-        JsonNode pass1Projection = readJsonNode(taskState == null ? null : taskState.getPass1ResultJson());
-        Map<String, Object> manifestContractSummary = readJsonMap(activeManifest == null ? null : activeManifest.getContractSummaryJson());
+        JsonNode pass1Projection = TaskQuerySupport.readJsonNode(taskState == null ? null : taskState.getPass1ResultJson(), objectMapper);
+        Map<String, Object> manifestContractSummary = TaskQuerySupport.readJsonMap(
+                activeManifest == null ? null : activeManifest.getContractSummaryJson(),
+                objectMapper
+        );
         Map<String, Object> frozenContractSummary = ContractConsistencyProjector.resolveManifestContractSummary(
                 manifestContractSummary,
                 pass1Projection
         );
         Map<String, Object> currentContractSummary = ContractConsistencyProjector.buildContractSummary(pass1Projection);
         ResumeTransactionView resumeTransaction = TaskProjectionBuilder.buildResumeTransaction(
-                readJsonNode(taskState == null ? null : taskState.getResumeTxnJson())
+                TaskQuerySupport.readJsonNode(taskState == null ? null : taskState.getResumeTxnJson(), objectMapper)
         );
         Map<String, Object> contractConsistency = ContractConsistencyProjector.buildDetailContractConsistency(
                 frozenContractSummary,
@@ -58,7 +61,7 @@ public class TaskContractQueryService {
 
         if (auditRecords != null) {
             for (AuditRecord auditRecord : auditRecords) {
-                Map<String, Object> detail = readJsonMap(auditRecord.getDetailJson());
+                Map<String, Object> detail = TaskQuerySupport.readJsonMap(auditRecord.getDetailJson(), objectMapper);
                 if (!ContractGovernanceAssembler.hasAuditContractEvidence(detail)) {
                     continue;
                 }
@@ -88,29 +91,5 @@ public class TaskContractQueryService {
         view.setFreezeStatus(manifest.getFreezeStatus());
         view.setContractSummary(contractSummary);
         return view;
-    }
-
-    private JsonNode readJsonNode(String sourceJson) {
-        if (sourceJson == null || sourceJson.isBlank()) {
-            return null;
-        }
-        try {
-            return objectMapper.readTree(sourceJson);
-        } catch (Exception exception) {
-            return null;
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> readJsonMap(String sourceJson) {
-        if (sourceJson == null || sourceJson.isBlank()) {
-            return null;
-        }
-        try {
-            Object value = objectMapper.readValue(sourceJson, Map.class);
-            return value instanceof Map<?, ?> map ? (Map<String, Object>) map : null;
-        } catch (Exception exception) {
-            return null;
-        }
     }
 }

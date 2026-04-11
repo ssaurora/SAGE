@@ -10,11 +10,8 @@ import com.sage.backend.model.TaskState;
 import com.sage.backend.task.dto.TaskManifestResponse;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 @Service
 public class TaskManifestQueryService {
@@ -130,10 +127,12 @@ public class TaskManifestQueryService {
                 response.getResumeTransaction()
         ));
 
-        RouteProjection routeProjection = buildRouteProjection(
+        TaskQuerySupport.RouteProjection routeProjection = TaskQuerySupport.buildRouteProjection(
                 manifest.getGoalParseJson(),
                 manifest.getSkillRouteJson(),
-                pass1Projection
+                pass1Projection,
+                goalRouteService,
+                objectMapper
         );
         response.setGoalParse(TaskProjectionBuilder.buildManifestGoalParse(routeProjection.goalParse()));
         response.setSkillRoute(TaskProjectionBuilder.buildManifestSkillRoute(routeProjection.skillRoute()));
@@ -154,7 +153,7 @@ public class TaskManifestQueryService {
                         frozenCatalogSummary,
                         currentCatalogSummary
                 ),
-                extractManifestRoleNames(response.getSlotBindings()),
+                TaskQuerySupport.extractManifestRoleNames(response.getSlotBindings()),
                 currentCatalogSummary,
                 "manifest_slot_bindings"
         );
@@ -192,31 +191,5 @@ public class TaskManifestQueryService {
             response.setFinalExplanationOutput(TaskProjectionBuilder.buildStageOutput(finalExplanationNode, objectMapper));
         }
         return response;
-    }
-
-    private RouteProjection buildRouteProjection(String goalParseJson, String skillRouteJson, JsonNode pass1Projection) {
-        return new RouteProjection(
-                goalRouteService.enrichGoalParse(TaskQuerySupport.readJsonNode(goalParseJson, objectMapper), pass1Projection),
-                goalRouteService.enrichSkillRoute(TaskQuerySupport.readJsonNode(skillRouteJson, objectMapper), pass1Projection)
-        );
-    }
-
-    private List<String> extractManifestRoleNames(List<TaskManifestResponse.SlotBinding> slotBindings) {
-        if (slotBindings == null || slotBindings.isEmpty()) {
-            return List.of();
-        }
-        Set<String> roleNames = new LinkedHashSet<>();
-        for (TaskManifestResponse.SlotBinding binding : slotBindings) {
-            if (binding != null && binding.getRoleName() != null && !binding.getRoleName().isBlank()) {
-                roleNames.add(binding.getRoleName());
-            }
-        }
-        return new ArrayList<>(roleNames);
-    }
-
-    private record RouteProjection(
-            JsonNode goalParse,
-            JsonNode skillRoute
-    ) {
     }
 }
