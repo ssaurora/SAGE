@@ -28,7 +28,6 @@ import com.sage.backend.mapper.TaskAttachmentMapper;
 import com.sage.backend.mapper.TaskAttemptMapper;
 import com.sage.backend.mapper.TaskStateMapper;
 import com.sage.backend.model.AnalysisManifest;
-import com.sage.backend.model.AuditRecord;
 import com.sage.backend.model.EventLog;
 import com.sage.backend.model.EventType;
 import com.sage.backend.model.InputChainStatus;
@@ -138,6 +137,9 @@ public class TaskService {
     private final ExecutionContractAssembler executionContractAssembler;
     private final RegistryService registryService;
     private final WorkspaceTraceService workspaceTraceService;
+    private final TaskDetailQueryService taskDetailQueryService;
+    private final TaskResultQueryService taskResultQueryService;
+    private final TaskAuditQueryService taskAuditQueryService;
     private final TaskCatalogQueryService taskCatalogQueryService;
     private final TaskContractQueryService taskContractQueryService;
     private final ObjectMapper objectMapper;
@@ -168,6 +170,9 @@ public class TaskService {
             ExecutionContractAssembler executionContractAssembler,
             RegistryService registryService,
             WorkspaceTraceService workspaceTraceService,
+            TaskDetailQueryService taskDetailQueryService,
+            TaskResultQueryService taskResultQueryService,
+            TaskAuditQueryService taskAuditQueryService,
             TaskCatalogQueryService taskCatalogQueryService,
             TaskContractQueryService taskContractQueryService,
             ObjectMapper objectMapper,
@@ -196,6 +201,9 @@ public class TaskService {
         this.executionContractAssembler = executionContractAssembler;
         this.registryService = registryService;
         this.workspaceTraceService = workspaceTraceService;
+        this.taskDetailQueryService = taskDetailQueryService;
+        this.taskResultQueryService = taskResultQueryService;
+        this.taskAuditQueryService = taskAuditQueryService;
         this.taskCatalogQueryService = taskCatalogQueryService;
         this.taskContractQueryService = taskContractQueryService;
         this.objectMapper = objectMapper;
@@ -562,111 +570,16 @@ public class TaskService {
         TaskState taskState = getOwnedTask(taskId, userId);
         List<TaskAttachment> attachments = taskAttachmentMapper.findByTaskId(taskId);
         AnalysisManifest activeManifest = resolveActiveManifest(taskState);
-        JsonNode pass1Projection = readJsonNode(taskState.getPass1ResultJson());
-        RouteProjection routeProjection = buildRouteProjection(
-                taskState.getGoalParseJson(),
-                taskState.getSkillRouteJson(),
-                pass1Projection
-        );
-        Map<String, Object> catalogSummary = buildCatalogSummary(taskId, attachments, taskState);
-        TaskDetailResponse response = new TaskDetailResponse();
-        response.setTaskId(taskState.getTaskId());
-        response.setState(taskState.getCurrentState());
-        response.setStateVersion(taskState.getStateVersion());
-        response.setPlanningRevision(taskState.getPlanningRevision());
-        response.setCheckpointVersion(taskState.getCheckpointVersion());
-        response.setCognitionVerdict(taskState.getCognitionVerdict());
-        response.setResumeTransaction(TaskProjectionBuilder.buildResumeTransaction(readJsonNode(taskState.getResumeTxnJson())));
-        response.setCorruptionState(buildCorruptionState(taskState));
-        response.setPromotionStatus(derivePromotionStatus(taskState.getCurrentState(), taskState.getCorruptionReason()));
-        response.setSkillId(routeProjection.skillRoute().path("skill_id").asText(null));
-        response.setSkillVersion(routeProjection.skillRoute().path("skill_version").asText(null));
-        response.setGoalParseSummary(TaskProjectionBuilder.buildGoalParseSummary(routeProjection.goalParse()));
-        response.setSkillRouteSummary(TaskProjectionBuilder.buildSkillRouteSummary(routeProjection.skillRoute()));
-        response.setPass1Summary(buildPass1Summary(taskState.getPass1ResultJson()));
-        response.setSlotBindingsSummary(TaskProjectionBuilder.buildSlotBindingsSummary(readJsonNode(taskState.getSlotBindingsSummaryJson())));
-        response.setArgsDraftSummary(TaskProjectionBuilder.buildArgsDraftSummary(readJsonNode(taskState.getArgsDraftSummaryJson())));
-        response.setValidationSummary(TaskProjectionBuilder.buildValidationSummary(readJsonNode(taskState.getValidationSummaryJson())));
-        response.setInputChainStatus(taskState.getInputChainStatus());
-        response.setPass2Summary(buildPass2Summary(taskState.getPass2ResultJson()));
-        response.setResultObjectSummary(TaskProjectionBuilder.buildResultObjectSummary(readJsonNode(taskState.getResultObjectSummaryJson())));
-        response.setResultBundleSummary(TaskProjectionBuilder.buildResultBundleSummaryView(readJsonNode(taskState.getResultBundleSummaryJson())));
-        response.setFinalExplanationSummary(TaskProjectionBuilder.buildFinalExplanationSummary(readJsonNode(taskState.getFinalExplanationSummaryJson())));
-        response.setLastFailureSummary(TaskProjectionBuilder.buildFailureSummary(readJsonNode(taskState.getLastFailureSummaryJson())));
-        response.setCatalogSummary(catalogSummary);
-        response.setWaitingContext(TaskProjectionBuilder.buildWaitingContext(readJsonNode(taskState.getWaitingContextJson())));
-        Map<String, Object> detailCatalogConsistency = CatalogConsistencyProjector.buildDetailCatalogConsistency(
-                response.getWaitingContext(),
-                catalogSummary
-        );
-        response.setCatalogConsistency(detailCatalogConsistency);
-        response.setCatalogGovernance(CatalogGovernanceAssembler.build(
-                "task_catalog_governance",
-                response.getWaitingContext() == null ? null : response.getWaitingContext().getCatalogSummary(),
-                catalogSummary,
-                detailCatalogConsistency
-        ));
-        Map<String, Object> detailFrozenSummary = ContractConsistencyProjector.resolveManifestContractSummary(
-                readJsonMap(activeManifest == null ? null : activeManifest.getContractSummaryJson()),
-                pass1Projection
-        );
-        Map<String, Object> detailCurrentSummary = ContractConsistencyProjector.buildContractSummary(pass1Projection);
-        Map<String, Object> detailContractConsistency = ContractConsistencyProjector.buildDetailContractConsistency(
-                detailFrozenSummary,
-                detailCurrentSummary,
-                response.getResumeTransaction()
-        );
-        response.setContractConsistency(detailContractConsistency);
-        response.setContractGovernance(ContractGovernanceAssembler.build(
-                "task_contract_governance",
-                detailFrozenSummary,
-                detailCurrentSummary,
-                detailContractConsistency,
-                response.getResumeTransaction()
-        ));
-        response.setLatestResultBundleId(taskState.getLatestResultBundleId());
-        response.setLatestWorkspaceId(taskState.getLatestWorkspaceId());
-        JsonNode pass2Root = readJsonNode(taskState.getPass2ResultJson());
-        response.setGraphDigest(pass2Root.path("graph_digest").asText(null));
-        response.setPlanningSummary(TaskProjectionBuilder.buildJsonObjectView(pass2Root.path("planning_summary"), objectMapper));
-        response.setPlanningIntentStatus(readJsonNode(taskState.getGoalParseJson()).path("planning_intent_status").asText(null));
-        JsonNode passBRoot = readJsonNode(taskState.getPassbResultJson());
-        response.setBindingStatus(passBRoot.path("binding_status").asText(null));
-        response.setOverruledFields(TaskProjectionBuilder.jsonArrayToStrings(passBRoot.path("overruled_fields")));
-        response.setBlockedMutations(TaskProjectionBuilder.jsonArrayToStrings(passBRoot.path("blocked_mutations")));
-        response.setAssemblyBlocked(passBRoot.path("assembly_blocked").isBoolean() ? passBRoot.path("assembly_blocked").asBoolean() : null);
-        response.setCaseProjection(TaskProjectionBuilder.buildCaseProjection(routeProjection.goalParse(), passBRoot, objectMapper));
-        response.setGoalRouteCognition(TaskProjectionBuilder.buildCognitionView(routeProjection.goalParse(), objectMapper));
-        response.setGoalRouteOutput(TaskProjectionBuilder.buildGoalRouteOutput(routeProjection.goalParse(), routeProjection.skillRoute(), objectMapper));
-        response.setPassbCognition(TaskProjectionBuilder.buildCognitionView(passBRoot, objectMapper));
-        response.setPassbOutput(TaskProjectionBuilder.buildStageOutput(passBRoot, objectMapper));
-        String activeCaseId = extractCaseId(activeManifest);
-
         int attemptNo = resolveActiveAttemptNo(taskState);
         RepairRecord latestRepair = repairRecordMapper.findLatestByTaskIdAndAttemptNo(taskId, attemptNo);
-        if (latestRepair != null) {
-            JsonNode repairProposalNode = readJsonNode(latestRepair.getRepairProposalJson());
-            response.setRepairProposal(TaskProjectionBuilder.buildRepairProposal(repairProposalNode));
-            response.setRepairProposalCognition(TaskProjectionBuilder.buildCognitionView(repairProposalNode, objectMapper));
-            response.setRepairProposalOutput(TaskProjectionBuilder.buildStageOutput(repairProposalNode, objectMapper));
-        }
-
         JobRecord jobRecord = taskState.getJobId() == null ? null : jobRecordMapper.findByJobId(taskState.getJobId());
-        if (jobRecord != null) {
-            TaskDetailResponse.JobSummary jobSummary = new TaskDetailResponse.JobSummary();
-            jobSummary.setJobId(jobRecord.getJobId());
-            jobSummary.setJobState(jobRecord.getJobState());
-            jobSummary.setLastHeartbeatAt(jobRecord.getLastHeartbeatAt() == null ? null : jobRecord.getLastHeartbeatAt().toString());
-            jobSummary.setProviderKey(jobRecord.getProviderKey());
-            jobSummary.setCapabilityKey(jobRecord.getCapabilityKey());
-            jobSummary.setRuntimeProfile(jobRecord.getRuntimeProfile());
-            jobSummary.setCaseId(activeCaseId);
-            response.setJob(jobSummary);
-            JsonNode finalExplanationNode = readJsonNode(jobRecord.getFinalExplanationJson());
-            response.setFinalExplanationCognition(TaskProjectionBuilder.buildCognitionView(finalExplanationNode, objectMapper));
-            response.setFinalExplanationOutput(TaskProjectionBuilder.buildStageOutput(finalExplanationNode, objectMapper));
-        }
-        return response;
+        return taskDetailQueryService.buildTaskDetailResponse(
+                taskState,
+                attachments,
+                activeManifest,
+                latestRepair,
+                jobRecord
+        );
     }
 
     public TaskResultResponse getTaskResult(String taskId, Long userId) {
@@ -674,134 +587,15 @@ public class TaskService {
         List<TaskAttachment> attachments = taskAttachmentMapper.findByTaskId(taskId);
         JobRecord jobRecord = taskState.getJobId() == null ? null : jobRecordMapper.findByJobId(taskState.getJobId());
         AnalysisManifest activeManifest = resolveActiveManifest(taskState);
-        String activeCaseId = extractCaseId(activeManifest);
-
-        TaskResultResponse response = new TaskResultResponse();
-        response.setTaskId(taskId);
-        response.setTaskState(taskState.getCurrentState());
-        response.setResumeTransaction(TaskProjectionBuilder.buildResumeTransaction(readJsonNode(taskState.getResumeTxnJson())));
-        response.setCorruptionState(buildCorruptionState(taskState));
-        response.setPromotionStatus(derivePromotionStatus(taskState.getCurrentState(), taskState.getCorruptionReason()));
-        response.setPlanningRevision(taskState.getPlanningRevision());
-        response.setCheckpointVersion(taskState.getCheckpointVersion());
-        response.setCognitionVerdict(taskState.getCognitionVerdict());
-        response.setCaseId(activeCaseId);
-        response.setPlanningIntentStatus(readJsonNode(taskState.getGoalParseJson()).path("planning_intent_status").asText(null));
-        JsonNode passBRoot = readJsonNode(taskState.getPassbResultJson());
-        JsonNode skillRouteRoot = readJsonNode(taskState.getSkillRouteJson());
-        response.setSkillId(skillRouteRoot.path("skill_id").asText(passBRoot.path("skill_id").asText(null)));
-        response.setSkillVersion(skillRouteRoot.path("skill_version").asText(passBRoot.path("skill_version").asText(null)));
-        response.setBindingStatus(passBRoot.path("binding_status").asText(null));
-        response.setOverruledFields(TaskProjectionBuilder.jsonArrayToStrings(passBRoot.path("overruled_fields")));
-        response.setBlockedMutations(TaskProjectionBuilder.jsonArrayToStrings(passBRoot.path("blocked_mutations")));
-        response.setAssemblyBlocked(passBRoot.path("assembly_blocked").isBoolean() ? passBRoot.path("assembly_blocked").asBoolean() : null);
-        JsonNode goalParseRoot = readJsonNode(taskState.getGoalParseJson());
-        response.setCaseProjection(TaskProjectionBuilder.buildCaseProjection(goalParseRoot, passBRoot, objectMapper));
-        Map<String, Object> frozenCatalogSummary = readJsonMap(activeManifest == null ? null : activeManifest.getCatalogSummaryJson());
-        Map<String, Object> currentCatalogSummary = buildCatalogSummary(taskId, attachments, taskState);
-        Map<String, Object> catalogSummary = resolveManifestCatalogSummary(activeManifest, attachments, taskState);
-        response.setCatalogSummary(catalogSummary);
-        Map<String, Object> resultCatalogConsistency = CatalogConsistencyProjector.mergeCoverageConsistency(
-                CatalogConsistencyProjector.buildFrozenCatalogConsistency(
-                        "result_catalog",
-                        frozenCatalogSummary,
-                        currentCatalogSummary
-                ),
-                List.of(),
-                currentCatalogSummary,
-                "result_input_bindings"
-        );
-        response.setCatalogConsistency(resultCatalogConsistency);
-        response.setCatalogGovernance(CatalogGovernanceAssembler.build(
-                "result_catalog_governance",
-                frozenCatalogSummary,
-                currentCatalogSummary,
-                resultCatalogConsistency
-        ));
-        Map<String, Object> resultFrozenSummary = ContractConsistencyProjector.resolveManifestContractSummary(
-                readJsonMap(activeManifest == null ? null : activeManifest.getContractSummaryJson()),
-                readJsonNode(taskState.getPass1ResultJson())
-        );
-        Map<String, Object> resultCurrentSummary = ContractConsistencyProjector.buildContractSummary(readJsonNode(taskState.getPass1ResultJson()));
-        Map<String, Object> resultContractConsistency = ContractConsistencyProjector.buildFrozenContractConsistency(
-                "result_manifest_contract",
-                resultFrozenSummary,
-                resultCurrentSummary
-        );
-        response.setContractConsistency(resultContractConsistency);
-        response.setContractGovernance(ContractGovernanceAssembler.build(
-                "result_contract_governance",
-                resultFrozenSummary,
-                resultCurrentSummary,
-                resultContractConsistency,
-                response.getResumeTransaction()
-        ));
-        response.setGoalRouteCognition(TaskProjectionBuilder.buildCognitionView(goalParseRoot, objectMapper));
-        response.setGoalRouteOutput(TaskProjectionBuilder.buildGoalRouteOutput(goalParseRoot, skillRouteRoot, objectMapper));
-        response.setPassbCognition(TaskProjectionBuilder.buildCognitionView(passBRoot, objectMapper));
-        response.setPassbOutput(TaskProjectionBuilder.buildStageOutput(passBRoot, objectMapper));
-        JsonNode pass2Root = readJsonNode(taskState.getPass2ResultJson());
-        response.setCanonicalizationSummary(TaskProjectionBuilder.buildJsonObjectView(pass2Root.path("canonicalization_summary"), objectMapper));
-        response.setRewriteSummary(TaskProjectionBuilder.buildJsonObjectView(pass2Root.path("rewrite_summary"), objectMapper));
-        response.setFailureSummary(TaskProjectionBuilder.buildTaskResultFailureSummary(readJsonNode(taskState.getLastFailureSummaryJson())));
-        if (jobRecord != null) {
-            response.setJobId(jobRecord.getJobId());
-            response.setJobState(jobRecord.getJobState());
-            response.setProviderKey(jobRecord.getProviderKey());
-            response.setRuntimeProfile(jobRecord.getRuntimeProfile());
-            response.setCaseId(activeCaseId);
-            response.setResultBundle(TaskProjectionBuilder.buildTaskResultBundle(readJsonNode(jobRecord.getResultBundleJson())));
-            JsonNode finalExplanationNode = readJsonNode(jobRecord.getFinalExplanationJson());
-            response.setFinalExplanation(TaskProjectionBuilder.buildTaskFinalExplanation(finalExplanationNode));
-            response.setFinalExplanationCognition(TaskProjectionBuilder.buildCognitionView(finalExplanationNode, objectMapper));
-            response.setFinalExplanationOutput(TaskProjectionBuilder.buildStageOutput(finalExplanationNode, objectMapper));
-            TaskResultResponse.FailureSummary jobFailureSummary = TaskProjectionBuilder.buildTaskResultFailureSummary(readJsonNode(jobRecord.getFailureSummaryJson()));
-            if (jobFailureSummary != null) {
-                response.setFailureSummary(jobFailureSummary);
-            }
-            TaskResultResponse.DockerRuntimeEvidence dockerRuntimeEvidence =
-                    TaskProjectionBuilder.buildDockerRuntimeEvidence(readJsonNode(jobRecord.getDockerRuntimeEvidenceJson()));
-            response.setDockerRuntimeEvidence(dockerRuntimeEvidence);
-            if (response.getCaseId() == null && dockerRuntimeEvidence != null) {
-                response.setCaseId(dockerRuntimeEvidence.getCaseId());
-            }
-            response.setWorkspaceSummary(TaskProjectionBuilder.buildWorkspaceSummary(readJsonNode(jobRecord.getWorkspaceSummaryJson())));
-            response.setArtifactCatalog(TaskProjectionBuilder.buildArtifactCatalog(readJsonNode(jobRecord.getArtifactCatalogJson())));
-            response.setPlanningSummary(TaskProjectionBuilder.buildJsonObjectView(readJsonNode(jobRecord.getPlanningPass2SummaryJson()), objectMapper));
-            List<String> resultRoleNames = extractResultInputRoleNames(response);
-            resultCatalogConsistency = CatalogConsistencyProjector.mergeCoverageConsistency(
-                    CatalogConsistencyProjector.buildFrozenCatalogConsistency(
-                            "result_catalog",
-                            frozenCatalogSummary,
-                            currentCatalogSummary
-                    ),
-                    resultRoleNames,
-                    currentCatalogSummary,
-                    "result_input_bindings"
-            );
-            response.setCatalogConsistency(resultCatalogConsistency);
-            response.setCatalogGovernance(CatalogGovernanceAssembler.build(
-                    "result_catalog_governance",
-                    frozenCatalogSummary,
-                    currentCatalogSummary,
-                    resultCatalogConsistency
-            ));
-        }
         int attemptNo = resolveActiveAttemptNo(taskState);
         RepairRecord latestRepair = repairRecordMapper.findLatestByTaskIdAndAttemptNo(taskId, attemptNo);
-        if (latestRepair != null) {
-            JsonNode repairProposalNode = readJsonNode(latestRepair.getRepairProposalJson());
-            response.setRepairProposalCognition(TaskProjectionBuilder.buildCognitionView(repairProposalNode, objectMapper));
-            response.setRepairProposalOutput(TaskProjectionBuilder.buildStageOutput(repairProposalNode, objectMapper));
-        }
-        if (activeManifest != null) {
-            response.setFreezeStatus(activeManifest.getFreezeStatus());
-            response.setGraphDigest(activeManifest.getGraphDigest());
-            if (response.getPlanningSummary() == null) {
-                response.setPlanningSummary(TaskProjectionBuilder.buildJsonObjectView(readJsonNode(activeManifest.getPlanningSummaryJson()), objectMapper));
-            }
-        }
-        return response;
+        return taskResultQueryService.buildTaskResultResponse(
+                taskState,
+                attachments,
+                activeManifest,
+                jobRecord,
+                latestRepair
+        );
     }
 
     public TaskRunsResponse getTaskRuns(String taskId, Long userId) {
@@ -883,23 +677,12 @@ public class TaskService {
     public TaskAuditResponse getTaskAudit(String taskId, Long userId) {
         TaskState taskState = getOwnedTask(taskId, userId);
         List<TaskAttachment> attachments = taskAttachmentMapper.findByTaskId(taskId);
-        Map<String, Object> currentCatalogSummary = buildCatalogSummary(taskId, attachments, taskState);
-        TaskAuditResponse response = new TaskAuditResponse();
-        response.setTaskId(taskId);
-        for (AuditRecord auditRecord : auditService.findByTaskId(taskId)) {
-            TaskAuditResponse.AuditItem item = new TaskAuditResponse.AuditItem();
-            item.setId(auditRecord.getId());
-            item.setActionType(auditRecord.getActionType());
-            item.setActionResult(auditRecord.getActionResult());
-            item.setTraceId(auditRecord.getTraceId());
-            item.setCreatedAt(auditRecord.getCreatedAt() == null ? null : auditRecord.getCreatedAt().toString());
-            Map<String, Object> detail = readJsonMap(auditRecord.getDetailJson());
-            item.setDetail(detail == null ? Map.of() : detail);
-            item.setContractGovernance(ContractGovernanceAssembler.buildAudit(detail));
-            item.setCatalogGovernance(CatalogGovernanceAssembler.buildAudit(detail, currentCatalogSummary));
-            response.getItems().add(item);
-        }
-        return response;
+        return taskAuditQueryService.buildTaskAuditResponse(
+                taskId,
+                taskState,
+                attachments,
+                auditService.findByTaskId(taskId)
+        );
     }
 
     public TaskCatalogResponse getTaskCatalog(String taskId, Long userId) {
@@ -1049,19 +832,6 @@ public class TaskService {
         }
         Set<String> roleNames = new LinkedHashSet<>();
         for (TaskManifestResponse.SlotBinding binding : slotBindings) {
-            if (binding != null && binding.getRoleName() != null && !binding.getRoleName().isBlank()) {
-                roleNames.add(binding.getRoleName());
-            }
-        }
-        return new ArrayList<>(roleNames);
-    }
-
-    private List<String> extractResultInputRoleNames(TaskResultResponse response) {
-        if (response == null || response.getDockerRuntimeEvidence() == null || response.getDockerRuntimeEvidence().getInputBindings() == null) {
-            return List.of();
-        }
-        Set<String> roleNames = new LinkedHashSet<>();
-        for (TaskResultResponse.InputBinding binding : response.getDockerRuntimeEvidence().getInputBindings()) {
             if (binding != null && binding.getRoleName() != null && !binding.getRoleName().isBlank()) {
                 roleNames.add(binding.getRoleName());
             }
@@ -3745,26 +3515,6 @@ public class TaskService {
                         manifest.getManifestVersion()
                 ))
         );
-    }
-
-    private TaskDetailResponse.Pass1Summary buildPass1Summary(String pass1ResultJson) {
-        if (pass1ResultJson == null || pass1ResultJson.isBlank()) return null;
-        try {
-            JsonNode root = objectMapper.readTree(pass1ResultJson);
-            return TaskProjectionBuilder.buildPass1Summary(root);
-        } catch (Exception exception) {
-            return null;
-        }
-    }
-
-    private TaskDetailResponse.Pass2Summary buildPass2Summary(String pass2ResultJson) {
-        if (pass2ResultJson == null || pass2ResultJson.isBlank()) return null;
-        try {
-            JsonNode root = objectMapper.readTree(pass2ResultJson);
-            return TaskProjectionBuilder.buildPass2Summary(root);
-        } catch (Exception exception) {
-            return null;
-        }
     }
 
     private Object readJsonObject(String sourceJson) {

@@ -653,12 +653,20 @@ class TaskServiceCognitionFlowTest {
         private final RepairProposalService repairProposalService = mock(RepairProposalService.class);
         private final RegistryService registryService = mock(RegistryService.class);
         private final WorkspaceTraceService workspaceTraceService = mock(WorkspaceTraceService.class);
+        private final TaskDetailQueryService taskDetailQueryService;
+        private final TaskResultQueryService taskResultQueryService;
+        private final TaskAuditQueryService taskAuditQueryService;
         private final TaskCatalogQueryService taskCatalogQueryService;
         private final TaskContractQueryService taskContractQueryService;
         private final TaskService service;
 
         private Harness(ObjectMapper objectMapper) {
             this.taskCatalogSnapshotService = new TaskCatalogSnapshotService(taskCatalogSnapshotMapper, objectMapper);
+            GoalRouteService goalRouteService = new GoalRouteService(objectMapper);
+            ExecutionContractAssembler executionContractAssembler = new ExecutionContractAssembler(objectMapper);
+            this.taskDetailQueryService = new TaskDetailQueryService(taskCatalogSnapshotService, goalRouteService, objectMapper);
+            this.taskResultQueryService = new TaskResultQueryService(taskCatalogSnapshotService, objectMapper);
+            this.taskAuditQueryService = new TaskAuditQueryService(taskCatalogSnapshotService, objectMapper);
             this.taskCatalogQueryService = new TaskCatalogQueryService(taskCatalogSnapshotService, objectMapper);
             this.taskContractQueryService = new TaskContractQueryService(objectMapper);
             when(taskStateMapper.insert(any())).thenReturn(1);
@@ -696,10 +704,13 @@ class TaskServiceCognitionFlowTest {
                     repairDispatcherService,
                     repairProposalService,
                     new AssertionFailureMapper(),
-                    new GoalRouteService(objectMapper),
-                    new ExecutionContractAssembler(objectMapper),
+                    goalRouteService,
+                    executionContractAssembler,
                     registryService,
                     workspaceTraceService,
+                    taskDetailQueryService,
+                    taskResultQueryService,
+                    taskAuditQueryService,
                     taskCatalogQueryService,
                     taskContractQueryService,
                     objectMapper,
