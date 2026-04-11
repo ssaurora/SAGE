@@ -32,9 +32,7 @@ public class TaskContractQueryService {
                 activeManifest == null ? null : activeManifest.getContractSummaryJson(),
                 objectMapper
         );
-        ResumeTransactionView resumeTransaction = TaskProjectionBuilder.buildResumeTransaction(
-                TaskQuerySupport.readJsonNode(taskState == null ? null : taskState.getResumeTxnJson(), objectMapper)
-        );
+        ResumeTransactionView resumeTransaction = TaskQuerySupport.buildResumeTransaction(taskState, objectMapper);
         TaskQuerySupport.ContractProjection contractProjection = TaskQuerySupport.buildDetailContractProjection(
                 pass1Projection,
                 manifestContractSummary,

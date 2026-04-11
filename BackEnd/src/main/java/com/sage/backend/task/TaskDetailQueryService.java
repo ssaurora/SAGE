@@ -58,15 +58,7 @@ public class TaskDetailQueryService {
         response.setStateVersion(taskState.getStateVersion());
         response.setPlanningRevision(taskState.getPlanningRevision());
         response.setCheckpointVersion(taskState.getCheckpointVersion());
-        response.setCognitionVerdict(taskState.getCognitionVerdict());
-        response.setResumeTransaction(TaskProjectionBuilder.buildResumeTransaction(
-                TaskQuerySupport.readJsonNode(taskState.getResumeTxnJson(), objectMapper)
-        ));
-        response.setCorruptionState(TaskQuerySupport.buildCorruptionState(taskState));
-        response.setPromotionStatus(TaskQuerySupport.derivePromotionStatus(
-                taskState.getCurrentState(),
-                taskState.getCorruptionReason()
-        ));
+        TaskQuerySupport.applyLifecycleProjection(response, taskState, objectMapper);
         response.setSkillId(routeProjection.skillRoute().path("skill_id").asText(null));
         response.setSkillVersion(routeProjection.skillRoute().path("skill_version").asText(null));
         response.setGoalParseSummary(TaskProjectionBuilder.buildGoalParseSummary(routeProjection.goalParse()));
@@ -130,14 +122,13 @@ public class TaskDetailQueryService {
                 passBRoot != null && passBRoot.path("assembly_blocked").isBoolean() ? passBRoot.path("assembly_blocked").asBoolean() : null
         );
         response.setCaseProjection(TaskProjectionBuilder.buildCaseProjection(goalParseRoot, passBRoot, objectMapper));
-        response.setGoalRouteCognition(TaskProjectionBuilder.buildCognitionView(routeProjection.goalParse(), objectMapper));
-        response.setGoalRouteOutput(TaskProjectionBuilder.buildGoalRouteOutput(
+        TaskQuerySupport.applyStageProjection(
+                response,
                 routeProjection.goalParse(),
                 routeProjection.skillRoute(),
+                passBRoot,
                 objectMapper
-        ));
-        response.setPassbCognition(TaskProjectionBuilder.buildCognitionView(passBRoot, objectMapper));
-        response.setPassbOutput(TaskProjectionBuilder.buildStageOutput(passBRoot, objectMapper));
+        );
 
         if (latestRepair != null) {
             JsonNode repairProposalNode = TaskQuerySupport.readJsonNode(latestRepair.getRepairProposalJson(), objectMapper);

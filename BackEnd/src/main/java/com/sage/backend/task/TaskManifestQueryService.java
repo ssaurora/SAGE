@@ -47,13 +47,12 @@ public class TaskManifestQueryService {
         response.setPlanningRevision(manifest.getPlanningRevision());
         response.setCheckpointVersion(manifest.getCheckpointVersion());
         response.setGraphDigest(manifest.getGraphDigest());
-        response.setPlanningSummary(TaskProjectionBuilder.buildJsonObjectView(
-                TaskQuerySupport.readJsonNode(manifest.getPlanningSummaryJson(), objectMapper),
-                objectMapper
+        response.setPlanningSummary(TaskQuerySupport.resolvePlanningSummary(
+                manifest.getPlanningSummaryJson(),
+                null,
+                objectMapper,
+                true
         ));
-        if (response.getPlanningSummary() == null) {
-            response.setPlanningSummary(Map.of());
-        }
 
         Map<String, Object> frozenCatalogSummary = TaskQuerySupport.readJsonMap(manifest.getCatalogSummaryJson(), objectMapper);
         Map<String, Object> currentCatalogSummary = TaskQuerySupport.resolveCurrentCatalogSummary(
@@ -70,7 +69,7 @@ public class TaskManifestQueryService {
                 taskCatalogSnapshotService,
                 objectMapper
         );
-        response.setCognitionVerdict(taskState.getCognitionVerdict());
+        TaskQuerySupport.applyLifecycleProjection(response, taskState, objectMapper);
 
         JsonNode goalParseRoot = TaskQuerySupport.readJsonNode(taskState.getGoalParseJson(), objectMapper);
         JsonNode skillRouteRoot = TaskQuerySupport.readJsonNode(taskState.getSkillRouteJson(), objectMapper);
@@ -86,18 +85,7 @@ public class TaskManifestQueryService {
                 passBRoot != null && passBRoot.path("assembly_blocked").isBoolean() ? passBRoot.path("assembly_blocked").asBoolean() : null
         );
         response.setCaseProjection(TaskProjectionBuilder.buildCaseProjection(goalParseRoot, passBRoot, objectMapper));
-        response.setGoalRouteCognition(TaskProjectionBuilder.buildCognitionView(goalParseRoot, objectMapper));
-        response.setGoalRouteOutput(TaskProjectionBuilder.buildGoalRouteOutput(goalParseRoot, skillRouteRoot, objectMapper));
-        response.setPassbCognition(TaskProjectionBuilder.buildCognitionView(passBRoot, objectMapper));
-        response.setPassbOutput(TaskProjectionBuilder.buildStageOutput(passBRoot, objectMapper));
-        response.setResumeTransaction(TaskProjectionBuilder.buildResumeTransaction(
-                TaskQuerySupport.readJsonNode(taskState.getResumeTxnJson(), objectMapper)
-        ));
-        response.setCorruptionState(TaskQuerySupport.buildCorruptionState(taskState));
-        response.setPromotionStatus(TaskQuerySupport.derivePromotionStatus(
-                taskState.getCurrentState(),
-                taskState.getCorruptionReason()
-        ));
+        TaskQuerySupport.applyStageProjection(response, goalParseRoot, skillRouteRoot, passBRoot, objectMapper);
 
         JsonNode pass2Root = TaskQuerySupport.readJsonNode(taskState.getPass2ResultJson(), objectMapper);
         response.setCanonicalizationSummary(TaskProjectionBuilder.buildJsonObjectView(

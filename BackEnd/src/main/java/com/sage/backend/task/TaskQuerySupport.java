@@ -16,6 +16,7 @@ import com.sage.backend.task.dto.TaskManifestResponse;
 import com.sage.backend.task.dto.TaskResultResponse;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -71,6 +72,51 @@ final class TaskQuerySupport {
             return "FAILED";
         }
         return "NOT_PROMOTED";
+    }
+
+    static ResumeTransactionView buildResumeTransaction(TaskState taskState, ObjectMapper objectMapper) {
+        return TaskProjectionBuilder.buildResumeTransaction(
+                readJsonNode(taskState == null ? null : taskState.getResumeTxnJson(), objectMapper)
+        );
+    }
+
+    static void applyLifecycleProjection(TaskDetailResponse response, TaskState taskState, ObjectMapper objectMapper) {
+        if (response == null || taskState == null) {
+            return;
+        }
+        response.setCognitionVerdict(taskState.getCognitionVerdict());
+        response.setResumeTransaction(buildResumeTransaction(taskState, objectMapper));
+        response.setCorruptionState(buildCorruptionState(taskState));
+        response.setPromotionStatus(derivePromotionStatus(
+                taskState.getCurrentState(),
+                taskState.getCorruptionReason()
+        ));
+    }
+
+    static void applyLifecycleProjection(TaskManifestResponse response, TaskState taskState, ObjectMapper objectMapper) {
+        if (response == null || taskState == null) {
+            return;
+        }
+        response.setCognitionVerdict(taskState.getCognitionVerdict());
+        response.setResumeTransaction(buildResumeTransaction(taskState, objectMapper));
+        response.setCorruptionState(buildCorruptionState(taskState));
+        response.setPromotionStatus(derivePromotionStatus(
+                taskState.getCurrentState(),
+                taskState.getCorruptionReason()
+        ));
+    }
+
+    static void applyLifecycleProjection(TaskResultResponse response, TaskState taskState, ObjectMapper objectMapper) {
+        if (response == null || taskState == null) {
+            return;
+        }
+        response.setResumeTransaction(buildResumeTransaction(taskState, objectMapper));
+        response.setCorruptionState(buildCorruptionState(taskState));
+        response.setPromotionStatus(derivePromotionStatus(
+                taskState.getCurrentState(),
+                taskState.getCorruptionReason()
+        ));
+        response.setCognitionVerdict(taskState.getCognitionVerdict());
     }
 
     static String extractCaseId(AnalysisManifest manifest, ObjectMapper objectMapper) {
@@ -133,6 +179,76 @@ final class TaskQuerySupport {
                 goalRouteService.enrichGoalParse(readJsonNode(goalParseJson, objectMapper), pass1Projection),
                 goalRouteService.enrichSkillRoute(readJsonNode(skillRouteJson, objectMapper), pass1Projection)
         );
+    }
+
+    static void applyStageProjection(
+            TaskDetailResponse response,
+            JsonNode goalParseRoot,
+            JsonNode skillRouteRoot,
+            JsonNode passBRoot,
+            ObjectMapper objectMapper
+    ) {
+        if (response == null) {
+            return;
+        }
+        response.setGoalRouteCognition(TaskProjectionBuilder.buildCognitionView(goalParseRoot, objectMapper));
+        response.setGoalRouteOutput(TaskProjectionBuilder.buildGoalRouteOutput(goalParseRoot, skillRouteRoot, objectMapper));
+        response.setPassbCognition(TaskProjectionBuilder.buildCognitionView(passBRoot, objectMapper));
+        response.setPassbOutput(TaskProjectionBuilder.buildStageOutput(passBRoot, objectMapper));
+    }
+
+    static void applyStageProjection(
+            TaskManifestResponse response,
+            JsonNode goalParseRoot,
+            JsonNode skillRouteRoot,
+            JsonNode passBRoot,
+            ObjectMapper objectMapper
+    ) {
+        if (response == null) {
+            return;
+        }
+        response.setGoalRouteCognition(TaskProjectionBuilder.buildCognitionView(goalParseRoot, objectMapper));
+        response.setGoalRouteOutput(TaskProjectionBuilder.buildGoalRouteOutput(goalParseRoot, skillRouteRoot, objectMapper));
+        response.setPassbCognition(TaskProjectionBuilder.buildCognitionView(passBRoot, objectMapper));
+        response.setPassbOutput(TaskProjectionBuilder.buildStageOutput(passBRoot, objectMapper));
+    }
+
+    static void applyStageProjection(
+            TaskResultResponse response,
+            JsonNode goalParseRoot,
+            JsonNode skillRouteRoot,
+            JsonNode passBRoot,
+            ObjectMapper objectMapper
+    ) {
+        if (response == null) {
+            return;
+        }
+        response.setGoalRouteCognition(TaskProjectionBuilder.buildCognitionView(goalParseRoot, objectMapper));
+        response.setGoalRouteOutput(TaskProjectionBuilder.buildGoalRouteOutput(goalParseRoot, skillRouteRoot, objectMapper));
+        response.setPassbCognition(TaskProjectionBuilder.buildCognitionView(passBRoot, objectMapper));
+        response.setPassbOutput(TaskProjectionBuilder.buildStageOutput(passBRoot, objectMapper));
+    }
+
+    static Map<String, Object> resolvePlanningSummary(
+            String primaryJson,
+            String fallbackJson,
+            ObjectMapper objectMapper,
+            boolean emptyObjectWhenMissing
+    ) {
+        Map<String, Object> summary = TaskProjectionBuilder.buildJsonObjectView(
+                readJsonNode(primaryJson, objectMapper),
+                objectMapper
+        );
+        if (summary == null && fallbackJson != null) {
+            summary = TaskProjectionBuilder.buildJsonObjectView(
+                    readJsonNode(fallbackJson, objectMapper),
+                    objectMapper
+            );
+        }
+        if (summary == null && emptyObjectWhenMissing) {
+            return Collections.emptyMap();
+        }
+        return summary;
     }
 
     static CatalogProjection buildDetailCatalogProjection(

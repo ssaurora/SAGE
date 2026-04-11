@@ -37,17 +37,9 @@ public class TaskResultQueryService {
         TaskResultResponse response = new TaskResultResponse();
         response.setTaskId(taskId);
         response.setTaskState(taskState.getCurrentState());
-        response.setResumeTransaction(TaskProjectionBuilder.buildResumeTransaction(
-                TaskQuerySupport.readJsonNode(taskState.getResumeTxnJson(), objectMapper)
-        ));
-        response.setCorruptionState(TaskQuerySupport.buildCorruptionState(taskState));
-        response.setPromotionStatus(TaskQuerySupport.derivePromotionStatus(
-                taskState.getCurrentState(),
-                taskState.getCorruptionReason()
-        ));
+        TaskQuerySupport.applyLifecycleProjection(response, taskState, objectMapper);
         response.setPlanningRevision(taskState.getPlanningRevision());
         response.setCheckpointVersion(taskState.getCheckpointVersion());
-        response.setCognitionVerdict(taskState.getCognitionVerdict());
         response.setCaseId(activeCaseId);
         JsonNode goalParseRoot = TaskQuerySupport.readJsonNode(taskState.getGoalParseJson(), objectMapper);
         response.setPlanningIntentStatus(goalParseRoot == null ? null : goalParseRoot.path("planning_intent_status").asText(null));
@@ -103,10 +95,7 @@ public class TaskResultQueryService {
                 "result_contract_governance"
         );
         TaskQuerySupport.applyContractProjection(response, contractProjection);
-        response.setGoalRouteCognition(TaskProjectionBuilder.buildCognitionView(goalParseRoot, objectMapper));
-        response.setGoalRouteOutput(TaskProjectionBuilder.buildGoalRouteOutput(goalParseRoot, skillRouteRoot, objectMapper));
-        response.setPassbCognition(TaskProjectionBuilder.buildCognitionView(passBRoot, objectMapper));
-        response.setPassbOutput(TaskProjectionBuilder.buildStageOutput(passBRoot, objectMapper));
+        TaskQuerySupport.applyStageProjection(response, goalParseRoot, skillRouteRoot, passBRoot, objectMapper);
         JsonNode pass2Root = TaskQuerySupport.readJsonNode(taskState.getPass2ResultJson(), objectMapper);
         response.setCanonicalizationSummary(TaskProjectionBuilder.buildJsonObjectView(
                 pass2Root == null ? null : pass2Root.path("canonicalization_summary"),
@@ -151,9 +140,11 @@ public class TaskResultQueryService {
             response.setArtifactCatalog(TaskProjectionBuilder.buildArtifactCatalog(
                     TaskQuerySupport.readJsonNode(jobRecord.getArtifactCatalogJson(), objectMapper)
             ));
-            response.setPlanningSummary(TaskProjectionBuilder.buildJsonObjectView(
-                    TaskQuerySupport.readJsonNode(jobRecord.getPlanningPass2SummaryJson(), objectMapper),
-                    objectMapper
+            response.setPlanningSummary(TaskQuerySupport.resolvePlanningSummary(
+                    jobRecord.getPlanningPass2SummaryJson(),
+                    null,
+                    objectMapper,
+                    false
             ));
             catalogProjection = TaskQuerySupport.buildFrozenCatalogProjection(
                     "result_catalog",
@@ -175,13 +166,12 @@ public class TaskResultQueryService {
             response.setFreezeStatus(activeManifest.getFreezeStatus());
             response.setGraphDigest(activeManifest.getGraphDigest());
             if (response.getPlanningSummary() == null) {
-                response.setPlanningSummary(TaskProjectionBuilder.buildJsonObjectView(
-                        TaskQuerySupport.readJsonNode(activeManifest.getPlanningSummaryJson(), objectMapper),
-                        objectMapper
+                response.setPlanningSummary(TaskQuerySupport.resolvePlanningSummary(
+                        null,
+                        activeManifest.getPlanningSummaryJson(),
+                        objectMapper,
+                        true
                 ));
-            }
-            if (response.getPlanningSummary() == null) {
-                response.setPlanningSummary(Map.of());
             }
         }
         return response;
