@@ -656,6 +656,7 @@ class TaskServiceCognitionFlowTest {
         private final TaskDetailQueryService taskDetailQueryService;
         private final TaskResultQueryService taskResultQueryService;
         private final TaskAuditQueryService taskAuditQueryService;
+        private final TaskManifestQueryService taskManifestQueryService;
         private final TaskCatalogQueryService taskCatalogQueryService;
         private final TaskContractQueryService taskContractQueryService;
         private final TaskService service;
@@ -667,6 +668,7 @@ class TaskServiceCognitionFlowTest {
             this.taskDetailQueryService = new TaskDetailQueryService(taskCatalogSnapshotService, goalRouteService, objectMapper);
             this.taskResultQueryService = new TaskResultQueryService(taskCatalogSnapshotService, objectMapper);
             this.taskAuditQueryService = new TaskAuditQueryService(taskCatalogSnapshotService, objectMapper);
+            this.taskManifestQueryService = new TaskManifestQueryService(taskCatalogSnapshotService, goalRouteService, objectMapper);
             this.taskCatalogQueryService = new TaskCatalogQueryService(taskCatalogSnapshotService, objectMapper);
             this.taskContractQueryService = new TaskContractQueryService(objectMapper);
             when(taskStateMapper.insert(any())).thenReturn(1);
@@ -711,6 +713,7 @@ class TaskServiceCognitionFlowTest {
                     taskDetailQueryService,
                     taskResultQueryService,
                     taskAuditQueryService,
+                    taskManifestQueryService,
                     taskCatalogQueryService,
                     taskContractQueryService,
                     objectMapper,

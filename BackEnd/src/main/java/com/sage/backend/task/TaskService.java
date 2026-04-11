@@ -140,6 +140,7 @@ public class TaskService {
     private final TaskDetailQueryService taskDetailQueryService;
     private final TaskResultQueryService taskResultQueryService;
     private final TaskAuditQueryService taskAuditQueryService;
+    private final TaskManifestQueryService taskManifestQueryService;
     private final TaskCatalogQueryService taskCatalogQueryService;
     private final TaskContractQueryService taskContractQueryService;
     private final ObjectMapper objectMapper;
@@ -173,6 +174,7 @@ public class TaskService {
             TaskDetailQueryService taskDetailQueryService,
             TaskResultQueryService taskResultQueryService,
             TaskAuditQueryService taskAuditQueryService,
+            TaskManifestQueryService taskManifestQueryService,
             TaskCatalogQueryService taskCatalogQueryService,
             TaskContractQueryService taskContractQueryService,
             ObjectMapper objectMapper,
@@ -204,6 +206,7 @@ public class TaskService {
         this.taskDetailQueryService = taskDetailQueryService;
         this.taskResultQueryService = taskResultQueryService;
         this.taskAuditQueryService = taskAuditQueryService;
+        this.taskManifestQueryService = taskManifestQueryService;
         this.taskCatalogQueryService = taskCatalogQueryService;
         this.taskContractQueryService = taskContractQueryService;
         this.objectMapper = objectMapper;
@@ -721,122 +724,16 @@ public class TaskService {
         if (manifest == null) {
             throw new ResponseStatusException(NOT_FOUND, "Analysis manifest not available yet");
         }
-
-        TaskManifestResponse response = new TaskManifestResponse();
-        response.setManifestId(manifest.getManifestId());
-        response.setTaskId(manifest.getTaskId());
-        response.setAttemptNo(manifest.getAttemptNo());
-        response.setManifestVersion(manifest.getManifestVersion());
-        response.setFreezeStatus(manifest.getFreezeStatus());
-        response.setPlanningRevision(manifest.getPlanningRevision());
-        response.setCheckpointVersion(manifest.getCheckpointVersion());
-        response.setGraphDigest(manifest.getGraphDigest());
-        response.setPlanningSummary(TaskProjectionBuilder.buildJsonObjectView(readJsonNode(manifest.getPlanningSummaryJson()), objectMapper));
-        Map<String, Object> frozenCatalogSummary = readJsonMap(manifest == null ? null : manifest.getCatalogSummaryJson());
-        Map<String, Object> currentCatalogSummary = buildCatalogSummary(taskId, attachments, taskState);
-        Map<String, Object> catalogSummary = resolveManifestCatalogSummary(manifest, attachments, taskState);
-        response.setCatalogSummary(catalogSummary);
-        response.setCognitionVerdict(taskState.getCognitionVerdict());
-        JsonNode goalParseRoot = readJsonNode(taskState.getGoalParseJson());
-        JsonNode skillRouteRoot = readJsonNode(taskState.getSkillRouteJson());
-        response.setSkillId(skillRouteRoot.path("skill_id").asText(null));
-        response.setSkillVersion(skillRouteRoot.path("skill_version").asText(null));
-        response.setPlanningIntentStatus(goalParseRoot.path("planning_intent_status").asText(null));
-        JsonNode passBRoot = readJsonNode(taskState.getPassbResultJson());
-        response.setBindingStatus(passBRoot.path("binding_status").asText(null));
-        response.setOverruledFields(TaskProjectionBuilder.jsonArrayToStrings(passBRoot.path("overruled_fields")));
-        response.setBlockedMutations(TaskProjectionBuilder.jsonArrayToStrings(passBRoot.path("blocked_mutations")));
-        response.setAssemblyBlocked(passBRoot.path("assembly_blocked").isBoolean() ? passBRoot.path("assembly_blocked").asBoolean() : null);
-        response.setCaseProjection(TaskProjectionBuilder.buildCaseProjection(goalParseRoot, passBRoot, objectMapper));
-        response.setGoalRouteCognition(TaskProjectionBuilder.buildCognitionView(goalParseRoot, objectMapper));
-        response.setGoalRouteOutput(TaskProjectionBuilder.buildGoalRouteOutput(goalParseRoot, skillRouteRoot, objectMapper));
-        response.setPassbCognition(TaskProjectionBuilder.buildCognitionView(passBRoot, objectMapper));
-        response.setPassbOutput(TaskProjectionBuilder.buildStageOutput(passBRoot, objectMapper));
-        response.setResumeTransaction(TaskProjectionBuilder.buildResumeTransaction(readJsonNode(taskState.getResumeTxnJson())));
-        response.setCorruptionState(buildCorruptionState(taskState));
-        response.setPromotionStatus(derivePromotionStatus(taskState.getCurrentState(), taskState.getCorruptionReason()));
-        JsonNode pass2Root = readJsonNode(taskState.getPass2ResultJson());
-        response.setCanonicalizationSummary(TaskProjectionBuilder.buildJsonObjectView(pass2Root.path("canonicalization_summary"), objectMapper));
-        response.setRewriteSummary(TaskProjectionBuilder.buildJsonObjectView(pass2Root.path("rewrite_summary"), objectMapper));
-        JsonNode pass1Projection = readJsonNode(taskState.getPass1ResultJson());
-        Map<String, Object> manifestFrozenSummary = ContractConsistencyProjector.resolveManifestContractSummary(
-                readJsonMap(manifest == null ? null : manifest.getContractSummaryJson()),
-                pass1Projection
-        );
-        Map<String, Object> manifestCurrentSummary = ContractConsistencyProjector.buildContractSummary(pass1Projection);
-        Map<String, Object> manifestContractConsistency = ContractConsistencyProjector.buildFrozenContractConsistency(
-                "manifest_contract",
-                manifestFrozenSummary,
-                manifestCurrentSummary
-        );
-        response.setContractConsistency(manifestContractConsistency);
-        response.setContractGovernance(ContractGovernanceAssembler.build(
-                "manifest_contract_governance",
-                manifestFrozenSummary,
-                manifestCurrentSummary,
-                manifestContractConsistency,
-                response.getResumeTransaction()
-        ));
-        RouteProjection routeProjection = buildRouteProjection(
-                manifest.getGoalParseJson(),
-                manifest.getSkillRouteJson(),
-                pass1Projection
-        );
-        response.setGoalParse(TaskProjectionBuilder.buildManifestGoalParse(routeProjection.goalParse()));
-        response.setSkillRoute(TaskProjectionBuilder.buildManifestSkillRoute(routeProjection.skillRoute()));
-        TaskProjectionBuilder.applyPass1Projection(response, pass1Projection, objectMapper);
-        response.setLogicalInputRoles(TaskProjectionBuilder.buildManifestLogicalInputRoles(readJsonNode(manifest.getLogicalInputRolesJson())));
-        response.setSlotSchemaView(TaskProjectionBuilder.buildManifestSlotSchemaView(readJsonNode(manifest.getSlotSchemaViewJson())));
-        response.setSlotBindings(TaskProjectionBuilder.buildManifestSlotBindings(readJsonNode(manifest.getSlotBindingsJson())));
-        Map<String, Object> manifestCatalogConsistency = CatalogConsistencyProjector.mergeCoverageConsistency(
-                CatalogConsistencyProjector.buildFrozenCatalogConsistency(
-                        "manifest_catalog",
-                        frozenCatalogSummary,
-                        currentCatalogSummary
-                ),
-                extractManifestRoleNames(response.getSlotBindings()),
-                currentCatalogSummary,
-                "manifest_slot_bindings"
-        );
-        response.setCatalogConsistency(manifestCatalogConsistency);
-        response.setCatalogGovernance(CatalogGovernanceAssembler.build(
-                "manifest_catalog_governance",
-                frozenCatalogSummary,
-                currentCatalogSummary,
-                manifestCatalogConsistency
-        ));
-        response.setArgsDraft(TaskProjectionBuilder.buildJsonObjectView(readJsonNode(manifest.getArgsDraftJson()), objectMapper));
-        response.setValidationSummary(TaskProjectionBuilder.buildManifestValidationSummary(readJsonNode(manifest.getValidationSummaryJson())));
-        response.setExecutionGraph(TaskProjectionBuilder.buildManifestExecutionGraph(readJsonNode(manifest.getExecutionGraphJson())));
-        response.setRuntimeAssertions(TaskProjectionBuilder.buildManifestRuntimeAssertions(readJsonNode(manifest.getRuntimeAssertionsJson())));
-        response.setCreatedAt(manifest.getCreatedAt() == null ? null : manifest.getCreatedAt().toString());
         int attemptNo = resolveActiveAttemptNo(taskState);
         RepairRecord latestRepair = repairRecordMapper.findLatestByTaskIdAndAttemptNo(taskId, attemptNo);
-        if (latestRepair != null) {
-            JsonNode repairProposalNode = readJsonNode(latestRepair.getRepairProposalJson());
-            response.setRepairProposalCognition(TaskProjectionBuilder.buildCognitionView(repairProposalNode, objectMapper));
-            response.setRepairProposalOutput(TaskProjectionBuilder.buildStageOutput(repairProposalNode, objectMapper));
-        }
         JobRecord jobRecord = taskState.getJobId() == null ? null : jobRecordMapper.findByJobId(taskState.getJobId());
-        if (jobRecord != null) {
-            JsonNode finalExplanationNode = readJsonNode(jobRecord.getFinalExplanationJson());
-            response.setFinalExplanationCognition(TaskProjectionBuilder.buildCognitionView(finalExplanationNode, objectMapper));
-            response.setFinalExplanationOutput(TaskProjectionBuilder.buildStageOutput(finalExplanationNode, objectMapper));
-        }
-        return response;
-    }
-
-    private List<String> extractManifestRoleNames(List<TaskManifestResponse.SlotBinding> slotBindings) {
-        if (slotBindings == null || slotBindings.isEmpty()) {
-            return List.of();
-        }
-        Set<String> roleNames = new LinkedHashSet<>();
-        for (TaskManifestResponse.SlotBinding binding : slotBindings) {
-            if (binding != null && binding.getRoleName() != null && !binding.getRoleName().isBlank()) {
-                roleNames.add(binding.getRoleName());
-            }
-        }
-        return new ArrayList<>(roleNames);
+        return taskManifestQueryService.buildTaskManifestResponse(
+                taskState,
+                manifest,
+                attachments,
+                latestRepair,
+                jobRecord
+        );
     }
 
     @Transactional
