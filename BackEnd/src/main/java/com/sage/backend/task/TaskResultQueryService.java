@@ -70,54 +70,39 @@ public class TaskResultQueryService {
                 activeManifest == null ? null : activeManifest.getCatalogSummaryJson(),
                 objectMapper
         );
-        Map<String, Object> currentCatalogSummary = taskCatalogSnapshotService.resolveCatalogSummary(
+        Map<String, Object> currentCatalogSummary = TaskQuerySupport.resolveCurrentCatalogSummary(
                 taskId,
                 attachments,
-                TaskQuerySupport.currentInventoryVersion(taskState)
+                taskState,
+                taskCatalogSnapshotService
         );
-        Map<String, Object> catalogSummary = taskCatalogSnapshotService.resolveManifestCatalogSummary(
-                frozenCatalogSummary,
+        Map<String, Object> catalogSummary = TaskQuerySupport.resolveManifestCatalogSummary(
+                activeManifest,
                 taskId,
                 attachments,
-                TaskQuerySupport.currentInventoryVersion(taskState)
+                taskState,
+                taskCatalogSnapshotService,
+                objectMapper
         );
-        response.setCatalogSummary(catalogSummary);
-        Map<String, Object> resultCatalogConsistency = CatalogConsistencyProjector.mergeCoverageConsistency(
-                CatalogConsistencyProjector.buildFrozenCatalogConsistency(
-                        "result_catalog",
-                        frozenCatalogSummary,
-                        currentCatalogSummary
-                ),
-                List.of(),
-                currentCatalogSummary,
-                "result_input_bindings"
-        );
-        response.setCatalogConsistency(resultCatalogConsistency);
-        response.setCatalogGovernance(CatalogGovernanceAssembler.build(
+        TaskQuerySupport.CatalogProjection catalogProjection = TaskQuerySupport.buildFrozenCatalogProjection(
+                "result_catalog",
                 "result_catalog_governance",
                 frozenCatalogSummary,
                 currentCatalogSummary,
-                resultCatalogConsistency
-        ));
+                List.of(),
+                "result_input_bindings"
+        );
+        TaskQuerySupport.applyCatalogProjection(response, catalogProjection);
+        response.setCatalogSummary(catalogSummary);
         JsonNode pass1Projection = TaskQuerySupport.readJsonNode(taskState.getPass1ResultJson(), objectMapper);
-        Map<String, Object> resultFrozenSummary = ContractConsistencyProjector.resolveManifestContractSummary(
+        TaskQuerySupport.ContractProjection contractProjection = TaskQuerySupport.buildFrozenContractProjection(
+                pass1Projection,
                 TaskQuerySupport.readJsonMap(activeManifest == null ? null : activeManifest.getContractSummaryJson(), objectMapper),
-                pass1Projection
-        );
-        Map<String, Object> resultCurrentSummary = ContractConsistencyProjector.buildContractSummary(pass1Projection);
-        Map<String, Object> resultContractConsistency = ContractConsistencyProjector.buildFrozenContractConsistency(
+                response.getResumeTransaction(),
                 "result_manifest_contract",
-                resultFrozenSummary,
-                resultCurrentSummary
+                "result_contract_governance"
         );
-        response.setContractConsistency(resultContractConsistency);
-        response.setContractGovernance(ContractGovernanceAssembler.build(
-                "result_contract_governance",
-                resultFrozenSummary,
-                resultCurrentSummary,
-                resultContractConsistency,
-                response.getResumeTransaction()
-        ));
+        TaskQuerySupport.applyContractProjection(response, contractProjection);
         response.setGoalRouteCognition(TaskProjectionBuilder.buildCognitionView(goalParseRoot, objectMapper));
         response.setGoalRouteOutput(TaskProjectionBuilder.buildGoalRouteOutput(goalParseRoot, skillRouteRoot, objectMapper));
         response.setPassbCognition(TaskProjectionBuilder.buildCognitionView(passBRoot, objectMapper));
@@ -170,23 +155,16 @@ public class TaskResultQueryService {
                     TaskQuerySupport.readJsonNode(jobRecord.getPlanningPass2SummaryJson(), objectMapper),
                     objectMapper
             ));
-            resultCatalogConsistency = CatalogConsistencyProjector.mergeCoverageConsistency(
-                    CatalogConsistencyProjector.buildFrozenCatalogConsistency(
-                            "result_catalog",
-                            frozenCatalogSummary,
-                            currentCatalogSummary
-                    ),
-                    TaskQuerySupport.extractResultInputRoleNames(response),
-                    currentCatalogSummary,
-                    "result_input_bindings"
-            );
-            response.setCatalogConsistency(resultCatalogConsistency);
-            response.setCatalogGovernance(CatalogGovernanceAssembler.build(
+            catalogProjection = TaskQuerySupport.buildFrozenCatalogProjection(
+                    "result_catalog",
                     "result_catalog_governance",
                     frozenCatalogSummary,
                     currentCatalogSummary,
-                    resultCatalogConsistency
-            ));
+                    TaskQuerySupport.extractResultInputRoleNames(response),
+                    "result_input_bindings"
+            );
+            TaskQuerySupport.applyCatalogProjection(response, catalogProjection);
+            response.setCatalogSummary(catalogSummary);
         }
         if (latestRepair != null) {
             JsonNode repairProposalNode = TaskQuerySupport.readJsonNode(latestRepair.getRepairProposalJson(), objectMapper);

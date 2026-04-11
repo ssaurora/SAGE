@@ -32,32 +32,20 @@ public class TaskContractQueryService {
                 activeManifest == null ? null : activeManifest.getContractSummaryJson(),
                 objectMapper
         );
-        Map<String, Object> frozenContractSummary = ContractConsistencyProjector.resolveManifestContractSummary(
-                manifestContractSummary,
-                pass1Projection
-        );
-        Map<String, Object> currentContractSummary = ContractConsistencyProjector.buildContractSummary(pass1Projection);
         ResumeTransactionView resumeTransaction = TaskProjectionBuilder.buildResumeTransaction(
                 TaskQuerySupport.readJsonNode(taskState == null ? null : taskState.getResumeTxnJson(), objectMapper)
         );
-        Map<String, Object> contractConsistency = ContractConsistencyProjector.buildDetailContractConsistency(
-                frozenContractSummary,
-                currentContractSummary,
-                resumeTransaction
+        TaskQuerySupport.ContractProjection contractProjection = TaskQuerySupport.buildDetailContractProjection(
+                pass1Projection,
+                manifestContractSummary,
+                resumeTransaction,
+                "task_contract_query_governance"
         );
 
         TaskContractResponse response = new TaskContractResponse();
         response.setTaskId(taskId);
-        response.setFrozenContractSummary(frozenContractSummary);
-        response.setCurrentContractSummary(currentContractSummary);
+        TaskQuerySupport.applyContractProjection(response, contractProjection);
         response.setActiveManifest(buildManifestContractView(activeManifest, manifestContractSummary));
-        response.setContractGovernance(ContractGovernanceAssembler.build(
-                "task_contract_query_governance",
-                frozenContractSummary,
-                currentContractSummary,
-                contractConsistency,
-                resumeTransaction
-        ));
 
         if (auditRecords != null) {
             for (AuditRecord auditRecord : auditRecords) {

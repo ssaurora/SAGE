@@ -97,39 +97,21 @@ public class TaskDetailQueryService {
         response.setLastFailureSummary(TaskProjectionBuilder.buildFailureSummary(
                 TaskQuerySupport.readJsonNode(taskState.getLastFailureSummaryJson(), objectMapper)
         ));
-        response.setCatalogSummary(catalogSummary);
         response.setWaitingContext(TaskProjectionBuilder.buildWaitingContext(
                 TaskQuerySupport.readJsonNode(taskState.getWaitingContextJson(), objectMapper)
         ));
-        Map<String, Object> detailCatalogConsistency = CatalogConsistencyProjector.buildDetailCatalogConsistency(
+        TaskQuerySupport.CatalogProjection catalogProjection = TaskQuerySupport.buildDetailCatalogProjection(
                 response.getWaitingContext(),
                 catalogSummary
         );
-        response.setCatalogConsistency(detailCatalogConsistency);
-        response.setCatalogGovernance(CatalogGovernanceAssembler.build(
-                "task_catalog_governance",
-                response.getWaitingContext() == null ? null : response.getWaitingContext().getCatalogSummary(),
-                catalogSummary,
-                detailCatalogConsistency
-        ));
-        Map<String, Object> detailFrozenSummary = ContractConsistencyProjector.resolveManifestContractSummary(
+        TaskQuerySupport.applyCatalogProjection(response, catalogProjection);
+        TaskQuerySupport.ContractProjection contractProjection = TaskQuerySupport.buildDetailContractProjection(
+                pass1Projection,
                 TaskQuerySupport.readJsonMap(activeManifest == null ? null : activeManifest.getContractSummaryJson(), objectMapper),
-                pass1Projection
+                response.getResumeTransaction(),
+                "task_contract_governance"
         );
-        Map<String, Object> detailCurrentSummary = ContractConsistencyProjector.buildContractSummary(pass1Projection);
-        Map<String, Object> detailContractConsistency = ContractConsistencyProjector.buildDetailContractConsistency(
-                detailFrozenSummary,
-                detailCurrentSummary,
-                response.getResumeTransaction()
-        );
-        response.setContractConsistency(detailContractConsistency);
-        response.setContractGovernance(ContractGovernanceAssembler.build(
-                "task_contract_governance",
-                detailFrozenSummary,
-                detailCurrentSummary,
-                detailContractConsistency,
-                response.getResumeTransaction()
-        ));
+        TaskQuerySupport.applyContractProjection(response, contractProjection);
         response.setLatestResultBundleId(taskState.getLatestResultBundleId());
         response.setLatestWorkspaceId(taskState.getLatestWorkspaceId());
         JsonNode pass2Root = TaskQuerySupport.readJsonNode(taskState.getPass2ResultJson(), objectMapper);

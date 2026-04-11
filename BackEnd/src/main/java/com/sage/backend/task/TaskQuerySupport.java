@@ -3,9 +3,15 @@ package com.sage.backend.task;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sage.backend.model.AnalysisManifest;
+import com.sage.backend.model.TaskAttachment;
 import com.sage.backend.model.TaskState;
 import com.sage.backend.model.TaskStatus;
+import com.sage.backend.task.dto.CatalogGovernanceView;
 import com.sage.backend.task.dto.CorruptionStateView;
+import com.sage.backend.task.dto.ContractGovernanceView;
+import com.sage.backend.task.dto.ResumeTransactionView;
+import com.sage.backend.task.dto.TaskContractResponse;
+import com.sage.backend.task.dto.TaskDetailResponse;
 import com.sage.backend.task.dto.TaskManifestResponse;
 import com.sage.backend.task.dto.TaskResultResponse;
 
@@ -86,6 +92,36 @@ final class TaskQuerySupport {
         return taskState.getInventoryVersion();
     }
 
+    static Map<String, Object> resolveCurrentCatalogSummary(
+            String taskId,
+            List<TaskAttachment> attachments,
+            TaskState taskState,
+            TaskCatalogSnapshotService taskCatalogSnapshotService
+    ) {
+        return taskCatalogSnapshotService.resolveCatalogSummary(
+                taskId,
+                attachments,
+                currentInventoryVersion(taskState)
+        );
+    }
+
+    static Map<String, Object> resolveManifestCatalogSummary(
+            AnalysisManifest manifest,
+            String taskId,
+            List<TaskAttachment> attachments,
+            TaskState taskState,
+            TaskCatalogSnapshotService taskCatalogSnapshotService,
+            ObjectMapper objectMapper
+    ) {
+        Map<String, Object> frozenSummary = readJsonMap(manifest == null ? null : manifest.getCatalogSummaryJson(), objectMapper);
+        return taskCatalogSnapshotService.resolveManifestCatalogSummary(
+                frozenSummary,
+                taskId,
+                attachments,
+                currentInventoryVersion(taskState)
+        );
+    }
+
     static RouteProjection buildRouteProjection(
             String goalParseJson,
             String skillRouteJson,
@@ -97,6 +133,167 @@ final class TaskQuerySupport {
                 goalRouteService.enrichGoalParse(readJsonNode(goalParseJson, objectMapper), pass1Projection),
                 goalRouteService.enrichSkillRoute(readJsonNode(skillRouteJson, objectMapper), pass1Projection)
         );
+    }
+
+    static CatalogProjection buildDetailCatalogProjection(
+            TaskDetailResponse.WaitingContext waitingContext,
+            Map<String, Object> currentCatalogSummary
+    ) {
+        Map<String, Object> consistency = CatalogConsistencyProjector.buildDetailCatalogConsistency(
+                waitingContext,
+                currentCatalogSummary
+        );
+        CatalogGovernanceView governance = CatalogGovernanceAssembler.build(
+                "task_catalog_governance",
+                waitingContext == null ? null : waitingContext.getCatalogSummary(),
+                currentCatalogSummary,
+                consistency
+        );
+        return new CatalogProjection(currentCatalogSummary, consistency, governance);
+    }
+
+    static void applyCatalogProjection(TaskDetailResponse response, CatalogProjection projection) {
+        if (response == null || projection == null) {
+            return;
+        }
+        response.setCatalogSummary(projection.summary());
+        response.setCatalogConsistency(projection.consistency());
+        response.setCatalogGovernance(projection.governance());
+    }
+
+    static void applyCatalogProjection(TaskManifestResponse response, CatalogProjection projection) {
+        if (response == null || projection == null) {
+            return;
+        }
+        response.setCatalogSummary(projection.summary());
+        response.setCatalogConsistency(projection.consistency());
+        response.setCatalogGovernance(projection.governance());
+    }
+
+    static void applyCatalogProjection(TaskResultResponse response, CatalogProjection projection) {
+        if (response == null || projection == null) {
+            return;
+        }
+        response.setCatalogSummary(projection.summary());
+        response.setCatalogConsistency(projection.consistency());
+        response.setCatalogGovernance(projection.governance());
+    }
+
+    static CatalogProjection buildFrozenCatalogProjection(
+            String consistencyScope,
+            String governanceScope,
+            Map<String, Object> frozenCatalogSummary,
+            Map<String, Object> currentCatalogSummary,
+            List<String> expectedRoleNames,
+            String coverageSource
+    ) {
+        Map<String, Object> consistency = CatalogConsistencyProjector.mergeCoverageConsistency(
+                CatalogConsistencyProjector.buildFrozenCatalogConsistency(
+                        consistencyScope,
+                        frozenCatalogSummary,
+                        currentCatalogSummary
+                ),
+                expectedRoleNames,
+                currentCatalogSummary,
+                coverageSource
+        );
+        CatalogGovernanceView governance = CatalogGovernanceAssembler.build(
+                governanceScope,
+                frozenCatalogSummary,
+                currentCatalogSummary,
+                consistency
+        );
+        return new CatalogProjection(
+                frozenCatalogSummary != null && !frozenCatalogSummary.isEmpty() ? frozenCatalogSummary : currentCatalogSummary,
+                consistency,
+                governance
+        );
+    }
+
+    static ContractProjection buildDetailContractProjection(
+            JsonNode pass1Projection,
+            Map<String, Object> manifestContractSummary,
+            ResumeTransactionView resumeTransaction,
+            String governanceScope
+    ) {
+        Map<String, Object> frozenSummary = ContractConsistencyProjector.resolveManifestContractSummary(
+                manifestContractSummary,
+                pass1Projection
+        );
+        Map<String, Object> currentSummary = ContractConsistencyProjector.buildContractSummary(pass1Projection);
+        Map<String, Object> consistency = ContractConsistencyProjector.buildDetailContractConsistency(
+                frozenSummary,
+                currentSummary,
+                resumeTransaction
+        );
+        ContractGovernanceView governance = ContractGovernanceAssembler.build(
+                governanceScope,
+                frozenSummary,
+                currentSummary,
+                consistency,
+                resumeTransaction
+        );
+        return new ContractProjection(frozenSummary, currentSummary, consistency, governance);
+    }
+
+    static void applyContractProjection(TaskDetailResponse response, ContractProjection projection) {
+        if (response == null || projection == null) {
+            return;
+        }
+        response.setContractConsistency(projection.consistency());
+        response.setContractGovernance(projection.governance());
+    }
+
+    static void applyContractProjection(TaskManifestResponse response, ContractProjection projection) {
+        if (response == null || projection == null) {
+            return;
+        }
+        response.setContractConsistency(projection.consistency());
+        response.setContractGovernance(projection.governance());
+    }
+
+    static void applyContractProjection(TaskResultResponse response, ContractProjection projection) {
+        if (response == null || projection == null) {
+            return;
+        }
+        response.setContractConsistency(projection.consistency());
+        response.setContractGovernance(projection.governance());
+    }
+
+    static void applyContractProjection(TaskContractResponse response, ContractProjection projection) {
+        if (response == null || projection == null) {
+            return;
+        }
+        response.setFrozenContractSummary(projection.frozenSummary());
+        response.setCurrentContractSummary(projection.currentSummary());
+        response.setContractGovernance(projection.governance());
+    }
+
+    static ContractProjection buildFrozenContractProjection(
+            JsonNode pass1Projection,
+            Map<String, Object> manifestContractSummary,
+            ResumeTransactionView resumeTransaction,
+            String consistencyScope,
+            String governanceScope
+    ) {
+        Map<String, Object> frozenSummary = ContractConsistencyProjector.resolveManifestContractSummary(
+                manifestContractSummary,
+                pass1Projection
+        );
+        Map<String, Object> currentSummary = ContractConsistencyProjector.buildContractSummary(pass1Projection);
+        Map<String, Object> consistency = ContractConsistencyProjector.buildFrozenContractConsistency(
+                consistencyScope,
+                frozenSummary,
+                currentSummary
+        );
+        ContractGovernanceView governance = ContractGovernanceAssembler.build(
+                governanceScope,
+                frozenSummary,
+                currentSummary,
+                consistency,
+                resumeTransaction
+        );
+        return new ContractProjection(frozenSummary, currentSummary, consistency, governance);
     }
 
     static List<String> extractManifestRoleNames(List<TaskManifestResponse.SlotBinding> slotBindings) {
@@ -128,6 +325,21 @@ final class TaskQuerySupport {
     record RouteProjection(
             JsonNode goalParse,
             JsonNode skillRoute
+    ) {
+    }
+
+    record CatalogProjection(
+            Map<String, Object> summary,
+            Map<String, Object> consistency,
+            CatalogGovernanceView governance
+    ) {
+    }
+
+    record ContractProjection(
+            Map<String, Object> frozenSummary,
+            Map<String, Object> currentSummary,
+            Map<String, Object> consistency,
+            ContractGovernanceView governance
     ) {
     }
 }

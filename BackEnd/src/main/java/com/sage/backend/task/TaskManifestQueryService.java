@@ -56,18 +56,20 @@ public class TaskManifestQueryService {
         }
 
         Map<String, Object> frozenCatalogSummary = TaskQuerySupport.readJsonMap(manifest.getCatalogSummaryJson(), objectMapper);
-        Map<String, Object> currentCatalogSummary = taskCatalogSnapshotService.resolveCatalogSummary(
+        Map<String, Object> currentCatalogSummary = TaskQuerySupport.resolveCurrentCatalogSummary(
                 taskId,
                 attachments,
-                TaskQuerySupport.currentInventoryVersion(taskState)
+                taskState,
+                taskCatalogSnapshotService
         );
-        Map<String, Object> catalogSummary = taskCatalogSnapshotService.resolveManifestCatalogSummary(
-                frozenCatalogSummary,
+        Map<String, Object> catalogSummary = TaskQuerySupport.resolveManifestCatalogSummary(
+                manifest,
                 taskId,
                 attachments,
-                TaskQuerySupport.currentInventoryVersion(taskState)
+                taskState,
+                taskCatalogSnapshotService,
+                objectMapper
         );
-        response.setCatalogSummary(catalogSummary);
         response.setCognitionVerdict(taskState.getCognitionVerdict());
 
         JsonNode goalParseRoot = TaskQuerySupport.readJsonNode(taskState.getGoalParseJson(), objectMapper);
@@ -108,24 +110,14 @@ public class TaskManifestQueryService {
         ));
 
         JsonNode pass1Projection = TaskQuerySupport.readJsonNode(taskState.getPass1ResultJson(), objectMapper);
-        Map<String, Object> manifestFrozenSummary = ContractConsistencyProjector.resolveManifestContractSummary(
+        TaskQuerySupport.ContractProjection contractProjection = TaskQuerySupport.buildFrozenContractProjection(
+                pass1Projection,
                 TaskQuerySupport.readJsonMap(manifest.getContractSummaryJson(), objectMapper),
-                pass1Projection
-        );
-        Map<String, Object> manifestCurrentSummary = ContractConsistencyProjector.buildContractSummary(pass1Projection);
-        Map<String, Object> manifestContractConsistency = ContractConsistencyProjector.buildFrozenContractConsistency(
+                response.getResumeTransaction(),
                 "manifest_contract",
-                manifestFrozenSummary,
-                manifestCurrentSummary
+                "manifest_contract_governance"
         );
-        response.setContractConsistency(manifestContractConsistency);
-        response.setContractGovernance(ContractGovernanceAssembler.build(
-                "manifest_contract_governance",
-                manifestFrozenSummary,
-                manifestCurrentSummary,
-                manifestContractConsistency,
-                response.getResumeTransaction()
-        ));
+        TaskQuerySupport.applyContractProjection(response, contractProjection);
 
         TaskQuerySupport.RouteProjection routeProjection = TaskQuerySupport.buildRouteProjection(
                 manifest.getGoalParseJson(),
@@ -147,23 +139,16 @@ public class TaskManifestQueryService {
                 TaskQuerySupport.readJsonNode(manifest.getSlotBindingsJson(), objectMapper)
         ));
 
-        Map<String, Object> manifestCatalogConsistency = CatalogConsistencyProjector.mergeCoverageConsistency(
-                CatalogConsistencyProjector.buildFrozenCatalogConsistency(
-                        "manifest_catalog",
-                        frozenCatalogSummary,
-                        currentCatalogSummary
-                ),
-                TaskQuerySupport.extractManifestRoleNames(response.getSlotBindings()),
-                currentCatalogSummary,
-                "manifest_slot_bindings"
-        );
-        response.setCatalogConsistency(manifestCatalogConsistency);
-        response.setCatalogGovernance(CatalogGovernanceAssembler.build(
+        TaskQuerySupport.CatalogProjection catalogProjection = TaskQuerySupport.buildFrozenCatalogProjection(
+                "manifest_catalog",
                 "manifest_catalog_governance",
                 frozenCatalogSummary,
                 currentCatalogSummary,
-                manifestCatalogConsistency
-        ));
+                TaskQuerySupport.extractManifestRoleNames(response.getSlotBindings()),
+                "manifest_slot_bindings"
+        );
+        TaskQuerySupport.applyCatalogProjection(response, catalogProjection);
+        response.setCatalogSummary(catalogSummary);
 
         response.setArgsDraft(TaskProjectionBuilder.buildJsonObjectView(
                 TaskQuerySupport.readJsonNode(manifest.getArgsDraftJson(), objectMapper),
