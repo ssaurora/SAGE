@@ -1354,15 +1354,35 @@ public class TaskService {
             return null;
         }
         if (JobState.CANCELLED.name().equals(newState)) {
-            appendEvent(
+            appendJobCancelledEvent(taskState, jobRecord, status);
+        }
+        TerminalFailureProjection terminalFailure = persistTerminalFailureProjection(taskState, jobRecord, status, newState);
+        if (JobState.FAILED.name().equals(newState)) {
+            TerminalFailureHandling assertionHandling = resolveAssertionFailureHandling(taskState, terminalFailure.failureSummaryNode());
+            if (assertionHandling != null) {
+                return assertionHandling;
+            }
+        }
+        return new TerminalFailureHandling(mapJobStateToTaskState(newState), null);
+    }
+
+    private void appendJobCancelledEvent(TaskState taskState, JobRecord jobRecord, JobStatusResponse status) throws Exception {
+        appendEvent(
                 taskState.getTaskId(),
                 EventType.JOB_CANCELLED.name(),
                 null,
-                    null,
-                    taskState.getStateVersion(),
-                        writePayload(TaskControlPayloadBuilder.buildCancelledJobEventPayload(jobRecord.getJobId(), status.getCancelReason()))
-            );
-        }
+                null,
+                taskState.getStateVersion(),
+                writePayload(TaskControlPayloadBuilder.buildCancelledJobEventPayload(jobRecord.getJobId(), status.getCancelReason()))
+        );
+    }
+
+    private TerminalFailureProjection persistTerminalFailureProjection(
+            TaskState taskState,
+            JobRecord jobRecord,
+            JobStatusResponse status,
+            String newState
+    ) throws Exception {
         String failureSummaryJson = writePayload(TaskProjectionBuilder.buildFailureSummaryPayload(
                 status.getFailureSummary(),
                 status.getErrorObject(),
@@ -1376,37 +1396,37 @@ public class TaskService {
                 null
         );
         workspaceTraceService.persistArtifacts(taskState.getTaskId(), jobRecord, null, status.getArtifactCatalog());
-        int attemptNo = resolveActiveAttemptNo(taskState);
         taskAttemptMapper.updateSnapshotAndJob(
                 taskState.getTaskId(),
-                attemptNo,
+                resolveActiveAttemptNo(taskState),
                 jobRecord.getJobId(),
                 writePayload(TaskControlPayloadBuilder.buildAttemptRuntimeSnapshotPayload(newState, taskState.getCurrentState())),
                 OffsetDateTime.now(ZoneOffset.UTC)
         );
-        if (JobState.FAILED.name().equals(newState)) {
-            JsonNode failureSummary = readJsonNode(failureSummaryJson);
-            RepairDecision assertionDecision = assertionFailureMapper.map(
-                    failureSummary,
-                    readJsonNode(taskState.getPass1ResultJson()),
-                    taskAttachmentMapper.findByTaskId(taskState.getTaskId())
-            );
-            if (assertionDecision != null) {
-                if (isFatalRepairDecision(assertionDecision)) {
-                    return new TerminalFailureHandling(TaskStatus.FAILED, null);
-                }
-                WaitingStateSnapshot waitingState = buildWaitingStateSnapshot(
-                        taskState.getTaskId(),
-                        assertionDecision,
-                        readJsonNode(taskState.getValidationSummaryJson()),
-                        failureSummary,
-                        null,
-                        false
-                );
-                return new TerminalFailureHandling(TaskStatus.WAITING_USER, waitingState);
-            }
+        return new TerminalFailureProjection(failureSummaryJson, readJsonNode(failureSummaryJson));
+    }
+
+    private TerminalFailureHandling resolveAssertionFailureHandling(TaskState taskState, JsonNode failureSummary) throws Exception {
+        RepairDecision assertionDecision = assertionFailureMapper.map(
+                failureSummary,
+                readJsonNode(taskState.getPass1ResultJson()),
+                taskAttachmentMapper.findByTaskId(taskState.getTaskId())
+        );
+        if (assertionDecision == null) {
+            return null;
         }
-        return new TerminalFailureHandling(mapJobStateToTaskState(newState), null);
+        if (isFatalRepairDecision(assertionDecision)) {
+            return new TerminalFailureHandling(TaskStatus.FAILED, null);
+        }
+        WaitingStateSnapshot waitingState = buildWaitingStateSnapshot(
+                taskState.getTaskId(),
+                assertionDecision,
+                readJsonNode(taskState.getValidationSummaryJson()),
+                failureSummary,
+                null,
+                false
+        );
+        return new TerminalFailureHandling(TaskStatus.WAITING_USER, waitingState);
     }
 
     private SuccessOutputSummaries buildSuccessOutputSummaries(JobStatusResponse status, JsonNode finalExplanation) throws Exception {
@@ -3727,6 +3747,12 @@ public class TaskService {
     private record TerminalFailureHandling(
             TaskStatus projectedState,
             WaitingStateSnapshot waitingState
+    ) {
+    }
+
+    private record TerminalFailureProjection(
+            String failureSummaryJson,
+            JsonNode failureSummaryNode
     ) {
     }
 
