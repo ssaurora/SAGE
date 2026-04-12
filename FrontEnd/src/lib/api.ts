@@ -800,3 +800,208 @@ export function subscribeTaskStream(
     abortController.abort();
   };
 }
+
+export type SessionMessage = {
+  message_id: string;
+  session_id: string;
+  task_id?: string | null;
+  result_bundle_id?: string | null;
+  role: string;
+  message_type: string;
+  content?: Record<string, unknown> | null;
+  attachment_refs?: Record<string, unknown> | null;
+  action_schema?: Record<string, unknown> | null;
+  related_object_refs?: Record<string, unknown> | null;
+  created_at?: string | null;
+};
+
+export type AnalysisSessionResponse = {
+  session_id: string;
+  title?: string | null;
+  user_goal: string;
+  status: string;
+  scene_id?: string | null;
+  current_task_id?: string | null;
+  latest_result_bundle_id?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  current_required_user_action?: Record<string, unknown> | null;
+  session_context_summary?: Record<string, unknown> | null;
+  current_task_summary?: Record<string, unknown> | null;
+  latest_result_summary?: Record<string, unknown> | null;
+  progress_projection?: Record<string, unknown> | null;
+  waiting_projection?: Record<string, unknown> | null;
+};
+
+export type CreateSessionResponse = AnalysisSessionResponse;
+
+export type SessionMessagesResponse = {
+  session_id: string;
+  items: SessionMessage[];
+};
+
+export type SessionListItem = {
+  session_id: string;
+  title?: string | null;
+  user_goal: string;
+  status: string;
+  scene_id?: string | null;
+  current_task_id?: string | null;
+  latest_result_bundle_id?: string | null;
+  session_summary?: Record<string, unknown> | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type SessionListResponse = {
+  items: SessionListItem[];
+  summary?: {
+    total_sessions?: number;
+    needs_action_count?: number;
+    running_count?: number;
+    ready_results_count?: number;
+    priority_sessions?: SessionListItem[];
+  };
+};
+
+export type UploadSessionAttachmentResponse = {
+  session_id: string;
+  task_id: string;
+  attachment_id: string;
+  logical_slot?: string | null;
+  stored_path?: string | null;
+  size_bytes?: number | null;
+  created_at?: string | null;
+  assignment_status?: string | null;
+};
+
+export type SessionStreamResponse = {
+  session: AnalysisSessionResponse;
+  messages: SessionMessagesResponse;
+  progress_projection?: Record<string, unknown> | null;
+  waiting_projection?: Record<string, unknown> | null;
+  latest_result_summary?: Record<string, unknown> | null;
+};
+
+export function createSession(payload: {
+  user_goal: string;
+  title?: string;
+  scene_id?: string;
+}): Promise<CreateSessionResponse> {
+  return apiFetch<CreateSessionResponse>("/sessions", {
+    method: "POST",
+    withAuth: true,
+    body: JSON.stringify(payload),
+  });
+}
+
+export function listSessions(params?: {
+  status?: string;
+  scene_id?: string;
+  limit?: number;
+}): Promise<SessionListResponse> {
+  const search = new URLSearchParams();
+  if (params?.status) search.set("status", params.status);
+  if (params?.scene_id) search.set("scene_id", params.scene_id);
+  if (params?.limit) search.set("limit", String(params.limit));
+  const queryString = search.toString();
+  const query = queryString ? `?${queryString}` : "";
+  return apiFetch<SessionListResponse>(`/sessions${query}`, {
+    method: "GET",
+    withAuth: true,
+  });
+}
+
+export function getSession(sessionId: string): Promise<AnalysisSessionResponse> {
+  return apiFetch<AnalysisSessionResponse>(`/sessions/${sessionId}`, {
+    method: "GET",
+    withAuth: true,
+  });
+}
+
+export function getSessionMessages(sessionId: string): Promise<SessionMessagesResponse> {
+  return apiFetch<SessionMessagesResponse>(`/sessions/${sessionId}/messages`, {
+    method: "GET",
+    withAuth: true,
+  });
+}
+
+export function postSessionMessage(
+  sessionId: string,
+  payload: {
+    content: string;
+    client_request_id: string;
+    attachment_ids?: string[];
+    slot_overrides?: Record<string, unknown>;
+    args_overrides?: Record<string, unknown>;
+  },
+): Promise<AnalysisSessionResponse> {
+  return apiFetch<AnalysisSessionResponse>(`/sessions/${sessionId}/messages`, {
+    method: "POST",
+    withAuth: true,
+    body: JSON.stringify(payload),
+  });
+}
+
+export function uploadSessionAttachment(
+  sessionId: string,
+  file: File,
+  logicalSlot?: string,
+): Promise<UploadSessionAttachmentResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  if (logicalSlot) {
+    formData.append("logical_slot", logicalSlot);
+  }
+  return apiFetch<UploadSessionAttachmentResponse>(`/sessions/${sessionId}/attachments`, {
+    method: "POST",
+    withAuth: true,
+    body: formData,
+  });
+}
+
+export function subscribeSessionStream(
+  sessionId: string,
+  handlers: {
+    onUpdate: (payload: SessionStreamResponse) => void;
+    onError: (error: Error) => void;
+  },
+): () => void {
+  const token = getAccessToken();
+  if (!token) {
+    throw new Error("鏈櫥褰曪紝璇峰厛鐧诲綍");
+  }
+
+  const abortController = new AbortController();
+  void fetchEventSource(`${API_BASE_URL}/sessions/${sessionId}/stream`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "text/event-stream",
+    },
+    signal: abortController.signal,
+    openWhenHidden: true,
+    onmessage(event) {
+      if (event.event !== "session_update") {
+        return;
+      }
+      try {
+        handlers.onUpdate(JSON.parse(event.data) as SessionStreamResponse);
+      } catch (error) {
+        handlers.onError(error instanceof Error ? error : new Error("Session SSE data parse failed"));
+      }
+    },
+    onerror(error) {
+      handlers.onError(error instanceof Error ? error : new Error("Session SSE connection failed"));
+      throw error;
+    },
+  }).catch((error) => {
+    if (!abortController.signal.aborted) {
+      handlers.onError(error instanceof Error ? error : new Error("Session SSE subscribe failed"));
+    }
+  });
+
+  return () => {
+    abortController.abort();
+  };
+}

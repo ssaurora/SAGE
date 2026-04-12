@@ -4,6 +4,7 @@ import java.time.OffsetDateTime;
 
 public class TaskState {
     private String taskId;
+    private String sessionId;
     private Long userId;
     private String currentState;
     private Integer stateVersion;
@@ -48,6 +49,14 @@ public class TaskState {
 
     public void setTaskId(String taskId) {
         this.taskId = taskId;
+    }
+
+    public String getSessionId() {
+        return sessionId;
+    }
+
+    public void setSessionId(String sessionId) {
+        this.sessionId = sessionId;
     }
 
     public Long getUserId() {

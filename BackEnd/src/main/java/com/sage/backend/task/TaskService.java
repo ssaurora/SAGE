@@ -27,6 +27,7 @@ import com.sage.backend.mapper.RepairRecordMapper;
 import com.sage.backend.mapper.TaskAttachmentMapper;
 import com.sage.backend.mapper.TaskAttemptMapper;
 import com.sage.backend.mapper.TaskStateMapper;
+import com.sage.backend.model.AnalysisSession;
 import com.sage.backend.model.AnalysisManifest;
 import com.sage.backend.model.EventLog;
 import com.sage.backend.model.EventType;
@@ -73,6 +74,7 @@ import com.sage.backend.repair.RepairDispatcherService;
 import com.sage.backend.repair.RepairProposalService;
 import com.sage.backend.repair.dto.RepairProposalResponse;
 import com.sage.backend.security.CurrentUser;
+import com.sage.backend.session.SessionLifecycleService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -143,6 +145,7 @@ public class TaskService {
     private final TaskManifestQueryService taskManifestQueryService;
     private final TaskCatalogQueryService taskCatalogQueryService;
     private final TaskContractQueryService taskContractQueryService;
+    private final SessionLifecycleService sessionLifecycleService;
     private final ObjectMapper objectMapper;
     private final Path uploadRoot;
     private final ExecutorService streamExecutor = Executors.newCachedThreadPool();
@@ -177,6 +180,7 @@ public class TaskService {
             TaskManifestQueryService taskManifestQueryService,
             TaskCatalogQueryService taskCatalogQueryService,
             TaskContractQueryService taskContractQueryService,
+            SessionLifecycleService sessionLifecycleService,
             ObjectMapper objectMapper,
             @Value("${sage.upload.root:BackEnd/runtime/uploads}") String uploadRoot
     ) {
@@ -209,17 +213,94 @@ public class TaskService {
         this.taskManifestQueryService = taskManifestQueryService;
         this.taskCatalogQueryService = taskCatalogQueryService;
         this.taskContractQueryService = taskContractQueryService;
+        this.sessionLifecycleService = sessionLifecycleService;
         this.objectMapper = objectMapper;
         this.uploadRoot = Path.of(uploadRoot).toAbsolutePath().normalize();
     }
 
+    public TaskService(
+            TaskStateMapper taskStateMapper,
+            AnalysisManifestMapper analysisManifestMapper,
+            JobRecordMapper jobRecordMapper,
+            TaskAttachmentMapper taskAttachmentMapper,
+            RepairRecordMapper repairRecordMapper,
+            TaskAttemptMapper taskAttemptMapper,
+            TaskCatalogSnapshotService taskCatalogSnapshotService,
+            EventService eventService,
+            AuditService auditService,
+            CognitionFinalExplanationClient cognitionFinalExplanationClient,
+            CognitionGoalRouteClient cognitionGoalRouteClient,
+            Pass1Client pass1Client,
+            CognitionPassBClient cognitionPassBClient,
+            ValidationClient validationClient,
+            Pass2Client pass2Client,
+            JobRuntimeClient jobRuntimeClient,
+            RepairDispatcherService repairDispatcherService,
+            RepairProposalService repairProposalService,
+            AssertionFailureMapper assertionFailureMapper,
+            GoalRouteService goalRouteService,
+            ExecutionContractAssembler executionContractAssembler,
+            RegistryService registryService,
+            WorkspaceTraceService workspaceTraceService,
+            TaskDetailQueryService taskDetailQueryService,
+            TaskResultQueryService taskResultQueryService,
+            TaskAuditQueryService taskAuditQueryService,
+            TaskManifestQueryService taskManifestQueryService,
+            TaskCatalogQueryService taskCatalogQueryService,
+            TaskContractQueryService taskContractQueryService,
+            ObjectMapper objectMapper,
+            String uploadRoot
+    ) {
+        this(
+                taskStateMapper,
+                analysisManifestMapper,
+                jobRecordMapper,
+                taskAttachmentMapper,
+                repairRecordMapper,
+                taskAttemptMapper,
+                taskCatalogSnapshotService,
+                eventService,
+                auditService,
+                cognitionFinalExplanationClient,
+                cognitionGoalRouteClient,
+                pass1Client,
+                cognitionPassBClient,
+                validationClient,
+                pass2Client,
+                jobRuntimeClient,
+                repairDispatcherService,
+                repairProposalService,
+                assertionFailureMapper,
+                goalRouteService,
+                executionContractAssembler,
+                registryService,
+                workspaceTraceService,
+                taskDetailQueryService,
+                taskResultQueryService,
+                taskAuditQueryService,
+                taskManifestQueryService,
+                taskCatalogQueryService,
+                taskContractQueryService,
+                new NoOpSessionLifecycleService(),
+                objectMapper,
+                uploadRoot
+        );
+    }
+
     @Transactional
     public CreateTaskResponse createTask(Long userId, CreateTaskRequest request) {
+        AnalysisSession session = sessionLifecycleService.createSessionShell(userId, request.getUserQuery(), null, null);
+        return createTaskInSession(userId, request, session.getSessionId(), true);
+    }
+
+    @Transactional
+    public CreateTaskResponse createTaskInSession(Long userId, CreateTaskRequest request, String sessionId, boolean appendUserGoalMessage) {
         String traceId = UUID.randomUUID().toString();
         String taskId = TaskIdGenerator.generate();
 
         TaskState taskState = new TaskState();
         taskState.setTaskId(taskId);
+        taskState.setSessionId(sessionId);
         taskState.setUserId(userId);
         taskState.setCurrentState(TaskStatus.CREATED.name());
         taskState.setStateVersion(0);
@@ -230,6 +311,10 @@ public class TaskService {
         taskState.setCheckpointVersion(0);
         taskState.setInventoryVersion(0);
         taskStateMapper.insert(taskState);
+        sessionLifecycleService.bindTaskToSession(sessionId, taskId, request.getUserQuery());
+        if (appendUserGoalMessage) {
+            sessionLifecycleService.recordUserGoal(sessionId, taskId, request.getUserQuery());
+        }
 
         TaskAttempt initialAttempt = new TaskAttempt();
         initialAttempt.setTaskId(taskId);
@@ -254,8 +339,11 @@ public class TaskService {
             String goalParseJson = writeJson(goalParseNode);
             String skillRouteJson = writeJson(skillRouteNode);
             taskStateMapper.updateGoalAndRoute(taskId, goalParseJson, skillRouteJson);
+            taskState.setGoalParseJson(goalParseJson);
+            taskState.setSkillRouteJson(skillRouteJson);
             appendEvent(taskId, EventType.GOAL_PARSED.name(), null, null, currentVersion, goalParseJson);
             appendEvent(taskId, EventType.SKILL_ROUTED.name(), null, null, currentVersion, skillRouteJson);
+            sessionLifecycleService.recordAssistantUnderstanding(taskState);
 
             if ("unsupported".equalsIgnoreCase(goalRouteResponse.getPlanningIntentStatus())) {
                 String failureSummaryJson = writePayload(buildUnsupportedFailureSummaryPayload(goalRouteNodeSummary(goalParseNode)));
@@ -544,6 +632,17 @@ public class TaskService {
             ));
             appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.QUEUED.name(), currentVersion + 1, null);
             currentVersion += 1;
+            taskState.setCurrentState(TaskStatus.QUEUED.name());
+            taskState.setStateVersion(currentVersion);
+            taskState.setLatestResultBundleId(null);
+            sessionLifecycleService.syncFromTask(taskState);
+            sessionLifecycleService.recordProgressUpdate(
+                    taskState,
+                    TaskStatus.QUEUED.name(),
+                    "Queued for runtime execution",
+                    "The governed task was accepted and queued.",
+                    "Runtime start"
+            );
 
             appendTaskCreateAudit(
                     taskId,
@@ -791,6 +890,9 @@ public class TaskService {
             response.setState(latestTaskState == null ? taskState.getCurrentState() : latestTaskState.getCurrentState());
             response.setJobState(latestJobRecord == null ? null : latestJobRecord.getJobState());
             response.setAccepted(true);
+            if (latestTaskState != null) {
+                sessionLifecycleService.syncFromTask(latestTaskState);
+            }
             return response;
         } catch (HttpClientErrorException.Conflict exception) {
             throw new ResponseStatusException(CONFLICT, "Job already terminal", exception);
@@ -849,6 +951,9 @@ public class TaskService {
             taskCatalogSnapshotService.persistCatalogSnapshot(taskId, taskAttachmentMapper.findByTaskId(taskId), currentInventoryVersion(refreshedTaskState));
 
             refreshWaitingContext(taskId);
+            TaskState latestTaskState = taskStateMapper.findByTaskId(taskId);
+            sessionLifecycleService.recordUploadAck(latestTaskState == null ? refreshedTaskState : latestTaskState, attachment);
+            sessionLifecycleService.syncFromTask(latestTaskState == null ? refreshedTaskState : latestTaskState);
 
             UploadAttachmentResponse response = new UploadAttachmentResponse();
             response.setAttachmentId(attachmentId);
@@ -998,6 +1103,9 @@ public class TaskService {
                 taskState.getStateVersion() + 1,
                 null
         );
+        TaskState acceptedResumeTask = taskStateMapper.findByTaskId(taskId);
+        sessionLifecycleService.recordResumeNotice(acceptedResumeTask == null ? taskState : acceptedResumeTask, resumeRequestId, newAttemptNo);
+        sessionLifecycleService.syncFromTask(acceptedResumeTask == null ? taskState : acceptedResumeTask);
 
         TaskState resumedTask = taskStateMapper.findByTaskId(taskId);
         ResumeTaskResponse resumeResponse = runResumePipeline(resumedTask, request);
@@ -1203,6 +1311,16 @@ public class TaskService {
                 taskState.getStateVersion(),
                 writePayload(TaskControlPayloadBuilder.buildJobReferencePayload(jobRecord.getJobId()))
         );
+        if (JobState.RUNNING.name().equals(newState)) {
+            sessionLifecycleService.syncFromTask(taskState);
+            sessionLifecycleService.recordProgressUpdate(
+                    taskState,
+                    TaskStatus.RUNNING.name(),
+                    "Runtime execution is in progress",
+                    "The current task is actively executing in the runtime.",
+                    "Result packaging"
+            );
+        }
 
         if (JobState.SUCCEEDED.name().equals(newState)) {
             processSuccess(taskState, jobRecord, status);
@@ -1246,6 +1364,8 @@ public class TaskService {
                 null,
                 taskState.getStateVersion() + 1
         );
+        TaskState latestTaskState = taskStateMapper.findByTaskId(taskState.getTaskId());
+        sessionLifecycleService.recordWaiting(latestTaskState == null ? taskState : latestTaskState);
     }
 
     private void transitionTerminalToState(TaskState taskState, TaskStatus projected, JobRecord jobRecord) throws Exception {
@@ -1267,6 +1387,12 @@ public class TaskService {
                     taskState.getStateVersion() + 1,
                     writePayload(TaskControlPayloadBuilder.buildJobReferencePayload(jobRecord.getJobId()))
             );
+        }
+        TaskState latestTaskState = taskStateMapper.findByTaskId(taskState.getTaskId());
+        if (projected == TaskStatus.FAILED || projected == TaskStatus.STATE_CORRUPTED) {
+            sessionLifecycleService.recordFailureExplanation(latestTaskState == null ? taskState : latestTaskState);
+        } else {
+            sessionLifecycleService.syncFromTask(latestTaskState == null ? taskState : latestTaskState);
         }
     }
 
@@ -1313,6 +1439,8 @@ public class TaskService {
                 taskStateMapper,
                 eventService
         );
+        TaskState latestTaskState = taskStateMapper.findByTaskId(taskState.getTaskId());
+        sessionLifecycleService.recordResultSummary(latestTaskState == null ? taskState : latestTaskState);
     }
 
     private void markTaskCorruptedForCapabilityContract(TaskState taskState, String failureReason) {
@@ -1335,6 +1463,8 @@ public class TaskService {
                 taskState.getStateVersion() + 1,
                 null
         );
+        TaskState latestTaskState = taskStateMapper.findByTaskId(taskState.getTaskId());
+        sessionLifecycleService.recordFailureExplanation(latestTaskState == null ? taskState : latestTaskState);
     }
 
     private void appendAuditWithContract(
@@ -1893,6 +2023,15 @@ public class TaskService {
                     writePayload(TaskControlPayloadBuilder.buildQueuedAttemptSnapshotPayload(preparedSubmission.createJobResponse().getJobId())),
                     null
             );
+            TaskState queuedTaskState = taskStateMapper.findByTaskId(taskId);
+            sessionLifecycleService.syncFromTask(queuedTaskState == null ? taskState : queuedTaskState);
+            sessionLifecycleService.recordProgressUpdate(
+                    queuedTaskState == null ? taskState : queuedTaskState,
+                    TaskStatus.QUEUED.name(),
+                    "Queued for runtime execution",
+                    "The resumed task was accepted and queued.",
+                    "Runtime start"
+            );
 
             return buildResumeTaskResponse(
                     taskId,
@@ -1926,6 +2065,8 @@ public class TaskService {
                         corruptedTxn
                 ));
                 appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.STATE_CORRUPTED.name(), currentVersion + 1, null);
+                TaskState corruptedTask = taskStateMapper.findByTaskId(taskId);
+                sessionLifecycleService.recordFailureExplanation(corruptedTask == null ? taskState : corruptedTask);
             } catch (Exception ignored) {
             }
             throw new ResponseStatusException(BAD_GATEWAY, "Resume pipeline failed", exception);
@@ -2549,6 +2690,8 @@ public class TaskService {
         ));
         appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.WAITING_USER.name(), responseVersion, null);
         recordWaitingUserEntry(taskId, resolveActiveAttemptNo(taskState), waitingState, null, responseVersion);
+        TaskState latestTaskState = taskStateMapper.findByTaskId(taskId);
+        sessionLifecycleService.recordWaiting(latestTaskState == null ? taskState : latestTaskState);
         return buildCreateTaskResponse(taskId, null, TaskStatus.WAITING_USER.name(), responseVersion);
     }
 
@@ -2572,6 +2715,8 @@ public class TaskService {
             appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.FAILED.name(), stateChangedEventVersion, null);
         }
         appendEvent(taskId, EventType.TASK_FAILED.name(), null, null, responseVersion, failureSummaryJson);
+        TaskState latestTaskState = taskStateMapper.findByTaskId(taskId);
+        sessionLifecycleService.recordFailureExplanation(latestTaskState);
         return buildCreateTaskResponse(taskId, null, TaskStatus.FAILED.name(), responseVersion);
     }
 
@@ -2659,6 +2804,8 @@ public class TaskService {
                 writeJson(request),
                 currentVersion + 1
         );
+        TaskState latestTaskState = taskStateMapper.findByTaskId(taskId);
+        sessionLifecycleService.recordWaiting(latestTaskState == null ? taskState : latestTaskState);
         return buildResumeTaskResponse(
                 taskId,
                 TaskStatus.WAITING_USER.name(),
@@ -2701,6 +2848,8 @@ public class TaskService {
         ensureUpdated(taskStateMapper.updateState(taskId, currentVersion, TaskStatus.FAILED.name()));
         appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.FAILED.name(), currentVersion + 1, null);
         appendEvent(taskId, EventType.TASK_FAILED.name(), null, null, taskFailedEventVersion, failureSummaryJson);
+        TaskState latestTaskState = taskStateMapper.findByTaskId(taskId);
+        sessionLifecycleService.recordFailureExplanation(latestTaskState == null ? taskState : latestTaskState);
         return buildResumeTaskResponse(
                 taskId,
                 TaskStatus.FAILED.name(),
@@ -3607,5 +3756,75 @@ public class TaskService {
             CreateJobResponse createJobResponse,
             AnalysisManifest manifestCandidate
     ) {
+    }
+
+    private static final class NoOpSessionLifecycleService extends SessionLifecycleService {
+        private NoOpSessionLifecycleService() {
+            super(null, null, new ObjectMapper());
+        }
+
+        @Override
+        public AnalysisSession createSessionShell(Long userId, String userGoal, String title, String sceneId) {
+            AnalysisSession session = new AnalysisSession();
+            session.setSessionId("sess_test_" + UUID.randomUUID().toString().replace("-", ""));
+            session.setUserId(userId);
+            session.setTitle(title);
+            session.setUserGoal(userGoal);
+            session.setStatus("RUNNING");
+            session.setSceneId(sceneId);
+            return session;
+        }
+
+        @Override
+        public void bindTaskToSession(String sessionId, String taskId, String userGoal) {
+        }
+
+        @Override
+        public void syncFromTask(TaskState taskState) {
+        }
+
+        @Override
+        public void recordUserGoal(String sessionId, String taskId, String userGoal) {
+        }
+
+        @Override
+        public void recordAssistantUnderstanding(TaskState taskState) {
+        }
+
+        @Override
+        public void recordProgressUpdate(TaskState taskState, String phaseLabel, String systemAction, String latestProgressNote, String estimatedNextMilestone) {
+        }
+
+        @Override
+        public void recordWaiting(TaskState taskState) {
+        }
+
+        @Override
+        public void recordResumeNotice(TaskState taskState, String resumeRequestId, Integer attemptNo) {
+        }
+
+        @Override
+        public void recordUploadAck(TaskState taskState, TaskAttachment attachment) {
+        }
+
+        @Override
+        public void recordResultSummary(TaskState taskState) {
+        }
+
+        @Override
+        public void recordFailureExplanation(TaskState taskState) {
+        }
+
+        @Override
+        public void recordSystemNote(String sessionId, String taskId, String text) {
+        }
+
+        @Override
+        public void recordUserReply(String sessionId, String taskId, String content, String clientRequestId, List<String> attachmentIds) {
+        }
+
+        @Override
+        public void recordUserClarification(String sessionId, String taskId, String content, String clientRequestId, List<String> attachmentIds) {
+        }
     }
 }

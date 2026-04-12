@@ -13,6 +13,7 @@ public interface TaskStateMapper {
     @Insert("""
             INSERT INTO task_state(
                 task_id,
+                session_id,
                 user_id,
                 current_state,
                 state_version,
@@ -51,6 +52,7 @@ public interface TaskStateMapper {
             )
             VALUES(
                 #{taskId},
+                #{sessionId},
                 #{userId},
                 #{currentState},
                 #{stateVersion},
@@ -453,6 +455,7 @@ public interface TaskStateMapper {
 
     @Select("""
             SELECT task_id,
+                   session_id,
                    user_id,
                    current_state,
                    state_version,
