@@ -433,6 +433,95 @@ final class TaskQuerySupport {
         ));
     }
 
+    static void applySkillBindingProjection(
+            TaskDetailResponse response,
+            JsonNode goalParseRoot,
+            JsonNode skillRouteRoot,
+            JsonNode passBRoot,
+            ObjectMapper objectMapper
+    ) {
+        if (response == null) {
+            return;
+        }
+        response.setSkillId(skillRouteRoot == null ? null : skillRouteRoot.path("skill_id").asText(null));
+        response.setSkillVersion(skillRouteRoot == null ? null : skillRouteRoot.path("skill_version").asText(null));
+        response.setBindingStatus(passBRoot == null ? null : passBRoot.path("binding_status").asText(null));
+        response.setOverruledFields(TaskProjectionBuilder.jsonArrayToStrings(
+                passBRoot == null ? null : passBRoot.path("overruled_fields")
+        ));
+        response.setBlockedMutations(TaskProjectionBuilder.jsonArrayToStrings(
+                passBRoot == null ? null : passBRoot.path("blocked_mutations")
+        ));
+        response.setAssemblyBlocked(
+                passBRoot != null && passBRoot.path("assembly_blocked").isBoolean()
+                        ? passBRoot.path("assembly_blocked").asBoolean()
+                        : null
+        );
+        response.setCaseProjection(TaskProjectionBuilder.buildCaseProjection(goalParseRoot, passBRoot, objectMapper));
+    }
+
+    static void applySkillBindingProjection(
+            TaskManifestResponse response,
+            JsonNode goalParseRoot,
+            JsonNode skillRouteRoot,
+            JsonNode passBRoot,
+            ObjectMapper objectMapper
+    ) {
+        if (response == null) {
+            return;
+        }
+        response.setSkillId(skillRouteRoot == null ? null : skillRouteRoot.path("skill_id").asText(
+                passBRoot == null ? null : passBRoot.path("skill_id").asText(null)
+        ));
+        response.setSkillVersion(skillRouteRoot == null ? null : skillRouteRoot.path("skill_version").asText(
+                passBRoot == null ? null : passBRoot.path("skill_version").asText(null)
+        ));
+        response.setBindingStatus(passBRoot == null ? null : passBRoot.path("binding_status").asText(null));
+        response.setOverruledFields(TaskProjectionBuilder.jsonArrayToStrings(
+                passBRoot == null ? null : passBRoot.path("overruled_fields")
+        ));
+        response.setBlockedMutations(TaskProjectionBuilder.jsonArrayToStrings(
+                passBRoot == null ? null : passBRoot.path("blocked_mutations")
+        ));
+        response.setAssemblyBlocked(
+                passBRoot != null && passBRoot.path("assembly_blocked").isBoolean()
+                        ? passBRoot.path("assembly_blocked").asBoolean()
+                        : null
+        );
+        response.setCaseProjection(TaskProjectionBuilder.buildCaseProjection(goalParseRoot, passBRoot, objectMapper));
+    }
+
+    static void applySkillBindingProjection(
+            TaskResultResponse response,
+            JsonNode goalParseRoot,
+            JsonNode skillRouteRoot,
+            JsonNode passBRoot,
+            ObjectMapper objectMapper
+    ) {
+        if (response == null) {
+            return;
+        }
+        response.setSkillId(skillRouteRoot == null ? null : skillRouteRoot.path("skill_id").asText(
+                passBRoot == null ? null : passBRoot.path("skill_id").asText(null)
+        ));
+        response.setSkillVersion(skillRouteRoot == null ? null : skillRouteRoot.path("skill_version").asText(
+                passBRoot == null ? null : passBRoot.path("skill_version").asText(null)
+        ));
+        response.setBindingStatus(passBRoot == null ? null : passBRoot.path("binding_status").asText(null));
+        response.setOverruledFields(TaskProjectionBuilder.jsonArrayToStrings(
+                passBRoot == null ? null : passBRoot.path("overruled_fields")
+        ));
+        response.setBlockedMutations(TaskProjectionBuilder.jsonArrayToStrings(
+                passBRoot == null ? null : passBRoot.path("blocked_mutations")
+        ));
+        response.setAssemblyBlocked(
+                passBRoot != null && passBRoot.path("assembly_blocked").isBoolean()
+                        ? passBRoot.path("assembly_blocked").asBoolean()
+                        : null
+        );
+        response.setCaseProjection(TaskProjectionBuilder.buildCaseProjection(goalParseRoot, passBRoot, objectMapper));
+    }
+
     static CatalogProjection buildDetailCatalogProjection(
             TaskDetailResponse.WaitingContext waitingContext,
             Map<String, Object> currentCatalogSummary

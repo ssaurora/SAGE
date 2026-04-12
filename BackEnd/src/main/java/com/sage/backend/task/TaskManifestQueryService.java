@@ -73,18 +73,16 @@ public class TaskManifestQueryService {
 
         JsonNode goalParseRoot = TaskQuerySupport.readJsonNode(taskState.getGoalParseJson(), objectMapper);
         JsonNode skillRouteRoot = TaskQuerySupport.readJsonNode(taskState.getSkillRouteJson(), objectMapper);
-        response.setSkillId(skillRouteRoot == null ? null : skillRouteRoot.path("skill_id").asText(null));
-        response.setSkillVersion(skillRouteRoot == null ? null : skillRouteRoot.path("skill_version").asText(null));
         response.setPlanningIntentStatus(goalParseRoot == null ? null : goalParseRoot.path("planning_intent_status").asText(null));
 
         JsonNode passBRoot = TaskQuerySupport.readJsonNode(taskState.getPassbResultJson(), objectMapper);
-        response.setBindingStatus(passBRoot == null ? null : passBRoot.path("binding_status").asText(null));
-        response.setOverruledFields(TaskProjectionBuilder.jsonArrayToStrings(passBRoot == null ? null : passBRoot.path("overruled_fields")));
-        response.setBlockedMutations(TaskProjectionBuilder.jsonArrayToStrings(passBRoot == null ? null : passBRoot.path("blocked_mutations")));
-        response.setAssemblyBlocked(
-                passBRoot != null && passBRoot.path("assembly_blocked").isBoolean() ? passBRoot.path("assembly_blocked").asBoolean() : null
+        TaskQuerySupport.applySkillBindingProjection(
+                response,
+                goalParseRoot,
+                skillRouteRoot,
+                passBRoot,
+                objectMapper
         );
-        response.setCaseProjection(TaskProjectionBuilder.buildCaseProjection(goalParseRoot, passBRoot, objectMapper));
         TaskQuerySupport.applyStageProjection(response, goalParseRoot, skillRouteRoot, passBRoot, objectMapper);
         TaskQuerySupport.applyManifestPass2Projection(response, taskState, objectMapper);
 

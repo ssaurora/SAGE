@@ -59,8 +59,6 @@ public class TaskDetailQueryService {
         response.setPlanningRevision(taskState.getPlanningRevision());
         response.setCheckpointVersion(taskState.getCheckpointVersion());
         TaskQuerySupport.applyLifecycleProjection(response, taskState, objectMapper);
-        response.setSkillId(routeProjection.skillRoute().path("skill_id").asText(null));
-        response.setSkillVersion(routeProjection.skillRoute().path("skill_version").asText(null));
         response.setGoalParseSummary(TaskProjectionBuilder.buildGoalParseSummary(routeProjection.goalParse()));
         response.setSkillRouteSummary(TaskProjectionBuilder.buildSkillRouteSummary(routeProjection.skillRoute()));
         response.setPass1Summary(TaskProjectionBuilder.buildPass1Summary(pass1Projection));
@@ -95,13 +93,13 @@ public class TaskDetailQueryService {
         JsonNode goalParseRoot = TaskQuerySupport.readJsonNode(taskState.getGoalParseJson(), objectMapper);
         response.setPlanningIntentStatus(goalParseRoot == null ? null : goalParseRoot.path("planning_intent_status").asText(null));
         JsonNode passBRoot = TaskQuerySupport.readJsonNode(taskState.getPassbResultJson(), objectMapper);
-        response.setBindingStatus(passBRoot == null ? null : passBRoot.path("binding_status").asText(null));
-        response.setOverruledFields(TaskProjectionBuilder.jsonArrayToStrings(passBRoot == null ? null : passBRoot.path("overruled_fields")));
-        response.setBlockedMutations(TaskProjectionBuilder.jsonArrayToStrings(passBRoot == null ? null : passBRoot.path("blocked_mutations")));
-        response.setAssemblyBlocked(
-                passBRoot != null && passBRoot.path("assembly_blocked").isBoolean() ? passBRoot.path("assembly_blocked").asBoolean() : null
+        TaskQuerySupport.applySkillBindingProjection(
+                response,
+                goalParseRoot,
+                routeProjection.skillRoute(),
+                passBRoot,
+                objectMapper
         );
-        response.setCaseProjection(TaskProjectionBuilder.buildCaseProjection(goalParseRoot, passBRoot, objectMapper));
         TaskQuerySupport.applyStageProjection(
                 response,
                 routeProjection.goalParse(),
