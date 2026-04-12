@@ -488,6 +488,10 @@ final class TaskQuerySupport {
         ));
     }
 
+    static void applyResultSummaryBundle(TaskResultResponse response, TaskState taskState, ObjectMapper objectMapper) {
+        applyResultPass2Projection(response, taskState, objectMapper);
+    }
+
     static void applyResultJobProjection(
             TaskResultResponse response,
             JobRecord jobRecord,
@@ -585,6 +589,17 @@ final class TaskQuerySupport {
                 readJsonNode(taskState.getValidationSummaryJson(), objectMapper)
         ));
         response.setInputChainStatus(taskState.getInputChainStatus());
+    }
+
+    static void applyDetailSummaryBundle(
+            TaskDetailResponse response,
+            JsonNode pass1Projection,
+            RouteProjection routeProjection,
+            TaskState taskState,
+            ObjectMapper objectMapper
+    ) {
+        applyDetailSummaryProjection(response, pass1Projection, routeProjection, taskState, objectMapper);
+        applyDetailOutcomeProjection(response, taskState, objectMapper);
     }
 
     static void applySkillBindingProjection(

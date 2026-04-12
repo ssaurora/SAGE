@@ -59,8 +59,7 @@ public class TaskDetailQueryService {
         response.setPlanningRevision(taskState.getPlanningRevision());
         response.setCheckpointVersion(taskState.getCheckpointVersion());
         TaskQuerySupport.applyLifecycleProjection(response, taskState, objectMapper);
-        TaskQuerySupport.applyDetailSummaryProjection(response, pass1Projection, routeProjection, taskState, objectMapper);
-        TaskQuerySupport.applyDetailOutcomeProjection(response, taskState, objectMapper);
+        TaskQuerySupport.applyDetailSummaryBundle(response, pass1Projection, routeProjection, taskState, objectMapper);
         response.setWaitingContext(TaskProjectionBuilder.buildWaitingContext(
                 TaskQuerySupport.readJsonNode(taskState.getWaitingContextJson(), objectMapper)
         ));

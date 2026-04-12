@@ -81,7 +81,7 @@ public class TaskResultQueryService {
         );
         TaskQuerySupport.applyContractProjection(response, contractProjection);
         TaskQuerySupport.applyStageProjection(response, stageRoots, objectMapper);
-        TaskQuerySupport.applyResultPass2Projection(response, taskState, objectMapper);
+        TaskQuerySupport.applyResultSummaryBundle(response, taskState, objectMapper);
         if (jobRecord != null) {
             TaskQuerySupport.applyResultJobPayload(
                     response,
