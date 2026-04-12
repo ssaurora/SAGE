@@ -410,6 +410,51 @@ final class TaskQuerySupport {
         ));
     }
 
+    static void applyManifestPayload(
+            TaskManifestResponse response,
+            AnalysisManifest manifest,
+            JsonNode pass1Projection,
+            GoalRouteService goalRouteService,
+            ObjectMapper objectMapper
+    ) {
+        if (response == null || manifest == null) {
+            return;
+        }
+        RouteProjection routeProjection = buildRouteProjection(
+                manifest.getGoalParseJson(),
+                manifest.getSkillRouteJson(),
+                pass1Projection,
+                goalRouteService,
+                objectMapper
+        );
+        response.setGoalParse(TaskProjectionBuilder.buildManifestGoalParse(routeProjection.goalParse()));
+        response.setSkillRoute(TaskProjectionBuilder.buildManifestSkillRoute(routeProjection.skillRoute()));
+        TaskProjectionBuilder.applyPass1Projection(response, pass1Projection, objectMapper);
+        response.setLogicalInputRoles(TaskProjectionBuilder.buildManifestLogicalInputRoles(
+                readJsonNode(manifest.getLogicalInputRolesJson(), objectMapper)
+        ));
+        response.setSlotSchemaView(TaskProjectionBuilder.buildManifestSlotSchemaView(
+                readJsonNode(manifest.getSlotSchemaViewJson(), objectMapper)
+        ));
+        response.setSlotBindings(TaskProjectionBuilder.buildManifestSlotBindings(
+                readJsonNode(manifest.getSlotBindingsJson(), objectMapper)
+        ));
+        response.setArgsDraft(TaskProjectionBuilder.buildJsonObjectView(
+                readJsonNode(manifest.getArgsDraftJson(), objectMapper),
+                objectMapper
+        ));
+        response.setValidationSummary(TaskProjectionBuilder.buildManifestValidationSummary(
+                readJsonNode(manifest.getValidationSummaryJson(), objectMapper)
+        ));
+        response.setExecutionGraph(TaskProjectionBuilder.buildManifestExecutionGraph(
+                readJsonNode(manifest.getExecutionGraphJson(), objectMapper)
+        ));
+        response.setRuntimeAssertions(TaskProjectionBuilder.buildManifestRuntimeAssertions(
+                readJsonNode(manifest.getRuntimeAssertionsJson(), objectMapper)
+        ));
+        response.setCreatedAt(manifest.getCreatedAt() == null ? null : manifest.getCreatedAt().toString());
+    }
+
     static void applyManifestPass2Projection(TaskManifestResponse response, TaskState taskState, ObjectMapper objectMapper) {
         if (response == null || taskState == null) {
             return;

@@ -86,25 +86,7 @@ public class TaskManifestQueryService {
         );
         TaskQuerySupport.applyContractProjection(response, contractProjection);
 
-        TaskQuerySupport.RouteProjection routeProjection = TaskQuerySupport.buildRouteProjection(
-                manifest.getGoalParseJson(),
-                manifest.getSkillRouteJson(),
-                pass1Projection,
-                goalRouteService,
-                objectMapper
-        );
-        response.setGoalParse(TaskProjectionBuilder.buildManifestGoalParse(routeProjection.goalParse()));
-        response.setSkillRoute(TaskProjectionBuilder.buildManifestSkillRoute(routeProjection.skillRoute()));
-        TaskProjectionBuilder.applyPass1Projection(response, pass1Projection, objectMapper);
-        response.setLogicalInputRoles(TaskProjectionBuilder.buildManifestLogicalInputRoles(
-                TaskQuerySupport.readJsonNode(manifest.getLogicalInputRolesJson(), objectMapper)
-        ));
-        response.setSlotSchemaView(TaskProjectionBuilder.buildManifestSlotSchemaView(
-                TaskQuerySupport.readJsonNode(manifest.getSlotSchemaViewJson(), objectMapper)
-        ));
-        response.setSlotBindings(TaskProjectionBuilder.buildManifestSlotBindings(
-                TaskQuerySupport.readJsonNode(manifest.getSlotBindingsJson(), objectMapper)
-        ));
+        TaskQuerySupport.applyManifestPayload(response, manifest, pass1Projection, goalRouteService, objectMapper);
 
         TaskQuerySupport.CatalogProjection catalogProjection = TaskQuerySupport.buildFrozenCatalogProjection(
                 "manifest_catalog",
@@ -116,21 +98,6 @@ public class TaskManifestQueryService {
         );
         TaskQuerySupport.applyCatalogProjection(response, catalogProjection);
         response.setCatalogSummary(catalogSummary);
-
-        response.setArgsDraft(TaskProjectionBuilder.buildJsonObjectView(
-                TaskQuerySupport.readJsonNode(manifest.getArgsDraftJson(), objectMapper),
-                objectMapper
-        ));
-        response.setValidationSummary(TaskProjectionBuilder.buildManifestValidationSummary(
-                TaskQuerySupport.readJsonNode(manifest.getValidationSummaryJson(), objectMapper)
-        ));
-        response.setExecutionGraph(TaskProjectionBuilder.buildManifestExecutionGraph(
-                TaskQuerySupport.readJsonNode(manifest.getExecutionGraphJson(), objectMapper)
-        ));
-        response.setRuntimeAssertions(TaskProjectionBuilder.buildManifestRuntimeAssertions(
-                TaskQuerySupport.readJsonNode(manifest.getRuntimeAssertionsJson(), objectMapper)
-        ));
-        response.setCreatedAt(manifest.getCreatedAt() == null ? null : manifest.getCreatedAt().toString());
 
         TaskQuerySupport.applyRepairProjection(response, latestRepair, objectMapper);
         TaskQuerySupport.applyFinalExplanationProjection(response, jobRecord, objectMapper);
