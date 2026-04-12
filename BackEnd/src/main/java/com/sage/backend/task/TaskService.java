@@ -1197,39 +1197,60 @@ public class TaskService {
         TaskStatus projected = terminalHandling == null ? mapJobStateToTaskState(newState) : terminalHandling.projectedState();
         if (projected != null && !projected.name().equals(taskState.getCurrentState())) {
             if (projected == TaskStatus.WAITING_USER && terminalHandling != null && terminalHandling.waitingState() != null) {
-                WaitingStateSnapshot waitingState = terminalHandling.waitingState();
-                ensureUpdated(taskStateMapper.updateStateWithWaitingContext(
-                        taskState.getTaskId(),
-                        taskState.getStateVersion(),
-                        TaskStatus.WAITING_USER.name(),
-                        waitingState.waitingContextJson(),
-                        safeString(waitingState.decision().waitingContext().getWaitingReasonType()).isBlank()
-                                ? "REPAIR_REQUIRED"
-                                : waitingState.decision().waitingContext().getWaitingReasonType(),
-                        OffsetDateTime.now(ZoneOffset.UTC)
-                ));
-                appendEvent(taskState.getTaskId(), EventType.STATE_CHANGED.name(), taskState.getCurrentState(), TaskStatus.WAITING_USER.name(), taskState.getStateVersion() + 1, null);
-                recordWaitingUserEntry(
-                        taskState.getTaskId(),
-                        resolveActiveAttemptNo(taskState),
-                        waitingState,
-                        null,
-                        taskState.getStateVersion() + 1
-                );
+                transitionTerminalToWaiting(taskState, terminalHandling.waitingState());
                 return;
             }
-            ensureUpdated(taskStateMapper.updateState(taskState.getTaskId(), taskState.getStateVersion(), projected.name()));
-            appendEvent(taskState.getTaskId(), EventType.STATE_CHANGED.name(), taskState.getCurrentState(), projected.name(), taskState.getStateVersion() + 1, null);
-            if (projected == TaskStatus.CANCELLED) {
-                appendEvent(
-                        taskState.getTaskId(),
-                        EventType.TASK_CANCELLED.name(),
-                        null,
-                        null,
-                        taskState.getStateVersion() + 1,
-                        writePayload(TaskControlPayloadBuilder.buildJobReferencePayload(jobRecord.getJobId()))
-                );
-            }
+            transitionTerminalToState(taskState, projected, jobRecord);
+        }
+    }
+
+    private void transitionTerminalToWaiting(TaskState taskState, WaitingStateSnapshot waitingState) {
+        ensureUpdated(taskStateMapper.updateStateWithWaitingContext(
+                taskState.getTaskId(),
+                taskState.getStateVersion(),
+                TaskStatus.WAITING_USER.name(),
+                waitingState.waitingContextJson(),
+                safeString(waitingState.decision().waitingContext().getWaitingReasonType()).isBlank()
+                        ? "REPAIR_REQUIRED"
+                        : waitingState.decision().waitingContext().getWaitingReasonType(),
+                OffsetDateTime.now(ZoneOffset.UTC)
+        ));
+        appendEvent(
+                taskState.getTaskId(),
+                EventType.STATE_CHANGED.name(),
+                taskState.getCurrentState(),
+                TaskStatus.WAITING_USER.name(),
+                taskState.getStateVersion() + 1,
+                null
+        );
+        recordWaitingUserEntry(
+                taskState.getTaskId(),
+                resolveActiveAttemptNo(taskState),
+                waitingState,
+                null,
+                taskState.getStateVersion() + 1
+        );
+    }
+
+    private void transitionTerminalToState(TaskState taskState, TaskStatus projected, JobRecord jobRecord) throws Exception {
+        ensureUpdated(taskStateMapper.updateState(taskState.getTaskId(), taskState.getStateVersion(), projected.name()));
+        appendEvent(
+                taskState.getTaskId(),
+                EventType.STATE_CHANGED.name(),
+                taskState.getCurrentState(),
+                projected.name(),
+                taskState.getStateVersion() + 1,
+                null
+        );
+        if (projected == TaskStatus.CANCELLED) {
+            appendEvent(
+                    taskState.getTaskId(),
+                    EventType.TASK_CANCELLED.name(),
+                    null,
+                    null,
+                    taskState.getStateVersion() + 1,
+                    writePayload(TaskControlPayloadBuilder.buildJobReferencePayload(jobRecord.getJobId()))
+            );
         }
     }
 
