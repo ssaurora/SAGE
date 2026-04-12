@@ -521,7 +521,13 @@ public class TaskService {
             );
             int committedPlanningRevision = nextPlanningRevision(taskState);
             int committedCheckpointVersion = nextCheckpointVersion(taskState);
-            freezeManifestOnCommit(preparedSubmission.manifestCandidate(), currentVersion);
+            TaskExecutionSubmissionSupport.freezeManifestOnCommit(
+                    preparedSubmission.manifestCandidate(),
+                    currentVersion,
+                    analysisManifestMapper,
+                    eventService,
+                    objectMapper
+            );
             ensureUpdated(taskStateMapper.commitQueuedWithGovernance(
                     taskId,
                     currentVersion,
@@ -555,7 +561,17 @@ public class TaskService {
             throw exception;
         } catch (Exception exception) {
             LOGGER.error("Task create pipeline failed for task {}", taskId, exception);
-            handlePipelineFailure(taskId, traceId, exception, currentVersion, currentState);
+            TaskExecutionSubmissionSupport.handlePipelineFailure(
+                    taskId,
+                    traceId,
+                    exception,
+                    currentVersion,
+                    currentState,
+                    taskStateMapper,
+                    eventService,
+                    auditService,
+                    objectMapper
+            );
             throw new ResponseStatusException(BAD_GATEWAY, "Task pipeline failed", exception);
         }
     }
@@ -1255,48 +1271,48 @@ public class TaskService {
     }
 
     private void processSuccess(TaskState taskState, JobRecord jobRecord, JobStatusResponse status) throws Exception {
-        int version = taskState.getStateVersion();
-        String taskId = taskState.getTaskId();
-        String currentState = taskState.getCurrentState();
-
-        if (!TaskStatus.ARTIFACT_PROMOTING.name().equals(currentState)) {
-            ensureUpdated(taskStateMapper.updateState(taskId, version, TaskStatus.ARTIFACT_PROMOTING.name()));
-            appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState, TaskStatus.ARTIFACT_PROMOTING.name(), version + 1, null);
-            version += 1;
-            currentState = TaskStatus.ARTIFACT_PROMOTING.name();
-        }
+        TaskSuccessLifecycleSupport.PromotionState promotionState = TaskSuccessLifecycleSupport.enterArtifactPromoting(
+                taskState,
+                taskStateMapper,
+                eventService
+        );
 
         try {
             CapabilityContractGuard.requireCollectResultBundleContract(readJsonNode(taskState.getPass1ResultJson()));
             CapabilityContractGuard.requireIndexArtifactsContract(readJsonNode(taskState.getPass1ResultJson()));
             JsonNode finalExplanationNode = buildFinalExplanationNode(taskState, jobRecord, status);
-            SuccessOutputSummaries outputSummaries = buildSuccessOutputSummaries(status, finalExplanationNode);
-            workspaceTraceService.persistSuccess(taskState, jobRecord, status.getResultBundle(), finalExplanationNode, status.getArtifactCatalog());
-            jobRecordMapper.updateFinalExplanation(jobRecord.getJobId(), writeJsonIfPresent(finalExplanationNode), OffsetDateTime.now(ZoneOffset.UTC));
-            taskStateMapper.updateOutputSummaries(
-                    taskId,
-                    outputSummaries.resultBundleSummary(),
-                    outputSummaries.finalExplanationSummary(),
-                    null,
-                    outputSummaries.resultObjectSummary()
+            TaskSuccessProjectionSupport.SuccessProjection successProjection =
+                    TaskSuccessProjectionSupport.buildSuccessProjection(status, finalExplanationNode, objectMapper);
+            TaskSuccessLifecycleSupport.persistSuccessProjection(
+                    taskState,
+                    jobRecord,
+                    status,
+                    finalExplanationNode,
+                    successProjection,
+                    promotionState.stateVersion(),
+                    taskStateMapper,
+                    jobRecordMapper,
+                    workspaceTraceService,
+                    eventService,
+                    objectMapper
             );
-
-            appendSuccessOutputEvents(taskId, version, outputSummaries);
         } catch (Exception exception) {
-            ensureUpdated(taskStateMapper.markCorrupted(
-                    taskId,
-                    version,
-                    TaskStatus.STATE_CORRUPTED.name(),
-                    "ARTIFACT_PROMOTION_FAILED: " + safeString(exception.getMessage()),
-                    OffsetDateTime.now(ZoneOffset.UTC),
-                    taskState.getResumeTxnJson()
-            ));
-            appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState, TaskStatus.STATE_CORRUPTED.name(), version + 1, null);
+            TaskSuccessLifecycleSupport.markArtifactPromotionCorrupted(
+                    taskState,
+                    promotionState,
+                    exception,
+                    taskStateMapper,
+                    eventService
+            );
             throw exception;
         }
 
-        ensureUpdated(taskStateMapper.updateState(taskId, version, TaskStatus.SUCCEEDED.name()));
-        appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState, TaskStatus.SUCCEEDED.name(), version + 1, null);
+        TaskSuccessLifecycleSupport.completeSuccessPromotion(
+                taskState.getTaskId(),
+                promotionState,
+                taskStateMapper,
+                eventService
+        );
     }
 
     private void markTaskCorruptedForCapabilityContract(TaskState taskState, String failureReason) {
@@ -1448,23 +1464,6 @@ public class TaskService {
                 false
         );
         return new TerminalFailureHandling(TaskStatus.WAITING_USER, waitingState);
-    }
-
-    private SuccessOutputSummaries buildSuccessOutputSummaries(JobStatusResponse status, JsonNode finalExplanation) throws Exception {
-        return new SuccessOutputSummaries(
-                writePayload(TaskProjectionBuilder.buildResultBundleSummary(status.getResultBundle())),
-                writePayload(TaskProjectionBuilder.buildFinalExplanationSummaryPayload(finalExplanation)),
-                writePayload(TaskProjectionBuilder.buildResultObjectSummaryPayload(status.getResultObject(), status.getResultBundle()))
-        );
-    }
-
-    private void appendSuccessOutputEvents(String taskId, int stateVersion, SuccessOutputSummaries outputSummaries) {
-        appendEvent(taskId, EventType.RESULT_BUNDLE_READY.name(), null, null, stateVersion, outputSummaries.resultBundleSummary());
-        appendEvent(taskId, EventType.FINAL_EXPLANATION_STARTED.name(), null, null, stateVersion, null);
-        appendEvent(taskId, EventType.FINAL_EXPLANATION_COMPLETED.name(), null, null, stateVersion, outputSummaries.finalExplanationSummary());
-        if (outputSummaries.resultObjectSummary() != null) {
-            appendEvent(taskId, EventType.RESULT_OBJECT_READY.name(), null, null, stateVersion, outputSummaries.resultObjectSummary());
-        }
     }
 
     private ResumeTaskResponse runResumePipeline(TaskState taskState, ResumeTaskRequest request) {
@@ -1865,7 +1864,13 @@ public class TaskService {
                     preparedSubmission.createJobResponse().getJobId(),
                     null
             ));
-            freezeManifestOnCommit(preparedSubmission.manifestCandidate(), currentVersion);
+            TaskExecutionSubmissionSupport.freezeManifestOnCommit(
+                    preparedSubmission.manifestCandidate(),
+                    currentVersion,
+                    analysisManifestMapper,
+                    eventService,
+                    objectMapper
+            );
             ensureUpdated(taskStateMapper.commitQueuedWithGovernance(
                     taskId,
                     currentVersion,
@@ -2746,7 +2751,7 @@ public class TaskService {
     }
 
     private JsonNode buildFinalExplanationNode(TaskState taskState, JobRecord jobRecord, JobStatusResponse status) {
-        boolean realCase = isRealCaseRuntime(jobRecord, status);
+        boolean realCase = TaskSuccessProjectionSupport.isRealCaseRuntime(jobRecord, status);
         if (!realCase) {
             return status.getFinalExplanation();
         }
@@ -2755,22 +2760,21 @@ public class TaskService {
             JsonNode node = objectMapper.valueToTree(response);
             String failureCode = evaluateRequiredLlmMetadata(node.path("cognition_metadata"));
             if (failureCode != null) {
-                return buildUnavailableFinalExplanationNode(failureCode, describeExplanationFailure(failureCode));
+                return TaskSuccessProjectionSupport.buildUnavailableFinalExplanationNode(
+                        failureCode,
+                        TaskSuccessProjectionSupport.describeExplanationFailure(failureCode),
+                        objectMapper
+                );
             }
             return node;
         } catch (Exception exception) {
-            return buildUnavailableFinalExplanationNode(classifyCognitionException(exception), exception.getMessage());
+            String failureCode = TaskSuccessProjectionSupport.classifyCognitionException(exception);
+            return TaskSuccessProjectionSupport.buildUnavailableFinalExplanationNode(
+                    failureCode,
+                    exception.getMessage(),
+                    objectMapper
+            );
         }
-    }
-
-    private boolean isRealCaseRuntime(JobRecord jobRecord, JobStatusResponse status) {
-        if (jobRecord != null && "docker-invest-real".equalsIgnoreCase(jobRecord.getRuntimeProfile())) {
-            return true;
-        }
-        JsonNode runtimeEvidence = status == null ? null : status.getDockerRuntimeEvidence();
-        return runtimeEvidence != null
-                && ("docker-invest-real".equalsIgnoreCase(runtimeEvidence.path("runtime_profile").asText(""))
-                || !runtimeEvidence.path("case_id").asText("").isBlank());
     }
 
     private CognitionFinalExplanationResponse runFinalExplanation(TaskState taskState, JobRecord jobRecord, JobStatusResponse status) {
@@ -2788,59 +2792,7 @@ public class TaskService {
     }
 
     private String resolveCaseIdForFinalExplanation(TaskState taskState, JobStatusResponse status) {
-        String caseId = extractCaseId(resolveActiveManifest(taskState));
-        if (caseId != null && !caseId.isBlank()) {
-            return caseId;
-        }
-        JsonNode runtimeEvidence = status == null ? null : status.getDockerRuntimeEvidence();
-        if (runtimeEvidence == null || runtimeEvidence.isNull() || runtimeEvidence.isMissingNode()) {
-            return null;
-        }
-        String runtimeCaseId = runtimeEvidence.path("case_id").asText(null);
-        return runtimeCaseId == null || runtimeCaseId.isBlank() ? null : runtimeCaseId;
-    }
-
-    private JsonNode buildUnavailableFinalExplanationNode(String failureCode, String failureMessage) {
-        ObjectNode node = objectMapper.createObjectNode();
-        node.put("available", false);
-        node.putNull("title");
-        node.putArray("highlights");
-        node.putNull("narrative");
-        node.putNull("generated_at");
-        node.put("failure_code", "EXPLANATION_UNAVAILABLE");
-        node.put("failure_message", normalizeFailureMessage(failureMessage, describeExplanationFailure(failureCode)));
-        ObjectNode metadata = node.putObject("cognition_metadata");
-        metadata.put("source", "glm_required_failure");
-        metadata.put("provider", "glm");
-        metadata.putNull("model");
-        metadata.put("prompt_version", "final_explanation_v1");
-        metadata.put("fallback_used", false);
-        metadata.put("schema_valid", false);
-        metadata.putNull("response_id");
-        metadata.put("status", "EXPLANATION_UNAVAILABLE");
-        metadata.put("failure_code", failureCode);
-        metadata.put("failure_message", normalizeFailureMessage(failureMessage, describeExplanationFailure(failureCode)));
-        return node;
-    }
-
-    private String classifyCognitionException(Exception exception) {
-        if (exception instanceof org.springframework.web.client.ResourceAccessException) {
-            return "COGNITION_TIMEOUT";
-        }
-        return "COGNITION_UNAVAILABLE";
-    }
-
-    private String describeExplanationFailure(String failureCode) {
-        return switch (failureCode) {
-            case "COGNITION_TIMEOUT" -> "Final explanation cognition timed out.";
-            case "COGNITION_SCHEMA_INVALID" -> "Final explanation cognition returned invalid schema.";
-            case "COGNITION_POLICY_VIOLATION" -> "Final explanation cognition did not satisfy the real-case LLM policy.";
-            default -> "Final explanation cognition unavailable.";
-        };
-    }
-
-    private String normalizeFailureMessage(String value, String fallback) {
-        return value == null || value.isBlank() ? fallback : value;
+        return TaskSuccessProjectionSupport.resolveCaseId(resolveActiveManifest(taskState), status, objectMapper);
     }
 
     private Pass1Response runPass1(
@@ -3035,64 +2987,25 @@ public class TaskService {
                 attemptNo,
                 providerResolution
         );
-        persistAcceptedJobAttempt(
+        TaskExecutionSubmissionSupport.persistAcceptedJobAttempt(
                 taskId,
                 attemptNo,
                 createJobResponse,
                 pass2Response,
                 workspaceId,
-                providerResolution
+                providerResolution,
+                jobRecordMapper,
+                workspaceTraceService,
+                objectMapper
         );
-        appendAcceptedJobEvents(taskId, stateVersion, createJobResponse.getJobId());
-        return new PreparedJobSubmission(pass2Json, pass2Response, createJobResponse, manifestCandidate);
-    }
-
-    private JobRecord persistAcceptedJobAttempt(
-            String taskId,
-            int attemptNo,
-            CreateJobResponse createJobResponse,
-            Pass2Response pass2Response,
-            String workspaceId,
-            RegistryService.ProviderResolution providerResolution
-    ) {
-        JobRecord jobRecord = new JobRecord();
-        jobRecord.setJobId(createJobResponse.getJobId());
-        jobRecord.setTaskId(taskId);
-        jobRecord.setAttemptNo(attemptNo);
-        jobRecord.setJobState(createJobResponse.getJobState());
-        jobRecord.setExecutionGraphJson(writeJsonIfPresent(TaskProjectionBuilder.buildExecutionGraphPayload(
-                pass2Response.getMaterializedExecutionGraph(),
-                objectMapper
-        )));
-        jobRecord.setRuntimeAssertionsJson(writeJsonIfPresent(TaskProjectionBuilder.buildRuntimeAssertionsPayload(
-                pass2Response.getRuntimeAssertions(),
-                objectMapper
-        )));
-        jobRecord.setPlanningPass2SummaryJson(writeJsonIfPresent(TaskProjectionBuilder.buildPlanningPass2SummaryPayload(
-                pass2Response.getPlanningSummary(),
-                objectMapper
-        )));
-        jobRecord.setWorkspaceId(workspaceId);
-        jobRecord.setProviderKey(providerResolution.providerKey());
-        jobRecord.setCapabilityKey(providerResolution.capabilityKey());
-        jobRecord.setRuntimeProfile(providerResolution.runtimeProfile());
-        jobRecord.setAcceptedAt(createJobResponse.getAcceptedAt());
-        jobRecord.setLastHeartbeatAt(createJobResponse.getAcceptedAt());
-        ensureInserted(jobRecordMapper.insert(jobRecord));
-        workspaceTraceService.createWorkspaceRecord(
-                workspaceId,
+        TaskExecutionSubmissionSupport.appendAcceptedJobEvents(
                 taskId,
+                stateVersion,
                 createJobResponse.getJobId(),
-                attemptNo,
-                providerResolution.runtimeProfile()
+                eventService,
+                objectMapper
         );
-        return jobRecord;
-    }
-
-    private void appendAcceptedJobEvents(String taskId, int stateVersion, String jobId) {
-        String payloadJson = writeJson(TaskControlPayloadBuilder.buildJobReferencePayload(jobId));
-        appendEvent(taskId, EventType.JOB_SUBMITTED.name(), null, null, stateVersion, payloadJson);
-        appendEvent(taskId, EventType.JOB_STATE_CHANGED.name(), null, JobState.ACCEPTED.name(), stateVersion, payloadJson);
+        return new PreparedJobSubmission(pass2Json, pass2Response, createJobResponse, manifestCandidate);
     }
 
     private void recordWaitingUserEntry(
@@ -3211,18 +3124,6 @@ public class TaskService {
         return analysisManifestMapper.findLatestByTaskIdAndAttemptNo(taskState.getTaskId(), resolveActiveAttemptNo(taskState));
     }
 
-    private String extractCaseId(AnalysisManifest manifest) {
-        if (manifest == null) {
-            return null;
-        }
-        JsonNode argsDraft = readJsonNode(manifest.getArgsDraftJson());
-        if (argsDraft == null || argsDraft.isNull() || argsDraft.isMissingNode()) {
-            return null;
-        }
-        String caseId = argsDraft.path("case_id").asText(null);
-        return caseId == null || caseId.isBlank() ? null : caseId;
-    }
-
     private com.sage.backend.task.dto.CorruptionStateView buildCorruptionState(TaskState taskState) {
         com.sage.backend.task.dto.CorruptionStateView view = new com.sage.backend.task.dto.CorruptionStateView();
         view.setCorrupted(TaskStatus.STATE_CORRUPTED.name().equals(taskState.getCurrentState()));
@@ -3331,13 +3232,6 @@ public class TaskService {
                 && ("FAILED".equalsIgnoreCase(repairDecision.routing()) || "FATAL".equalsIgnoreCase(repairDecision.severity()));
     }
 
-    private RouteProjection buildRouteProjection(String goalParseJson, String skillRouteJson, JsonNode pass1Projection) {
-        return new RouteProjection(
-                goalRouteService.enrichGoalParse(readJsonNode(goalParseJson), pass1Projection),
-                goalRouteService.enrichSkillRoute(readJsonNode(skillRouteJson), pass1Projection)
-        );
-    }
-
     private String deriveInputChainStatus(PrimitiveValidationResponse validationResponse) {
         return Boolean.TRUE.equals(validationResponse.getIsValid()) ? InputChainStatus.COMPLETE.name() : InputChainStatus.INCOMPLETE.name();
     }
@@ -3407,37 +3301,24 @@ public class TaskService {
         manifest.setCheckpointVersion(nextCheckpointVersion(latestTaskState));
         manifest.setGraphDigest(pass2Response == null ? null : pass2Response.getGraphDigest());
         manifest.setPlanningSummaryJson(writeJsonIfPresent(pass2Response == null ? null : pass2Response.getPlanningSummary()));
-        TaskGovernanceFactSupport.CatalogFacts currentCatalogFacts = TaskGovernanceFactSupport.resolveCurrentCatalogFacts(
-                taskId,
-                latestTaskState,
-                taskAttachmentMapper,
-                taskCatalogSnapshotService
-        );
-        manifest.setCatalogSummaryJson(writeJson(currentCatalogFacts.summary()));
-        manifest.setContractSummaryJson(TaskGovernanceFactSupport.writeContractSummary(pass1Node, objectMapper));
-        manifest.setCapabilityKey(pass1Node == null || pass1Node.isMissingNode()
-                ? null
-                : Pass1FactHelper.normalizeCapabilityKey(pass1Node.path("capability_key").asText(null)));
-        manifest.setSelectedTemplate(pass1Node == null || pass1Node.isMissingNode() ? null : pass1Node.path("selected_template").asText(null));
-        manifest.setTemplateVersion(pass1Node == null || pass1Node.isMissingNode() ? null : pass1Node.path("template_version").asText(null));
-        String goalParseJson = latestTaskState == null ? null : latestTaskState.getGoalParseJson();
-        String skillRouteJson = latestTaskState == null ? null : latestTaskState.getSkillRouteJson();
-        if ((goalParseJson == null || goalParseJson.isBlank()) || (skillRouteJson == null || skillRouteJson.isBlank())) {
-            GoalRouteService.GoalRouteDecision fallbackDecision = goalRouteService.deriveFallback(userQuery, pass1Node);
-            if (goalParseJson == null || goalParseJson.isBlank()) {
-                goalParseJson = writeJson(fallbackDecision.goalParse());
-            }
-            if (skillRouteJson == null || skillRouteJson.isBlank()) {
-                skillRouteJson = writeJson(fallbackDecision.skillRoute());
-            }
-        }
-        if ((goalParseJson != null && !goalParseJson.isBlank()) || (skillRouteJson != null && !skillRouteJson.isBlank())) {
-            RouteProjection routeProjection = buildRouteProjection(goalParseJson, skillRouteJson, pass1Node);
-            goalParseJson = writeJson(routeProjection.goalParse());
-            skillRouteJson = writeJson(routeProjection.skillRoute());
-        }
-        manifest.setGoalParseJson(goalParseJson);
-        manifest.setSkillRouteJson(skillRouteJson);
+        TaskManifestGovernanceSupport.ManifestGovernanceProjection governanceProjection =
+                TaskManifestGovernanceSupport.build(
+                        taskId,
+                        userQuery,
+                        latestTaskState,
+                        pass1Node,
+                        taskAttachmentMapper,
+                        taskCatalogSnapshotService,
+                        goalRouteService,
+                        objectMapper
+                );
+        manifest.setCatalogSummaryJson(governanceProjection.catalogSummaryJson());
+        manifest.setContractSummaryJson(governanceProjection.contractSummaryJson());
+        manifest.setCapabilityKey(governanceProjection.capabilityKey());
+        manifest.setSelectedTemplate(governanceProjection.selectedTemplate());
+        manifest.setTemplateVersion(governanceProjection.templateVersion());
+        manifest.setGoalParseJson(governanceProjection.goalParseJson());
+        manifest.setSkillRouteJson(governanceProjection.skillRouteJson());
         manifest.setLogicalInputRolesJson(writeJsonIfPresent(TaskProjectionBuilder.buildManifestLogicalInputRolesPayload(pass1Node, objectMapper)));
         manifest.setSlotSchemaViewJson(writeJsonIfPresent(TaskProjectionBuilder.buildManifestSlotSchemaViewPayload(pass1Node, objectMapper)));
         manifest.setSlotBindingsJson(writeJsonIfPresent(TaskProjectionBuilder.buildManifestSlotBindingsPayload(passBNode, objectMapper)));
@@ -3449,56 +3330,12 @@ public class TaskService {
         return manifest;
     }
 
-    private void freezeManifestOnCommit(AnalysisManifest manifest, int stateVersion) {
-        ensureUpdated(analysisManifestMapper.updateFreezeStatus(
-                manifest.getManifestId(),
-                "CANDIDATE",
-                "FROZEN"
-        ));
-        appendEvent(
-                manifest.getTaskId(),
-                EventType.ANALYSIS_MANIFEST_FROZEN.name(),
-                null,
-                null,
-                stateVersion,
-                writeJson(TaskControlPayloadBuilder.buildManifestFrozenPayload(
-                        manifest.getManifestId(),
-                        manifest.getAttemptNo(),
-                        manifest.getManifestVersion()
-                ))
-        );
-    }
-
     private Object readJsonObject(String sourceJson) {
         if (sourceJson == null || sourceJson.isBlank()) return null;
         try {
             return objectMapper.readValue(sourceJson, Object.class);
         } catch (Exception exception) {
             return null;
-        }
-    }
-
-    private void handlePipelineFailure(String taskId, String traceId, Exception exception, int expectedVersion, TaskStatus fromState) {
-        try {
-            int failedVersion = expectedVersion;
-            if (taskStateMapper.updateState(taskId, expectedVersion, TaskStatus.FAILED.name()) > 0) {
-                failedVersion = expectedVersion + 1;
-                appendEvent(taskId, EventType.STATE_CHANGED.name(), fromState.name(), TaskStatus.FAILED.name(), failedVersion, null);
-            }
-            appendEvent(taskId, EventType.TASK_FAILED.name(), null, null, failedVersion, null);
-            appendAuditJson(
-                    taskId,
-                    "TASK_CREATE",
-                    "FAILED",
-                    traceId,
-                    writePayload(TaskControlPayloadBuilder.buildPipelineFailureAuditPayload(
-                            exception,
-                            fromState,
-                            expectedVersion,
-                            OffsetDateTime.now().toString()
-                    ))
-            );
-        } catch (Exception ignored) {
         }
     }
 
@@ -3732,19 +3569,6 @@ public class TaskService {
         private com.sage.backend.repair.dto.RepairProposalRequest.WaitingContext waitingContext() {
             return decision.waitingContext();
         }
-    }
-
-    private record RouteProjection(
-            JsonNode goalParse,
-            JsonNode skillRoute
-    ) {
-    }
-
-    private record SuccessOutputSummaries(
-            String resultBundleSummary,
-            String finalExplanationSummary,
-            String resultObjectSummary
-    ) {
     }
 
     private record ValidationStageResult(

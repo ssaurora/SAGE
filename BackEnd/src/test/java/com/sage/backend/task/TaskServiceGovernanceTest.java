@@ -1034,6 +1034,38 @@ class TaskServiceGovernanceTest {
     }
 
     @Test
+    void syncActiveJobsSuccessPromotesArtifactsPersistsProjectionAndReturnsSucceeded() throws Exception {
+        Harness harness = new Harness(objectMapper);
+        JobRecord activeJob = activeJobRecord("job_active_success");
+        TaskState runningTask = runningTaskState();
+        runningTask.setJobId("job_active_success");
+        JobStatusResponse succeededStatus = succeededJobStatus("job_active_success");
+        succeededStatus.setDockerRuntimeEvidence(objectMapper.createObjectNode().put("runtime_profile", "docker-local"));
+        succeededStatus.setFinalExplanation(objectMapper.createObjectNode().put("available", true).put("title", "done"));
+
+        when(harness.jobRecordMapper.findActiveJobs()).thenReturn(List.of(activeJob));
+        when(harness.taskStateMapper.findByTaskId("task_running")).thenReturn(runningTask, runningTask);
+        when(harness.jobRuntimeClient.getJob("job_active_success")).thenReturn(succeededStatus);
+        when(harness.jobRecordMapper.findByJobId("job_active_success")).thenReturn(activeJob);
+        when(harness.taskStateMapper.updateState("task_running", 5, TaskStatus.ARTIFACT_PROMOTING.name())).thenReturn(1);
+        when(harness.taskStateMapper.updateState("task_running", 6, TaskStatus.SUCCEEDED.name())).thenReturn(1);
+
+        harness.service.syncActiveJobs();
+
+        verify(harness.workspaceTraceService).persistSuccess(any(), eq(activeJob), any(), any(), any());
+        verify(harness.jobRecordMapper).updateFinalExplanation(eq("job_active_success"), anyString(), any());
+        verify(harness.taskStateMapper).updateOutputSummaries(
+                eq("task_running"),
+                anyString(),
+                anyString(),
+                eq((String) null),
+                anyString()
+        );
+        verify(harness.taskStateMapper).updateState("task_running", 5, TaskStatus.ARTIFACT_PROMOTING.name());
+        verify(harness.taskStateMapper).updateState("task_running", 6, TaskStatus.SUCCEEDED.name());
+    }
+
+    @Test
     void cancelTaskMissingCancelJobContractFailsBeforeRuntimeCancel() throws Exception {
         Harness harness = new Harness(objectMapper);
         TaskState cancelTask = cancelableTaskState();
