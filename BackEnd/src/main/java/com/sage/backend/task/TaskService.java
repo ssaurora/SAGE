@@ -928,8 +928,10 @@ public class TaskService {
                 OffsetDateTime.now(ZoneOffset.UTC)
         );
 
-        Map<String, Object> currentCatalogSummary = waitingState.waitingContext().getCatalogSummary();
-        CatalogConsistencyProjector.CatalogIdentity currentCatalogIdentity = CatalogConsistencyProjector.catalogIdentity(currentCatalogSummary);
+        TaskGovernanceFactSupport.CatalogFacts currentCatalogFacts = TaskGovernanceFactSupport.catalogFacts(
+                waitingState.waitingContext().getCatalogSummary()
+        );
+        CatalogConsistencyProjector.CatalogIdentity currentCatalogIdentity = currentCatalogFacts.identity();
         int candidateCatalogRevision = taskState.getInventoryVersion() == null ? 0 : taskState.getInventoryVersion() + 1;
 
         String resumeTxnJson = writeJson(buildResumeTransactionPayload(
@@ -1046,8 +1048,13 @@ public class TaskService {
             throw new ResponseStatusException(NOT_FOUND, "Frozen manifest not found for target checkpoint");
         }
 
-        Map<String, Object> currentCatalogSummary = buildCatalogSummary(taskId, taskState);
-        CatalogConsistencyProjector.CatalogIdentity currentCatalogIdentity = CatalogConsistencyProjector.catalogIdentity(currentCatalogSummary);
+        TaskGovernanceFactSupport.CatalogFacts currentCatalogFacts = TaskGovernanceFactSupport.resolveCurrentCatalogFacts(
+                taskId,
+                taskState,
+                taskAttachmentMapper,
+                taskCatalogSnapshotService
+        );
+        CatalogConsistencyProjector.CatalogIdentity currentCatalogIdentity = currentCatalogFacts.identity();
 
         String resumeTxnJson = writeJson(buildResumeTransactionPayload(
                 request.getRequestId(),
@@ -1406,8 +1413,13 @@ public class TaskService {
         int baseCheckpointVersion = currentCheckpointVersion(taskState);
         int candidateCheckpointVersion = baseCheckpointVersion + 1;
         int candidateInventoryVersion = nextResumeInventoryVersion(taskState);
-        Map<String, Object> currentCatalogSummary = buildCatalogSummary(taskId, taskState);
-        CatalogConsistencyProjector.CatalogIdentity baseCatalogIdentity = CatalogConsistencyProjector.catalogIdentity(currentCatalogSummary);
+        TaskGovernanceFactSupport.CatalogFacts currentCatalogFacts = TaskGovernanceFactSupport.resolveCurrentCatalogFacts(
+                taskId,
+                taskState,
+                taskAttachmentMapper,
+                taskCatalogSnapshotService
+        );
+        CatalogConsistencyProjector.CatalogIdentity baseCatalogIdentity = currentCatalogFacts.identity();
         Integer baseCatalogInventoryVersion = baseCatalogIdentity.inventoryVersion();
         Integer baseCatalogRevision = baseCatalogIdentity.revision();
         String baseCatalogFingerprint = baseCatalogIdentity.fingerprint();
@@ -2408,7 +2420,12 @@ public class TaskService {
                 ? "Select a governed case and then resume."
                 : "Provide clarification in user_note before resuming.");
         waitingContext.setCanResume(false);
-        waitingContext.setCatalogSummary(buildCatalogSummary(taskId, taskStateMapper.findByTaskId(taskId)));
+        waitingContext.setCatalogSummary(TaskGovernanceFactSupport.resolveCurrentCatalogFacts(
+                taskId,
+                taskStateMapper.findByTaskId(taskId),
+                taskAttachmentMapper,
+                taskCatalogSnapshotService
+        ).summary());
 
         RepairDecision decision = new RepairDecision("RECOVERABLE", "WAITING_USER", waitingContext);
         return buildWaitingStateSnapshot(taskId, decision, objectMapper.createObjectNode(), objectMapper.createObjectNode(), userNote, false);
@@ -2627,8 +2644,13 @@ public class TaskService {
             JsonNode payloadNode
     ) throws Exception {
         String taskId = taskState.getTaskId();
-        Map<String, Object> currentCatalogSummary = buildCatalogSummary(taskId, taskState);
-        CatalogConsistencyProjector.CatalogIdentity currentCatalogIdentity = CatalogConsistencyProjector.catalogIdentity(currentCatalogSummary);
+        TaskGovernanceFactSupport.CatalogFacts currentCatalogFacts = TaskGovernanceFactSupport.resolveCurrentCatalogFacts(
+                taskId,
+                taskState,
+                taskAttachmentMapper,
+                taskCatalogSnapshotService
+        );
+        CatalogConsistencyProjector.CatalogIdentity currentCatalogIdentity = currentCatalogFacts.identity();
         String rolledBackTxn = writeJson(buildResumeTransactionPayload(
                 request.getResumeRequestId(),
                 "ROLLED_BACK",
@@ -3358,8 +3380,14 @@ public class TaskService {
         manifest.setCheckpointVersion(nextCheckpointVersion(latestTaskState));
         manifest.setGraphDigest(pass2Response == null ? null : pass2Response.getGraphDigest());
         manifest.setPlanningSummaryJson(writeJsonIfPresent(pass2Response == null ? null : pass2Response.getPlanningSummary()));
-        manifest.setCatalogSummaryJson(writeJson(buildCatalogSummary(taskId, latestTaskState)));
-        manifest.setContractSummaryJson(writeJson(ContractConsistencyProjector.buildContractSummary(pass1Node)));
+        TaskGovernanceFactSupport.CatalogFacts currentCatalogFacts = TaskGovernanceFactSupport.resolveCurrentCatalogFacts(
+                taskId,
+                latestTaskState,
+                taskAttachmentMapper,
+                taskCatalogSnapshotService
+        );
+        manifest.setCatalogSummaryJson(writeJson(currentCatalogFacts.summary()));
+        manifest.setContractSummaryJson(TaskGovernanceFactSupport.writeContractSummary(pass1Node, objectMapper));
         manifest.setCapabilityKey(pass1Node == null || pass1Node.isMissingNode()
                 ? null
                 : Pass1FactHelper.normalizeCapabilityKey(pass1Node.path("capability_key").asText(null)));
@@ -3483,53 +3511,12 @@ public class TaskService {
         );
     }
 
-    private Map<String, Object> buildCatalogSummary(String taskId, TaskState taskState) {
-        List<TaskAttachment> attachments = taskAttachmentMapper.findByTaskId(taskId);
-        return buildCatalogSummary(taskId, attachments, taskState);
-    }
-
-    private Map<String, Object> buildCatalogSummary(List<TaskAttachment> attachments, TaskState taskState) {
-        return buildCatalogSummary(null, attachments, taskState);
-    }
-
-    private Map<String, Object> buildCatalogSummary(String taskId, List<TaskAttachment> attachments, TaskState taskState) {
-        return taskCatalogSnapshotService.resolveCatalogSummary(taskId, attachments, currentInventoryVersion(taskState));
-    }
-
-    private Map<String, Object> resolveManifestCatalogSummary(
-            AnalysisManifest manifest,
-            List<TaskAttachment> attachments,
-            TaskState taskState
-    ) {
-        Map<String, Object> frozenSummary = readJsonMap(manifest == null ? null : manifest.getCatalogSummaryJson());
-        if (frozenSummary != null && !frozenSummary.isEmpty()) {
-            return frozenSummary;
-        }
-        return taskCatalogSnapshotService.resolveManifestCatalogSummary(
-                frozenSummary,
-                taskState == null ? null : taskState.getTaskId(),
-                attachments,
-                currentInventoryVersion(taskState)
-        );
-    }
-
     private String enrichAuditDetailWithContract(JsonNode pass1Node, String detailJson) {
         try {
-            return writePayload(ContractConsistencyProjector.enrichAuditDetailWithContract(pass1Node, readJsonMap(detailJson)));
+            return TaskGovernanceFactSupport.enrichAuditDetailWithContract(pass1Node, detailJson, objectMapper);
         } catch (Exception exception) {
             LOGGER.warn("Failed to enrich audit detail with contract identity", exception);
             return detailJson;
-        }
-    }
-
-    private Map<String, Object> readJsonMap(String sourceJson) {
-        if (sourceJson == null || sourceJson.isBlank()) {
-            return null;
-        }
-        try {
-            return TaskProjectionBuilder.buildJsonObjectView(objectMapper.readTree(sourceJson), objectMapper);
-        } catch (Exception exception) {
-            return null;
         }
     }
 
