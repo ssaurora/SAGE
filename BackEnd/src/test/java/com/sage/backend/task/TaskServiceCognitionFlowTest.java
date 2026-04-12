@@ -24,6 +24,7 @@ import com.sage.backend.planning.Pass1Client;
 import com.sage.backend.planning.dto.Pass1Response;
 import com.sage.backend.planning.dto.Pass2Response;
 import com.sage.backend.repair.RepairDispatcherService;
+import com.sage.backend.repair.RepairDecision;
 import com.sage.backend.repair.RepairProposalService;
 import com.sage.backend.repair.dto.RepairProposalResponse;
 import com.sage.backend.task.dto.CreateTaskRequest;
@@ -44,8 +45,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -146,6 +150,41 @@ class TaskServiceCognitionFlowTest {
 
         assertEquals(502, exception.getStatusCode().value());
         verify(harness.jobRuntimeClient, never()).createJob(any());
+    }
+
+    @Test
+    void createTaskFatalValidationKeepsSingleFailedTransitionAndOriginalTaskFailedVersion() throws Exception {
+        Harness harness = new Harness(objectMapper);
+        when(harness.cognitionGoalRouteClient.route(any())).thenReturn(goalRouteResponse("resolved"));
+        when(harness.pass1Client.runPass1(any())).thenReturn(defaultPass1Response());
+        when(harness.cognitionPassBClient.runPassB(any())).thenReturn(bindingResolvedPassBResponse());
+        when(harness.validationClient.validatePrimitive(any())).thenReturn(invalidValidation());
+        when(harness.repairDispatcherService.decide(any(), any(), any(), anyInt()))
+                .thenReturn(new RepairDecision("FATAL", "FAILED", null));
+
+        CreateTaskRequest request = new CreateTaskRequest();
+        request.setUserQuery("run water yield");
+
+        CreateTaskResponse response = harness.service.createTask(42L, request);
+
+        assertEquals(TaskStatus.FAILED.name(), response.getState());
+        verify(harness.jobRuntimeClient, never()).createJob(any());
+        verify(harness.eventService, times(1)).appendEvent(
+                anyString(),
+                eq("STATE_CHANGED"),
+                eq(TaskStatus.VALIDATING.name()),
+                eq(TaskStatus.FAILED.name()),
+                eq(4),
+                isNull()
+        );
+        verify(harness.eventService, times(1)).appendEvent(
+                anyString(),
+                eq("TASK_FAILED"),
+                isNull(),
+                isNull(),
+                eq(4),
+                anyString()
+        );
     }
 
     @Test
@@ -587,6 +626,16 @@ class TaskServiceCognitionFlowTest {
         return response;
     }
 
+    private PrimitiveValidationResponse invalidValidation() {
+        PrimitiveValidationResponse response = new PrimitiveValidationResponse();
+        response.setIsValid(false);
+        response.setMissingRoles(List.of("precipitation"));
+        response.setMissingParams(List.of("basin_id"));
+        response.setInvalidBindings(List.of());
+        response.setErrorCode("MISSING_REQUIRED_INPUT");
+        return response;
+    }
+
     private Pass2Response defaultPass2Response() throws Exception {
         Pass2Response response = new Pass2Response();
         response.setGraphDigest("digest_test");
@@ -673,12 +722,14 @@ class TaskServiceCognitionFlowTest {
             this.taskContractQueryService = new TaskContractQueryService(objectMapper);
             when(taskStateMapper.insert(any())).thenReturn(1);
             when(taskStateMapper.updateState(anyString(), anyInt(), anyString())).thenReturn(1);
+            when(taskStateMapper.updateStateWithInputChain(anyString(), anyInt(), anyString(), anyString(), anyString(), anyString(), anyString(), anyString())).thenReturn(1);
             when(taskStateMapper.updateGoalAndRoute(anyString(), anyString(), anyString())).thenReturn(1);
             when(taskStateMapper.updateStateWithWaitingContext(anyString(), anyInt(), anyString(), anyString(), anyString(), any())).thenReturn(1);
             when(taskStateMapper.updateOutputSummaries(anyString(), any(), any(), any(), any())).thenReturn(1);
             when(taskStateMapper.updateCognitionVerdict(anyString(), anyString())).thenReturn(1);
             when(taskStateMapper.updateStateAndPass1(anyString(), anyInt(), anyString(), anyString())).thenReturn(1);
             when(taskAttemptMapper.insert(any())).thenReturn(1);
+            when(repairRecordMapper.insert(any())).thenReturn(1);
             when(repairProposalService.generate(any(), any(), any(), any())).thenReturn(new RepairProposalResponse());
             when(taskAttachmentMapper.findByTaskId(anyString())).thenReturn(List.of());
             when(taskCatalogSnapshotMapper.findByTaskIdAndInventoryVersion(anyString(), anyInt())).thenReturn(null);

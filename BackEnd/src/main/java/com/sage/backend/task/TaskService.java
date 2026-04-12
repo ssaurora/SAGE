@@ -259,28 +259,28 @@ public class TaskService {
 
             if ("unsupported".equalsIgnoreCase(goalRouteResponse.getPlanningIntentStatus())) {
                 String failureSummaryJson = writePayload(buildUnsupportedFailureSummaryPayload(goalRouteNodeSummary(goalParseNode)));
-                taskStateMapper.updateOutputSummaries(taskId, null, null, failureSummaryJson, null);
-                taskStateMapper.updateCognitionVerdict(taskId, "UNSUPPORTED");
-                ensureUpdated(taskStateMapper.updateState(taskId, currentVersion, TaskStatus.FAILED.name()));
-                appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.FAILED.name(), currentVersion + 1, null);
-                appendEvent(taskId, EventType.TASK_FAILED.name(), null, null, currentVersion + 1, failureSummaryJson);
-                return buildCreateTaskResponse(taskId, null, TaskStatus.FAILED.name(), currentVersion + 1);
+                return transitionCreateToFailed(
+                        taskId,
+                        currentState,
+                        failureSummaryJson,
+                        "UNSUPPORTED",
+                        currentVersion,
+                        currentVersion + 1,
+                        currentVersion + 1
+                );
             }
 
             if ("ambiguous".equalsIgnoreCase(goalRouteResponse.getPlanningIntentStatus())) {
                 WaitingStateSnapshot waitingState = buildClarifyWaitingState(taskId, "CLARIFY_INTENT", "Clarify the requested analysis before resuming.", null);
-                taskStateMapper.updateCognitionVerdict(taskId, "AMBIGUOUS");
-                ensureUpdated(taskStateMapper.updateStateWithWaitingContext(
+                return transitionCreateToWaiting(
                         taskId,
+                        taskState,
                         currentVersion,
-                        TaskStatus.WAITING_USER.name(),
-                        waitingState.waitingContextJson(),
-                        waitingState.decision().waitingContext().getWaitingReasonType(),
-                        OffsetDateTime.now(ZoneOffset.UTC)
-                ));
-                appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.WAITING_USER.name(), currentVersion + 1, null);
-                recordWaitingUserEntry(taskId, resolveActiveAttemptNo(taskState), waitingState, null, currentVersion + 1);
-                return buildCreateTaskResponse(taskId, null, TaskStatus.WAITING_USER.name(), currentVersion + 1);
+                        currentState,
+                        waitingState,
+                        "AMBIGUOUS",
+                        currentVersion + 1
+                );
             }
 
             if (isRealCaseRoute(skillRouteNode)) {
@@ -304,18 +304,15 @@ public class TaskService {
                             null,
                             goalParseNode.path("case_projection")
                     );
-                    taskStateMapper.updateCognitionVerdict(taskId, "LLM_AMBIGUOUS");
-                    ensureUpdated(taskStateMapper.updateStateWithWaitingContext(
+                    return transitionCreateToWaiting(
                             taskId,
+                            taskState,
                             currentVersion,
-                            TaskStatus.WAITING_USER.name(),
-                            waitingState.waitingContextJson(),
-                            waitingState.decision().waitingContext().getWaitingReasonType(),
-                            OffsetDateTime.now(ZoneOffset.UTC)
-                    ));
-                    appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.WAITING_USER.name(), currentVersion + 1, null);
-                    recordWaitingUserEntry(taskId, resolveActiveAttemptNo(taskState), waitingState, null, currentVersion + 1);
-                    return buildCreateTaskResponse(taskId, null, TaskStatus.WAITING_USER.name(), currentVersion + 1);
+                            currentState,
+                            waitingState,
+                            "LLM_AMBIGUOUS",
+                            currentVersion + 1
+                    );
                 }
             }
 
@@ -399,17 +396,15 @@ public class TaskService {
                             null,
                             passBNode.path("case_projection")
                     );
-                    ensureUpdated(taskStateMapper.updateStateWithWaitingContext(
+                    return transitionCreateToWaiting(
                             taskId,
+                            taskState,
                             currentVersion,
-                            TaskStatus.WAITING_USER.name(),
-                            waitingState.waitingContextJson(),
-                            waitingState.decision().waitingContext().getWaitingReasonType(),
-                            OffsetDateTime.now(ZoneOffset.UTC)
-                    ));
-                    appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.WAITING_USER.name(), currentVersion + 1, null);
-                    recordWaitingUserEntry(taskId, resolveActiveAttemptNo(taskState), waitingState, null, currentVersion + 1);
-                    return buildCreateTaskResponse(taskId, null, TaskStatus.WAITING_USER.name(), currentVersion + 1);
+                            currentState,
+                            waitingState,
+                            null,
+                            currentVersion + 1
+                    );
                 }
             }
 
@@ -422,17 +417,15 @@ public class TaskService {
                         "Clarify the requested bindings before resuming.",
                         null
                 );
-                ensureUpdated(taskStateMapper.updateStateWithWaitingContext(
+                return transitionCreateToWaiting(
                         taskId,
+                        taskState,
                         currentVersion,
-                        TaskStatus.WAITING_USER.name(),
-                        waitingState.waitingContextJson(),
-                        waitingState.decision().waitingContext().getWaitingReasonType(),
-                        OffsetDateTime.now(ZoneOffset.UTC)
-                ));
-                appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.WAITING_USER.name(), currentVersion + 1, null);
-                recordWaitingUserEntry(taskId, resolveActiveAttemptNo(taskState), waitingState, null, currentVersion + 1);
-                return buildCreateTaskResponse(taskId, null, TaskStatus.WAITING_USER.name(), currentVersion + 1);
+                        currentState,
+                        waitingState,
+                        null,
+                        currentVersion + 1
+                );
             }
 
             ensureUpdated(taskStateMapper.updateState(taskId, currentVersion, TaskStatus.VALIDATING.name()));
@@ -461,8 +454,15 @@ public class TaskService {
                                     OffsetDateTime.now(ZoneOffset.UTC).toString()
                             )
                     );
-                    taskStateMapper.updateOutputSummaries(taskId, null, null, failureSummaryJson, null);
-                    appendEvent(taskId, EventType.TASK_FAILED.name(), null, null, currentVersion, failureSummaryJson);
+                    transitionCreateToFailed(
+                            taskId,
+                            currentState,
+                            failureSummaryJson,
+                            null,
+                            null,
+                            null,
+                            currentVersion
+                    );
                     auditService.appendAudit(
                             taskId,
                             "TASK_CREATE",
@@ -1463,25 +1463,21 @@ public class TaskService {
                 taskStateMapper.updateGoalAndRoute(taskId, writeJson(goalParseNode), writeJson(skillRouteNode));
 
                 if ("unsupported".equalsIgnoreCase(goalRouteResponse.getPlanningIntentStatus())) {
-                    String rolledBackTxn = writeJson(buildResumeTransactionPayload(
-                            request.getResumeRequestId(),
-                            "ROLLED_BACK",
+                    String failureSummaryJson = writePayload(buildUnsupportedFailureSummaryPayload(goalRouteNodeSummary(goalParseNode)));
+                    return rollbackResumeToFailed(
+                            taskId,
+                            taskState,
+                            request,
+                            currentState,
+                            currentVersion,
                             baseCheckpointVersion,
                             candidateCheckpointVersion,
                             resumeCatalogScope,
-                            null,
-                            resolveActiveAttemptNo(taskState),
-                            null,
-                            "UNSUPPORTED"
-                    ));
-                    taskStateMapper.updateResumeTransaction(taskId, rolledBackTxn);
-                    taskStateMapper.updateCognitionVerdict(taskId, "UNSUPPORTED");
-                    String failureSummaryJson = writePayload(buildUnsupportedFailureSummaryPayload(goalRouteNodeSummary(goalParseNode)));
-                    taskStateMapper.updateOutputSummaries(taskId, null, null, failureSummaryJson, null);
-                    ensureUpdated(taskStateMapper.updateState(taskId, currentVersion, TaskStatus.FAILED.name()));
-                    appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.FAILED.name(), currentVersion + 1, null);
-                    appendEvent(taskId, EventType.TASK_FAILED.name(), null, null, currentVersion + 1, failureSummaryJson);
-                    return buildResumeTaskResponse(taskId, TaskStatus.FAILED.name(), currentVersion + 1, true, taskState.getActiveAttemptNo());
+                            "UNSUPPORTED",
+                            failureSummaryJson,
+                            "UNSUPPORTED",
+                            currentVersion + 1
+                    );
                 }
 
                 if ("ambiguous".equalsIgnoreCase(goalRouteResponse.getPlanningIntentStatus())) {
@@ -1710,28 +1706,12 @@ public class TaskService {
 
             if (!Boolean.TRUE.equals(validationStage.validationResponse().getIsValid())) {
                 if (TaskStatus.FAILED.equals(validationStage.nextState())) {
-                    String rolledBackTxn = writeJson(buildResumeTransactionPayload(
-                            request.getResumeRequestId(),
-                            "ROLLED_BACK",
-                            baseCheckpointVersion,
-                            candidateCheckpointVersion,
-                            resumeCatalogScope,
-                            null,
-                            resolveActiveAttemptNo(taskState),
-                            null,
-                            "FATAL_VALIDATION"
-                    ));
-                    taskStateMapper.updateResumeTransaction(taskId, rolledBackTxn);
                     String failureSummaryJson = writePayload(
                             TaskControlPayloadBuilder.buildFatalValidationFailureSummaryPayload(
                                     validationStage.validationResponse(),
                                     OffsetDateTime.now(ZoneOffset.UTC).toString()
                             )
                     );
-                    taskStateMapper.updateOutputSummaries(taskId, null, null, failureSummaryJson, null);
-                    ensureUpdated(taskStateMapper.updateState(taskId, currentVersion, TaskStatus.FAILED.name()));
-                    appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.FAILED.name(), currentVersion + 1, null);
-                    appendEvent(taskId, EventType.TASK_FAILED.name(), null, null, currentVersion, failureSummaryJson);
 
                     insertRepairRecord(
                             taskId,
@@ -1749,12 +1729,19 @@ public class TaskService {
                     validationStage.repairDecision().routing()
             );
 
-                    return buildResumeTaskResponse(
+                    return rollbackResumeToFailed(
                             taskId,
-                            TaskStatus.FAILED.name(),
-                            currentVersion + 1,
-                            true,
-                            taskState.getActiveAttemptNo()
+                            taskState,
+                            request,
+                            currentState,
+                            currentVersion,
+                            baseCheckpointVersion,
+                            candidateCheckpointVersion,
+                            resumeCatalogScope,
+                            "FATAL_VALIDATION",
+                            failureSummaryJson,
+                            null,
+                            currentVersion
                     );
                 }
 
@@ -2443,11 +2430,15 @@ public class TaskService {
             JsonNode payloadNode
     ) throws Exception {
         String failureSummaryJson = writePayload(buildCognitionFailureSummaryPayload(stage, failureCode, payloadNode));
-        taskStateMapper.updateOutputSummaries(taskId, null, null, failureSummaryJson, null);
-        taskStateMapper.updateCognitionVerdict(taskId, mapCognitionFailureVerdict(failureCode));
-        ensureUpdated(taskStateMapper.updateState(taskId, currentVersion, TaskStatus.FAILED.name()));
-        appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.FAILED.name(), currentVersion + 1, null);
-        appendEvent(taskId, EventType.TASK_FAILED.name(), null, null, currentVersion + 1, failureSummaryJson);
+        transitionCreateToFailed(
+                taskId,
+                currentState,
+                failureSummaryJson,
+                mapCognitionFailureVerdict(failureCode),
+                currentVersion,
+                currentVersion + 1,
+                currentVersion + 1
+        );
         auditService.appendAudit(
                 taskId,
                 "TASK_CREATE",
@@ -2463,6 +2454,54 @@ public class TaskService {
                 ))
         );
         return buildCreateTaskResponse(taskId, null, TaskStatus.FAILED.name(), currentVersion + 1);
+    }
+
+    private CreateTaskResponse transitionCreateToWaiting(
+            String taskId,
+            TaskState taskState,
+            int currentVersion,
+            TaskStatus currentState,
+            WaitingStateSnapshot waitingState,
+            String cognitionVerdict,
+            int responseVersion
+    ) {
+        if (cognitionVerdict != null && !cognitionVerdict.isBlank()) {
+            taskStateMapper.updateCognitionVerdict(taskId, cognitionVerdict);
+        }
+        ensureUpdated(taskStateMapper.updateStateWithWaitingContext(
+                taskId,
+                currentVersion,
+                TaskStatus.WAITING_USER.name(),
+                waitingState.waitingContextJson(),
+                waitingState.decision().waitingContext().getWaitingReasonType(),
+                OffsetDateTime.now(ZoneOffset.UTC)
+        ));
+        appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.WAITING_USER.name(), responseVersion, null);
+        recordWaitingUserEntry(taskId, resolveActiveAttemptNo(taskState), waitingState, null, responseVersion);
+        return buildCreateTaskResponse(taskId, null, TaskStatus.WAITING_USER.name(), responseVersion);
+    }
+
+    private CreateTaskResponse transitionCreateToFailed(
+            String taskId,
+            TaskStatus currentState,
+            String failureSummaryJson,
+            String cognitionVerdict,
+            Integer stateUpdateVersion,
+            Integer stateChangedEventVersion,
+            int responseVersion
+    ) {
+        taskStateMapper.updateOutputSummaries(taskId, null, null, failureSummaryJson, null);
+        if (cognitionVerdict != null && !cognitionVerdict.isBlank()) {
+            taskStateMapper.updateCognitionVerdict(taskId, cognitionVerdict);
+        }
+        if (stateUpdateVersion != null) {
+            ensureUpdated(taskStateMapper.updateState(taskId, stateUpdateVersion, TaskStatus.FAILED.name()));
+        }
+        if (stateChangedEventVersion != null) {
+            appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.FAILED.name(), stateChangedEventVersion, null);
+        }
+        appendEvent(taskId, EventType.TASK_FAILED.name(), null, null, responseVersion, failureSummaryJson);
+        return buildCreateTaskResponse(taskId, null, TaskStatus.FAILED.name(), responseVersion);
     }
 
     private ResumeTaskResponse failResumeForRequiredCognition(
@@ -2486,25 +2525,21 @@ public class TaskService {
         );
         TaskResumeGovernanceSupport.ResumeCatalogScope resumeCatalogScope =
                 TaskResumeGovernanceSupport.buildResumeCatalogScope(currentCatalogFacts, candidateInventoryVersion);
-        String rolledBackTxn = writeJson(buildResumeTransactionPayload(
-                request.getResumeRequestId(),
-                "ROLLED_BACK",
+        String failureSummaryJson = writePayload(buildCognitionFailureSummaryPayload(stage, failureCode, payloadNode));
+        return rollbackResumeToFailed(
+                taskId,
+                taskState,
+                request,
+                currentState,
+                currentVersion,
                 baseCheckpointVersion,
                 candidateCheckpointVersion,
                 resumeCatalogScope,
-                null,
-                resolveActiveAttemptNo(taskState),
-                null,
-                failureCode
-        ));
-        taskStateMapper.updateResumeTransaction(taskId, rolledBackTxn);
-        taskStateMapper.updateCognitionVerdict(taskId, mapCognitionFailureVerdict(failureCode));
-        String failureSummaryJson = writePayload(buildCognitionFailureSummaryPayload(stage, failureCode, payloadNode));
-        taskStateMapper.updateOutputSummaries(taskId, null, null, failureSummaryJson, null);
-        ensureUpdated(taskStateMapper.updateState(taskId, currentVersion, TaskStatus.FAILED.name()));
-        appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.FAILED.name(), currentVersion + 1, null);
-        appendEvent(taskId, EventType.TASK_FAILED.name(), null, null, currentVersion + 1, failureSummaryJson);
-        return buildResumeTaskResponse(taskId, TaskStatus.FAILED.name(), currentVersion + 1, true, taskState.getActiveAttemptNo());
+                failureCode,
+                failureSummaryJson,
+                mapCognitionFailureVerdict(failureCode),
+                currentVersion + 1
+        );
     }
 
     private ResumeTaskResponse rollbackResumeToWaiting(
@@ -2556,6 +2591,48 @@ public class TaskService {
         return buildResumeTaskResponse(
                 taskId,
                 TaskStatus.WAITING_USER.name(),
+                currentVersion + 1,
+                true,
+                taskState.getActiveAttemptNo()
+        );
+    }
+
+    private ResumeTaskResponse rollbackResumeToFailed(
+            String taskId,
+            TaskState taskState,
+            ResumeTaskRequest request,
+            TaskStatus currentState,
+            int currentVersion,
+            int baseCheckpointVersion,
+            int candidateCheckpointVersion,
+            TaskResumeGovernanceSupport.ResumeCatalogScope resumeCatalogScope,
+            String failureReason,
+            String failureSummaryJson,
+            String cognitionVerdict,
+            int taskFailedEventVersion
+    ) {
+        String rolledBackTxn = writeJson(buildResumeTransactionPayload(
+                request.getResumeRequestId(),
+                "ROLLED_BACK",
+                baseCheckpointVersion,
+                candidateCheckpointVersion,
+                resumeCatalogScope,
+                null,
+                resolveActiveAttemptNo(taskState),
+                null,
+                failureReason
+        ));
+        taskStateMapper.updateResumeTransaction(taskId, rolledBackTxn);
+        if (cognitionVerdict != null && !cognitionVerdict.isBlank()) {
+            taskStateMapper.updateCognitionVerdict(taskId, cognitionVerdict);
+        }
+        taskStateMapper.updateOutputSummaries(taskId, null, null, failureSummaryJson, null);
+        ensureUpdated(taskStateMapper.updateState(taskId, currentVersion, TaskStatus.FAILED.name()));
+        appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.FAILED.name(), currentVersion + 1, null);
+        appendEvent(taskId, EventType.TASK_FAILED.name(), null, null, taskFailedEventVersion, failureSummaryJson);
+        return buildResumeTaskResponse(
+                taskId,
+                TaskStatus.FAILED.name(),
                 currentVersion + 1,
                 true,
                 taskState.getActiveAttemptNo()
