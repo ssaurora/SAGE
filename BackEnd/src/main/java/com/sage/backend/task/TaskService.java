@@ -463,19 +463,16 @@ public class TaskService {
                             null,
                             currentVersion
                     );
-                    auditService.appendAudit(
+                    appendTaskCreateAudit(
                             taskId,
-                            "TASK_CREATE",
                             "FAILED",
                             traceId,
-                            writePayload(TaskControlPayloadBuilder.buildTaskCreateAuditPayload(
-                                    currentState.name(),
-                                    false,
-                                    validationStage.inputChainStatus(),
-                                    false,
-                                    null,
-                                    "FATAL_VALIDATION"
-                            ))
+                            currentState.name(),
+                            false,
+                            validationStage.inputChainStatus(),
+                            false,
+                            null,
+                            "FATAL_VALIDATION"
                     );
                     return buildCreateTaskResponse(taskId, null, currentState.name(), currentVersion);
                 }
@@ -489,19 +486,16 @@ public class TaskService {
                         currentVersion
                 );
 
-                auditService.appendAudit(
+                appendTaskCreateAudit(
                         taskId,
-                        "TASK_CREATE",
                         "SUCCESS",
                         traceId,
-                        writePayload(TaskControlPayloadBuilder.buildTaskCreateAuditPayload(
-                                currentState.name(),
-                                false,
-                                validationStage.inputChainStatus(),
-                                false,
-                                null,
-                                null
-                        ))
+                        currentState.name(),
+                        false,
+                        validationStage.inputChainStatus(),
+                        false,
+                        null,
+                        null
                 );
                 return buildCreateTaskResponse(taskId, null, currentState.name(), currentVersion);
             }
@@ -545,19 +539,16 @@ public class TaskService {
             appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.QUEUED.name(), currentVersion + 1, null);
             currentVersion += 1;
 
-            auditService.appendAudit(
+            appendTaskCreateAudit(
                     taskId,
-                    "TASK_CREATE",
                     "SUCCESS",
                     traceId,
-                    writePayload(TaskControlPayloadBuilder.buildTaskCreateAuditPayload(
-                            TaskStatus.QUEUED.name(),
-                            true,
-                            validationStage.inputChainStatus(),
-                            true,
-                            preparedSubmission.createJobResponse().getJobId(),
-                            null
-                    ))
+                    TaskStatus.QUEUED.name(),
+                    true,
+                    validationStage.inputChainStatus(),
+                    true,
+                    preparedSubmission.createJobResponse().getJobId(),
+                    null
             );
             return buildCreateTaskResponse(taskId, preparedSubmission.createJobResponse().getJobId(), TaskStatus.QUEUED.name(), currentVersion);
         } catch (ResponseStatusException exception) {
@@ -1318,7 +1309,44 @@ public class TaskService {
             String detailJson
     ) {
         CapabilityContractGuard.requireRecordAuditContract(pass1Node);
-        auditService.appendAudit(taskId, actionType, actionResult, traceId, enrichAuditDetailWithContract(pass1Node, detailJson));
+        appendAuditJson(taskId, actionType, actionResult, traceId, enrichAuditDetailWithContract(pass1Node, detailJson));
+    }
+
+    private void appendTaskCreateAudit(
+            String taskId,
+            String actionResult,
+            String traceId,
+            String state,
+            boolean validationIsValid,
+            String inputChainStatus,
+            boolean jobCreated,
+            String jobId,
+            String failureCode
+    ) throws Exception {
+        appendAuditJson(
+                taskId,
+                "TASK_CREATE",
+                actionResult,
+                traceId,
+                writePayload(TaskControlPayloadBuilder.buildTaskCreateAuditPayload(
+                        state,
+                        validationIsValid,
+                        inputChainStatus,
+                        jobCreated,
+                        jobId,
+                        failureCode
+                ))
+        );
+    }
+
+    private void appendAuditJson(
+            String taskId,
+            String actionType,
+            String actionResult,
+            String traceId,
+            String detailJson
+    ) {
+        auditService.appendAudit(taskId, actionType, actionResult, traceId, detailJson);
     }
 
     private TerminalFailureHandling handleNonSuccessTerminalState(TaskState taskState, JobRecord jobRecord, JobStatusResponse status, String newState) throws Exception {
@@ -1914,7 +1942,7 @@ public class TaskService {
                 OffsetDateTime.now(ZoneOffset.UTC),
                 corruptedTxn
         ));
-        auditService.appendAudit(
+        appendAuditJson(
                 taskId,
                 "TASK_RESUME",
                 "REJECTED",
@@ -2439,19 +2467,16 @@ public class TaskService {
                 currentVersion + 1,
                 currentVersion + 1
         );
-        auditService.appendAudit(
+        appendTaskCreateAudit(
                 taskId,
-                "TASK_CREATE",
                 "FAILED",
                 traceId,
-                writePayload(TaskControlPayloadBuilder.buildTaskCreateAuditPayload(
-                        TaskStatus.FAILED.name(),
-                        false,
-                        InputChainStatus.INCOMPLETE.name(),
-                        false,
-                        null,
-                        failureCode
-                ))
+                TaskStatus.FAILED.name(),
+                false,
+                InputChainStatus.INCOMPLETE.name(),
+                false,
+                null,
+                failureCode
         );
         return buildCreateTaskResponse(taskId, null, TaskStatus.FAILED.name(), currentVersion + 1);
     }
@@ -3420,7 +3445,7 @@ public class TaskService {
                 appendEvent(taskId, EventType.STATE_CHANGED.name(), fromState.name(), TaskStatus.FAILED.name(), failedVersion, null);
             }
             appendEvent(taskId, EventType.TASK_FAILED.name(), null, null, failedVersion, null);
-            auditService.appendAudit(
+            appendAuditJson(
                     taskId,
                     "TASK_CREATE",
                     "FAILED",
