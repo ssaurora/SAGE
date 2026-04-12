@@ -533,6 +533,31 @@ final class TaskQuerySupport {
         ));
     }
 
+    static void applyResultJobPayload(
+            TaskResultResponse response,
+            JobRecord jobRecord,
+            String activeCaseId,
+            Map<String, Object> frozenCatalogSummary,
+            Map<String, Object> currentCatalogSummary,
+            Map<String, Object> catalogSummary,
+            ObjectMapper objectMapper
+    ) {
+        if (response == null || jobRecord == null) {
+            return;
+        }
+        applyResultJobProjection(response, jobRecord, activeCaseId, objectMapper);
+        CatalogProjection catalogProjection = buildFrozenCatalogProjection(
+                "result_catalog",
+                "result_catalog_governance",
+                frozenCatalogSummary,
+                currentCatalogSummary,
+                extractResultInputRoleNames(response),
+                "result_input_bindings"
+        );
+        applyCatalogProjection(response, catalogProjection);
+        response.setCatalogSummary(catalogSummary);
+    }
+
     static void applyDetailSummaryProjection(
             TaskDetailResponse response,
             JsonNode pass1Projection,

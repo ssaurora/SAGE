@@ -83,17 +83,15 @@ public class TaskResultQueryService {
         TaskQuerySupport.applyStageProjection(response, stageRoots, objectMapper);
         TaskQuerySupport.applyResultPass2Projection(response, taskState, objectMapper);
         if (jobRecord != null) {
-            TaskQuerySupport.applyResultJobProjection(response, jobRecord, activeCaseId, objectMapper);
-            catalogProjection = TaskQuerySupport.buildFrozenCatalogProjection(
-                    "result_catalog",
-                    "result_catalog_governance",
+            TaskQuerySupport.applyResultJobPayload(
+                    response,
+                    jobRecord,
+                    activeCaseId,
                     frozenCatalogSummary,
                     currentCatalogSummary,
-                    TaskQuerySupport.extractResultInputRoleNames(response),
-                    "result_input_bindings"
+                    catalogSummary,
+                    objectMapper
             );
-            TaskQuerySupport.applyCatalogProjection(response, catalogProjection);
-            response.setCatalogSummary(catalogSummary);
         }
         TaskQuerySupport.applyRepairProjection(response, latestRepair, objectMapper);
         if (activeManifest != null) {
