@@ -443,6 +443,7 @@ final class TaskQuerySupport {
         if (response == null) {
             return;
         }
+        response.setPlanningIntentStatus(goalParseRoot == null ? null : goalParseRoot.path("planning_intent_status").asText(null));
         response.setSkillId(skillRouteRoot == null ? null : skillRouteRoot.path("skill_id").asText(null));
         response.setSkillVersion(skillRouteRoot == null ? null : skillRouteRoot.path("skill_version").asText(null));
         response.setBindingStatus(passBRoot == null ? null : passBRoot.path("binding_status").asText(null));
@@ -470,6 +471,7 @@ final class TaskQuerySupport {
         if (response == null) {
             return;
         }
+        response.setPlanningIntentStatus(goalParseRoot == null ? null : goalParseRoot.path("planning_intent_status").asText(null));
         response.setSkillId(skillRouteRoot == null ? null : skillRouteRoot.path("skill_id").asText(
                 passBRoot == null ? null : passBRoot.path("skill_id").asText(null)
         ));
@@ -501,6 +503,7 @@ final class TaskQuerySupport {
         if (response == null) {
             return;
         }
+        response.setPlanningIntentStatus(goalParseRoot == null ? null : goalParseRoot.path("planning_intent_status").asText(null));
         response.setSkillId(skillRouteRoot == null ? null : skillRouteRoot.path("skill_id").asText(
                 passBRoot == null ? null : passBRoot.path("skill_id").asText(null)
         ));

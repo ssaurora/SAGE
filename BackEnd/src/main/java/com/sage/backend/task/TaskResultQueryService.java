@@ -42,7 +42,6 @@ public class TaskResultQueryService {
         response.setCheckpointVersion(taskState.getCheckpointVersion());
         response.setCaseId(activeCaseId);
         JsonNode goalParseRoot = TaskQuerySupport.readJsonNode(taskState.getGoalParseJson(), objectMapper);
-        response.setPlanningIntentStatus(goalParseRoot == null ? null : goalParseRoot.path("planning_intent_status").asText(null));
         JsonNode passBRoot = TaskQuerySupport.readJsonNode(taskState.getPassbResultJson(), objectMapper);
         JsonNode skillRouteRoot = TaskQuerySupport.readJsonNode(taskState.getSkillRouteJson(), objectMapper);
         TaskQuerySupport.applySkillBindingProjection(

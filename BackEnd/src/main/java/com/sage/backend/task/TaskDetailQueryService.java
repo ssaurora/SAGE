@@ -91,7 +91,6 @@ public class TaskDetailQueryService {
         response.setLatestResultBundleId(taskState.getLatestResultBundleId());
         response.setLatestWorkspaceId(taskState.getLatestWorkspaceId());
         JsonNode goalParseRoot = TaskQuerySupport.readJsonNode(taskState.getGoalParseJson(), objectMapper);
-        response.setPlanningIntentStatus(goalParseRoot == null ? null : goalParseRoot.path("planning_intent_status").asText(null));
         JsonNode passBRoot = TaskQuerySupport.readJsonNode(taskState.getPassbResultJson(), objectMapper);
         TaskQuerySupport.applySkillBindingProjection(
                 response,
