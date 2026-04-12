@@ -931,21 +931,18 @@ public class TaskService {
         TaskGovernanceFactSupport.CatalogFacts currentCatalogFacts = TaskGovernanceFactSupport.catalogFacts(
                 waitingState.waitingContext().getCatalogSummary()
         );
-        CatalogConsistencyProjector.CatalogIdentity currentCatalogIdentity = currentCatalogFacts.identity();
-        int candidateCatalogRevision = taskState.getInventoryVersion() == null ? 0 : taskState.getInventoryVersion() + 1;
+        TaskResumeGovernanceSupport.ResumeCatalogScope resumeCatalogScope =
+                TaskResumeGovernanceSupport.buildResumeCatalogScope(
+                        currentCatalogFacts,
+                        taskState.getInventoryVersion() == null ? 0 : taskState.getInventoryVersion() + 1
+                );
 
         String resumeTxnJson = writeJson(buildResumeTransactionPayload(
                 resumeRequestId,
                 "PREPARING",
                 taskState.getCheckpointVersion(),
                 taskState.getCheckpointVersion() == null ? 1 : taskState.getCheckpointVersion() + 1,
-                taskState.getInventoryVersion() == null ? 0 : taskState.getInventoryVersion() + 1,
-                currentCatalogIdentity.inventoryVersion(),
-                currentCatalogIdentity.revision(),
-                currentCatalogIdentity.fingerprint(),
-                taskState.getInventoryVersion() == null ? 0 : taskState.getInventoryVersion() + 1,
-                candidateCatalogRevision,
-                currentCatalogIdentity.fingerprint(),
+                resumeCatalogScope,
                 null,
                 newAttemptNo,
                 null,
@@ -1054,20 +1051,15 @@ public class TaskService {
                 taskAttachmentMapper,
                 taskCatalogSnapshotService
         );
-        CatalogConsistencyProjector.CatalogIdentity currentCatalogIdentity = currentCatalogFacts.identity();
+        TaskResumeGovernanceSupport.ResumeCatalogScope resumeCatalogScope =
+                TaskResumeGovernanceSupport.buildForceRevertCatalogScope(taskState, currentCatalogFacts);
 
         String resumeTxnJson = writeJson(buildResumeTransactionPayload(
                 request.getRequestId(),
                 "FORCE_REVERTED",
                 taskState.getCheckpointVersion(),
                 manifest.getCheckpointVersion(),
-                currentInventoryVersion(taskState),
-                currentCatalogIdentity.inventoryVersion(),
-                currentCatalogIdentity.revision(),
-                currentCatalogIdentity.fingerprint(),
-                currentInventoryVersion(taskState),
-                currentCatalogIdentity.revision(),
-                currentCatalogIdentity.fingerprint(),
+                resumeCatalogScope,
                 manifest.getManifestId(),
                 manifest.getAttemptNo(),
                 null,
@@ -1419,12 +1411,8 @@ public class TaskService {
                 taskAttachmentMapper,
                 taskCatalogSnapshotService
         );
-        CatalogConsistencyProjector.CatalogIdentity baseCatalogIdentity = currentCatalogFacts.identity();
-        Integer baseCatalogInventoryVersion = baseCatalogIdentity.inventoryVersion();
-        Integer baseCatalogRevision = baseCatalogIdentity.revision();
-        String baseCatalogFingerprint = baseCatalogIdentity.fingerprint();
-        Integer candidateCatalogRevision = candidateInventoryVersion;
-        String candidateCatalogFingerprint = baseCatalogFingerprint;
+        TaskResumeGovernanceSupport.ResumeCatalogScope resumeCatalogScope =
+                TaskResumeGovernanceSupport.buildResumeCatalogScope(currentCatalogFacts, candidateInventoryVersion);
         PreparedJobSubmission preparedSubmission = null;
 
         try {
@@ -1480,13 +1468,7 @@ public class TaskService {
                             "ROLLED_BACK",
                             baseCheckpointVersion,
                             candidateCheckpointVersion,
-                            candidateInventoryVersion,
-                            baseCatalogInventoryVersion,
-                            baseCatalogRevision,
-                            baseCatalogFingerprint,
-                            candidateInventoryVersion,
-                            candidateCatalogRevision,
-                            candidateCatalogFingerprint,
+                            resumeCatalogScope,
                             null,
                             resolveActiveAttemptNo(taskState),
                             null,
@@ -1514,13 +1496,7 @@ public class TaskService {
                             "ROLLED_BACK",
                             baseCheckpointVersion,
                             candidateCheckpointVersion,
-                            candidateInventoryVersion,
-                            baseCatalogInventoryVersion,
-                            baseCatalogRevision,
-                            baseCatalogFingerprint,
-                            candidateInventoryVersion,
-                            candidateCatalogRevision,
-                            candidateCatalogFingerprint,
+                            resumeCatalogScope,
                             null,
                             resolveActiveAttemptNo(taskState),
                             null,
@@ -1570,13 +1546,7 @@ public class TaskService {
                                 "ROLLED_BACK",
                                 baseCheckpointVersion,
                                 candidateCheckpointVersion,
-                                candidateInventoryVersion,
-                                baseCatalogInventoryVersion,
-                                baseCatalogRevision,
-                                baseCatalogFingerprint,
-                                candidateInventoryVersion,
-                                candidateCatalogRevision,
-                                candidateCatalogFingerprint,
+                                resumeCatalogScope,
                                 null,
                                 resolveActiveAttemptNo(taskState),
                                 null,
@@ -1616,12 +1586,7 @@ public class TaskService {
                         currentState,
                         baseCheckpointVersion,
                         candidateCheckpointVersion,
-                        candidateInventoryVersion,
-                        baseCatalogInventoryVersion,
-                        baseCatalogRevision,
-                        baseCatalogFingerprint,
-                        candidateCatalogRevision,
-                        candidateCatalogFingerprint,
+                        resumeCatalogScope,
                         readJsonNode(taskState.getPass1ResultJson()),
                         pass1Node
                 );
@@ -1721,13 +1686,7 @@ public class TaskService {
                             "ROLLED_BACK",
                             baseCheckpointVersion,
                             candidateCheckpointVersion,
-                            candidateInventoryVersion,
-                            baseCatalogInventoryVersion,
-                            baseCatalogRevision,
-                            baseCatalogFingerprint,
-                            candidateInventoryVersion,
-                            candidateCatalogRevision,
-                            candidateCatalogFingerprint,
+                            resumeCatalogScope,
                             null,
                             resolveActiveAttemptNo(taskState),
                             null,
@@ -1761,13 +1720,7 @@ public class TaskService {
                             "ROLLED_BACK",
                             baseCheckpointVersion,
                             candidateCheckpointVersion,
-                            candidateInventoryVersion,
-                            baseCatalogInventoryVersion,
-                            baseCatalogRevision,
-                            baseCatalogFingerprint,
-                            candidateInventoryVersion,
-                            candidateCatalogRevision,
-                            candidateCatalogFingerprint,
+                            resumeCatalogScope,
                             null,
                         resolveActiveAttemptNo(taskState),
                         null,
@@ -1806,13 +1759,7 @@ public class TaskService {
                             "ROLLED_BACK",
                             baseCheckpointVersion,
                             candidateCheckpointVersion,
-                            candidateInventoryVersion,
-                            baseCatalogInventoryVersion,
-                            baseCatalogRevision,
-                            baseCatalogFingerprint,
-                            candidateInventoryVersion,
-                            candidateCatalogRevision,
-                            candidateCatalogFingerprint,
+                            resumeCatalogScope,
                             null,
                             resolveActiveAttemptNo(taskState),
                             null,
@@ -1861,13 +1808,7 @@ public class TaskService {
                         "ROLLED_BACK",
                         baseCheckpointVersion,
                         candidateCheckpointVersion,
-                        candidateInventoryVersion,
-                        baseCatalogInventoryVersion,
-                        baseCatalogRevision,
-                        baseCatalogFingerprint,
-                        candidateInventoryVersion,
-                        candidateCatalogRevision,
-                        candidateCatalogFingerprint,
+                        resumeCatalogScope,
                         null,
                         resolveActiveAttemptNo(taskState),
                         null,
@@ -1914,18 +1855,12 @@ public class TaskService {
                     passBNode,
                     validationStage.validationNode()
             );
-                    String ackedTxn = writeJson(buildResumeTransactionPayload(
+            String ackedTxn = writeJson(buildResumeTransactionPayload(
                     request.getResumeRequestId(),
                     "ACKED",
                     baseCheckpointVersion,
                     candidateCheckpointVersion,
-                    candidateInventoryVersion,
-                    baseCatalogInventoryVersion,
-                    baseCatalogRevision,
-                    baseCatalogFingerprint,
-                    candidateInventoryVersion,
-                    candidateCatalogRevision,
-                    candidateCatalogFingerprint,
+                    resumeCatalogScope,
                     preparedSubmission.manifestCandidate().getManifestId(),
                     attemptNo,
                     preparedSubmission.createJobResponse().getJobId(),
@@ -1937,13 +1872,7 @@ public class TaskService {
                     "COMMITTED",
                     baseCheckpointVersion,
                     candidateCheckpointVersion,
-                    candidateInventoryVersion,
-                    baseCatalogInventoryVersion,
-                    baseCatalogRevision,
-                    baseCatalogFingerprint,
-                    candidateInventoryVersion,
-                    candidateCatalogRevision,
-                    candidateCatalogFingerprint,
+                    resumeCatalogScope,
                     preparedSubmission.manifestCandidate().getManifestId(),
                     attemptNo,
                     preparedSubmission.createJobResponse().getJobId(),
@@ -1990,13 +1919,7 @@ public class TaskService {
                         "CORRUPTED",
                         baseCheckpointVersion,
                         candidateCheckpointVersion,
-                        candidateInventoryVersion,
-                        baseCatalogInventoryVersion,
-                        baseCatalogRevision,
-                        baseCatalogFingerprint,
-                        candidateInventoryVersion,
-                        candidateCatalogRevision,
-                        candidateCatalogFingerprint,
+                        resumeCatalogScope,
                         preparedSubmission == null ? null : preparedSubmission.manifestCandidate().getManifestId(),
                         resolveActiveAttemptNo(taskState),
                         preparedSubmission == null ? null : preparedSubmission.createJobResponse().getJobId(),
@@ -2044,52 +1967,32 @@ public class TaskService {
             TaskStatus currentState,
             int baseCheckpointVersion,
             int candidateCheckpointVersion,
-            int candidateInventoryVersion,
-            Integer baseCatalogInventoryVersion,
-            Integer baseCatalogRevision,
-            String baseCatalogFingerprint,
-            Integer candidateCatalogRevision,
-            String candidateCatalogFingerprint,
+            TaskResumeGovernanceSupport.ResumeCatalogScope resumeCatalogScope,
             JsonNode frozenPass1Node,
             JsonNode currentPass1Node
     ) throws Exception {
-        Map<String, Object> drift = ContractConsistencyProjector.buildResumeContractDriftEvaluation(frozenPass1Node, currentPass1Node);
-        if (drift.isEmpty()) {
+        TaskResumeGovernanceSupport.ResumeContractDrift contractDrift =
+                TaskResumeGovernanceSupport.buildResumeContractDrift(frozenPass1Node, currentPass1Node);
+        if (!contractDrift.isPresent()) {
             return;
         }
-        String mismatchCode = safeString((String) drift.get("mismatch_code"));
-        String failureReason = safeString((String) drift.get("failure_reason"));
-        String frozenContractVersion = safeString((String) drift.get("frozen_contract_version"));
-        String frozenContractFingerprint = safeString((String) drift.get("frozen_contract_fingerprint"));
-        String currentContractVersion = safeString((String) drift.get("current_contract_version"));
-        String currentContractFingerprint = safeString((String) drift.get("current_contract_fingerprint"));
         String corruptedTxn = writeJson(buildResumeTransactionPayload(
                 request.getResumeRequestId(),
                 "CORRUPTED",
                 baseCheckpointVersion,
                 candidateCheckpointVersion,
-                candidateInventoryVersion,
-                baseCatalogInventoryVersion,
-                baseCatalogRevision,
-                baseCatalogFingerprint,
-                candidateInventoryVersion,
-                candidateCatalogRevision,
-                candidateCatalogFingerprint,
+                resumeCatalogScope,
                 null,
                 resolveActiveAttemptNo(taskState),
                 null,
-                failureReason,
-                mismatchCode,
-                frozenContractVersion,
-                frozenContractFingerprint,
-                currentContractVersion,
-                currentContractFingerprint
+                contractDrift.failureReason(),
+                contractDrift
         ));
         ensureUpdated(taskStateMapper.markCorrupted(
                 taskId,
                 currentVersion,
                 TaskStatus.STATE_CORRUPTED.name(),
-                failureReason,
+                contractDrift.failureReason(),
                 OffsetDateTime.now(ZoneOffset.UTC),
                 corruptedTxn
         ));
@@ -2098,10 +2001,10 @@ public class TaskService {
                 "TASK_RESUME",
                 "REJECTED",
                 request.getResumeRequestId(),
-                writePayload(ContractConsistencyProjector.buildResumeContractAuditDetail(drift))
+                writePayload(contractDrift.toAuditDetail())
         );
         appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.STATE_CORRUPTED.name(), currentVersion + 1, null);
-        throw new ResponseStatusException(CONFLICT, ContractConsistencyProjector.contractConflictReason(mismatchCode));
+        throw new ResponseStatusException(CONFLICT, contractDrift.conflictReason());
     }
 
     private boolean canReuseGoalAndPass1ForClarifyResume(TaskState taskState, ResumeTaskRequest request) {
@@ -2650,19 +2553,14 @@ public class TaskService {
                 taskAttachmentMapper,
                 taskCatalogSnapshotService
         );
-        CatalogConsistencyProjector.CatalogIdentity currentCatalogIdentity = currentCatalogFacts.identity();
+        TaskResumeGovernanceSupport.ResumeCatalogScope resumeCatalogScope =
+                TaskResumeGovernanceSupport.buildResumeCatalogScope(currentCatalogFacts, candidateInventoryVersion);
         String rolledBackTxn = writeJson(buildResumeTransactionPayload(
                 request.getResumeRequestId(),
                 "ROLLED_BACK",
                 baseCheckpointVersion,
                 candidateCheckpointVersion,
-                candidateInventoryVersion,
-                currentCatalogIdentity.inventoryVersion(),
-                currentCatalogIdentity.revision(),
-                currentCatalogIdentity.fingerprint(),
-                candidateInventoryVersion,
-                candidateInventoryVersion,
-                currentCatalogIdentity.fingerprint(),
+                resumeCatalogScope,
                 null,
                 resolveActiveAttemptNo(taskState),
                 null,
@@ -3518,6 +3416,67 @@ public class TaskService {
             LOGGER.warn("Failed to enrich audit detail with contract identity", exception);
             return detailJson;
         }
+    }
+
+    private Map<String, Object> buildResumeTransactionPayload(
+            String resumeRequestId,
+            String status,
+            Integer baseCheckpointVersion,
+            Integer candidateCheckpointVersion,
+            TaskResumeGovernanceSupport.ResumeCatalogScope resumeCatalogScope,
+            String candidateManifestId,
+            Integer candidateAttemptNo,
+            String candidateJobId,
+            String failureReason
+    ) {
+        return buildResumeTransactionPayload(
+                resumeRequestId,
+                status,
+                baseCheckpointVersion,
+                candidateCheckpointVersion,
+                resumeCatalogScope,
+                candidateManifestId,
+                candidateAttemptNo,
+                candidateJobId,
+                failureReason,
+                null
+        );
+    }
+
+    private Map<String, Object> buildResumeTransactionPayload(
+            String resumeRequestId,
+            String status,
+            Integer baseCheckpointVersion,
+            Integer candidateCheckpointVersion,
+            TaskResumeGovernanceSupport.ResumeCatalogScope resumeCatalogScope,
+            String candidateManifestId,
+            Integer candidateAttemptNo,
+            String candidateJobId,
+            String failureReason,
+            TaskResumeGovernanceSupport.ResumeContractDrift contractDrift
+    ) {
+        return buildResumeTransactionPayload(
+                resumeRequestId,
+                status,
+                baseCheckpointVersion,
+                candidateCheckpointVersion,
+                resumeCatalogScope == null ? null : resumeCatalogScope.candidateInventoryVersion(),
+                resumeCatalogScope == null ? null : resumeCatalogScope.baseCatalogInventoryVersion(),
+                resumeCatalogScope == null ? null : resumeCatalogScope.baseCatalogRevision(),
+                resumeCatalogScope == null ? null : resumeCatalogScope.baseCatalogFingerprint(),
+                resumeCatalogScope == null ? null : resumeCatalogScope.candidateCatalogInventoryVersion(),
+                resumeCatalogScope == null ? null : resumeCatalogScope.candidateCatalogRevision(),
+                resumeCatalogScope == null ? null : resumeCatalogScope.candidateCatalogFingerprint(),
+                candidateManifestId,
+                candidateAttemptNo,
+                candidateJobId,
+                failureReason,
+                contractDrift == null ? null : contractDrift.mismatchCode(),
+                contractDrift == null ? null : contractDrift.baseContractVersion(),
+                contractDrift == null ? null : contractDrift.baseContractFingerprint(),
+                contractDrift == null ? null : contractDrift.candidateContractVersion(),
+                contractDrift == null ? null : contractDrift.candidateContractFingerprint()
+        );
     }
 
     private Map<String, Object> buildResumeTransactionPayload(
