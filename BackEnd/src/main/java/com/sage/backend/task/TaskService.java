@@ -1491,30 +1491,19 @@ public class TaskService {
                             "Clarify the requested analysis before resuming.",
                             request.getUserNote()
                     );
-                    String rolledBackTxn = writeJson(buildResumeTransactionPayload(
-                            request.getResumeRequestId(),
-                            "ROLLED_BACK",
+                    return rollbackResumeToWaiting(
+                            taskId,
+                            taskState,
+                            request,
+                            currentState,
+                            currentVersion,
                             baseCheckpointVersion,
                             candidateCheckpointVersion,
                             resumeCatalogScope,
-                            null,
-                            resolveActiveAttemptNo(taskState),
-                            null,
-                            "AMBIGUOUS_INTENT"
-                    ));
-                    taskStateMapper.updateCognitionVerdict(taskId, "AMBIGUOUS");
-                    ensureUpdated(taskStateMapper.rollbackResumeToWaiting(
-                            taskId,
-                            currentVersion,
-                            TaskStatus.WAITING_USER.name(),
-                            waitingState.waitingContextJson(),
-                            waitingState.decision().waitingContext().getWaitingReasonType(),
-                            OffsetDateTime.now(ZoneOffset.UTC),
-                            rolledBackTxn
-                    ));
-                    appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.WAITING_USER.name(), currentVersion + 1, null);
-                    recordWaitingUserEntry(taskId, resolveActiveAttemptNo(taskState), waitingState, writeJson(request), currentVersion + 1);
-                    return buildResumeTaskResponse(taskId, TaskStatus.WAITING_USER.name(), currentVersion + 1, true, taskState.getActiveAttemptNo());
+                            waitingState,
+                            "AMBIGUOUS_INTENT",
+                            "AMBIGUOUS"
+                    );
                 }
 
                 if (isRealCaseRoute(skillRouteNode)) {
@@ -1541,30 +1530,19 @@ public class TaskService {
                                 request.getUserNote(),
                                 goalParseNode.path("case_projection")
                         );
-                        String rolledBackTxn = writeJson(buildResumeTransactionPayload(
-                                request.getResumeRequestId(),
-                                "ROLLED_BACK",
+                        return rollbackResumeToWaiting(
+                                taskId,
+                                taskState,
+                                request,
+                                currentState,
+                                currentVersion,
                                 baseCheckpointVersion,
                                 candidateCheckpointVersion,
                                 resumeCatalogScope,
-                                null,
-                                resolveActiveAttemptNo(taskState),
-                                null,
-                                "CLARIFY_CASE_SELECTION"
-                        ));
-                        taskStateMapper.updateCognitionVerdict(taskId, "LLM_AMBIGUOUS");
-                        ensureUpdated(taskStateMapper.rollbackResumeToWaiting(
-                                taskId,
-                                currentVersion,
-                                TaskStatus.WAITING_USER.name(),
-                                waitingState.waitingContextJson(),
-                                waitingState.decision().waitingContext().getWaitingReasonType(),
-                                OffsetDateTime.now(ZoneOffset.UTC),
-                                rolledBackTxn
-                        ));
-                        appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.WAITING_USER.name(), currentVersion + 1, null);
-                        recordWaitingUserEntry(taskId, resolveActiveAttemptNo(taskState), waitingState, writeJson(request), currentVersion + 1);
-                        return buildResumeTaskResponse(taskId, TaskStatus.WAITING_USER.name(), currentVersion + 1, true, taskState.getActiveAttemptNo());
+                                waitingState,
+                                "CLARIFY_CASE_SELECTION",
+                                "LLM_AMBIGUOUS"
+                        );
                     }
                 }
 
@@ -1681,30 +1659,19 @@ public class TaskService {
                             request.getUserNote(),
                             passBNode.path("case_projection")
                     );
-                    String rolledBackTxn = writeJson(buildResumeTransactionPayload(
-                            request.getResumeRequestId(),
-                            "ROLLED_BACK",
+                    return rollbackResumeToWaiting(
+                            taskId,
+                            taskState,
+                            request,
+                            currentState,
+                            currentVersion,
                             baseCheckpointVersion,
                             candidateCheckpointVersion,
                             resumeCatalogScope,
-                            null,
-                            resolveActiveAttemptNo(taskState),
-                            null,
-                            "CLARIFY_CASE_SELECTION"
-                    ));
-                    taskStateMapper.updateCognitionVerdict(taskId, "LLM_AMBIGUOUS");
-                    ensureUpdated(taskStateMapper.rollbackResumeToWaiting(
-                            taskId,
-                            currentVersion,
-                            TaskStatus.WAITING_USER.name(),
-                            waitingState.waitingContextJson(),
-                            waitingState.decision().waitingContext().getWaitingReasonType(),
-                            OffsetDateTime.now(ZoneOffset.UTC),
-                            rolledBackTxn
-                    ));
-                    appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.WAITING_USER.name(), currentVersion + 1, null);
-                    recordWaitingUserEntry(taskId, resolveActiveAttemptNo(taskState), waitingState, writeJson(request), currentVersion + 1);
-                    return buildResumeTaskResponse(taskId, TaskStatus.WAITING_USER.name(), currentVersion + 1, true, taskState.getActiveAttemptNo());
+                            waitingState,
+                            "CLARIFY_CASE_SELECTION",
+                            "LLM_AMBIGUOUS"
+                    );
                 }
             }
 
@@ -1715,30 +1682,19 @@ public class TaskService {
                         "Clarify the requested bindings before resuming.",
                         request.getUserNote()
                 );
-                    String rolledBackTxn = writeJson(buildResumeTransactionPayload(
-                            request.getResumeRequestId(),
-                            "ROLLED_BACK",
-                            baseCheckpointVersion,
-                            candidateCheckpointVersion,
-                            resumeCatalogScope,
-                            null,
-                        resolveActiveAttemptNo(taskState),
-                        null,
-                        "AMBIGUOUS_BINDING"
-                ));
-                taskStateMapper.updateCognitionVerdict(taskId, "AMBIGUOUS");
-                ensureUpdated(taskStateMapper.rollbackResumeToWaiting(
+                return rollbackResumeToWaiting(
                         taskId,
+                        taskState,
+                        request,
+                        currentState,
                         currentVersion,
-                        TaskStatus.WAITING_USER.name(),
-                        waitingState.waitingContextJson(),
-                        waitingState.decision().waitingContext().getWaitingReasonType(),
-                        OffsetDateTime.now(ZoneOffset.UTC),
-                        rolledBackTxn
-                ));
-                appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.WAITING_USER.name(), currentVersion + 1, null);
-                recordWaitingUserEntry(taskId, resolveActiveAttemptNo(taskState), waitingState, writeJson(request), currentVersion + 1);
-                return buildResumeTaskResponse(taskId, TaskStatus.WAITING_USER.name(), currentVersion + 1, true, taskState.getActiveAttemptNo());
+                        baseCheckpointVersion,
+                        candidateCheckpointVersion,
+                        resumeCatalogScope,
+                        waitingState,
+                        "AMBIGUOUS_BINDING",
+                        "AMBIGUOUS"
+                );
             }
 
             CapabilityContractGuard.requireResumeAckContract(pass1Node);
@@ -1803,43 +1759,18 @@ public class TaskService {
                 }
 
                 WaitingStateSnapshot waitingState = rebuildWaitingState(taskId, pass1Node, validationStage.validationNode(), null, request.getUserNote());
-                String rolledBackTxn = writeJson(buildResumeTransactionPayload(
-                        request.getResumeRequestId(),
-                        "ROLLED_BACK",
+                return rollbackResumeToWaiting(
+                        taskId,
+                        taskState,
+                        request,
+                        currentState,
+                        currentVersion,
                         baseCheckpointVersion,
                         candidateCheckpointVersion,
                         resumeCatalogScope,
-                        null,
-                        resolveActiveAttemptNo(taskState),
-                        null,
-                        "RECOVERABLE_VALIDATION"
-                ));
-                ensureUpdated(taskStateMapper.rollbackResumeToWaiting(
-                        taskId,
-                        currentVersion,
-                        TaskStatus.WAITING_USER.name(),
-                        waitingState.waitingContextJson(),
-                        safeString(waitingState.decision().waitingContext().getWaitingReasonType()).isBlank()
-                                ? "REPAIR_REQUIRED"
-                                : waitingState.decision().waitingContext().getWaitingReasonType(),
-                        OffsetDateTime.now(ZoneOffset.UTC),
-                        rolledBackTxn
-                ));
-                appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.WAITING_USER.name(), currentVersion + 1, null);
-                recordWaitingUserEntry(
-                        taskId,
-                        resolveActiveAttemptNo(taskState),
                         waitingState,
-                        writeJson(request),
-                        currentVersion + 1
-                );
-
-                return buildResumeTaskResponse(
-                        taskId,
-                        TaskStatus.WAITING_USER.name(),
-                        currentVersion + 1,
-                        true,
-                        taskState.getActiveAttemptNo()
+                        "RECOVERABLE_VALIDATION",
+                        null
                 );
             }
 
@@ -2574,6 +2505,61 @@ public class TaskService {
         appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.FAILED.name(), currentVersion + 1, null);
         appendEvent(taskId, EventType.TASK_FAILED.name(), null, null, currentVersion + 1, failureSummaryJson);
         return buildResumeTaskResponse(taskId, TaskStatus.FAILED.name(), currentVersion + 1, true, taskState.getActiveAttemptNo());
+    }
+
+    private ResumeTaskResponse rollbackResumeToWaiting(
+            String taskId,
+            TaskState taskState,
+            ResumeTaskRequest request,
+            TaskStatus currentState,
+            int currentVersion,
+            int baseCheckpointVersion,
+            int candidateCheckpointVersion,
+            TaskResumeGovernanceSupport.ResumeCatalogScope resumeCatalogScope,
+            WaitingStateSnapshot waitingState,
+            String failureReason,
+            String cognitionVerdict
+    ) {
+        String rolledBackTxn = writeJson(buildResumeTransactionPayload(
+                request.getResumeRequestId(),
+                "ROLLED_BACK",
+                baseCheckpointVersion,
+                candidateCheckpointVersion,
+                resumeCatalogScope,
+                null,
+                resolveActiveAttemptNo(taskState),
+                null,
+                failureReason
+        ));
+        if (cognitionVerdict != null && !cognitionVerdict.isBlank()) {
+            taskStateMapper.updateCognitionVerdict(taskId, cognitionVerdict);
+        }
+        ensureUpdated(taskStateMapper.rollbackResumeToWaiting(
+                taskId,
+                currentVersion,
+                TaskStatus.WAITING_USER.name(),
+                waitingState.waitingContextJson(),
+                safeString(waitingState.decision().waitingContext().getWaitingReasonType()).isBlank()
+                        ? "REPAIR_REQUIRED"
+                        : waitingState.decision().waitingContext().getWaitingReasonType(),
+                OffsetDateTime.now(ZoneOffset.UTC),
+                rolledBackTxn
+        ));
+        appendEvent(taskId, EventType.STATE_CHANGED.name(), currentState.name(), TaskStatus.WAITING_USER.name(), currentVersion + 1, null);
+        recordWaitingUserEntry(
+                taskId,
+                resolveActiveAttemptNo(taskState),
+                waitingState,
+                writeJson(request),
+                currentVersion + 1
+        );
+        return buildResumeTaskResponse(
+                taskId,
+                TaskStatus.WAITING_USER.name(),
+                currentVersion + 1,
+                true,
+                taskState.getActiveAttemptNo()
+        );
     }
 
     private Map<String, Object> buildCognitionFailureSummaryPayload(String stage, String failureCode, JsonNode payloadNode) {
