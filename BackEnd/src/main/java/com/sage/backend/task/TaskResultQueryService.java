@@ -74,7 +74,7 @@ public class TaskResultQueryService {
         JsonNode pass1Projection = TaskQuerySupport.readJsonNode(taskState.getPass1ResultJson(), objectMapper);
         TaskQuerySupport.ContractProjection contractProjection = TaskQuerySupport.buildFrozenContractProjection(
                 pass1Projection,
-                TaskQuerySupport.readJsonMap(activeManifest == null ? null : activeManifest.getContractSummaryJson(), objectMapper),
+                TaskQuerySupport.resolveManifestContractSummary(activeManifest, objectMapper),
                 response.getResumeTransaction(),
                 "result_manifest_contract",
                 "result_contract_governance"

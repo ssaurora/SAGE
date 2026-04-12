@@ -8,7 +8,6 @@ import com.sage.backend.task.dto.TaskAuditResponse;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.Map;
 
 @Service
 public class TaskAuditQueryService {
@@ -27,29 +26,18 @@ public class TaskAuditQueryService {
             List<TaskAttachment> attachments,
             List<AuditRecord> auditRecords
     ) {
-        Map<String, Object> currentCatalogSummary = taskCatalogSnapshotService.resolveCatalogSummary(
-                taskId,
-                attachments,
-                TaskQuerySupport.currentInventoryVersion(taskState)
-        );
         TaskAuditResponse response = new TaskAuditResponse();
         response.setTaskId(taskId);
-        if (auditRecords == null) {
-            return response;
-        }
-        for (AuditRecord auditRecord : auditRecords) {
-            TaskAuditResponse.AuditItem item = new TaskAuditResponse.AuditItem();
-            item.setId(auditRecord.getId());
-            item.setActionType(auditRecord.getActionType());
-            item.setActionResult(auditRecord.getActionResult());
-            item.setTraceId(auditRecord.getTraceId());
-            item.setCreatedAt(auditRecord.getCreatedAt() == null ? null : auditRecord.getCreatedAt().toString());
-            Map<String, Object> detail = TaskQuerySupport.readJsonMap(auditRecord.getDetailJson(), objectMapper);
-            item.setDetail(detail == null ? Map.of() : detail);
-            item.setContractGovernance(ContractGovernanceAssembler.buildAudit(detail));
-            item.setCatalogGovernance(CatalogGovernanceAssembler.buildAudit(detail, currentCatalogSummary));
-            response.getItems().add(item);
-        }
+        TaskQuerySupport.applyAuditQueryPayload(
+                response,
+                auditRecords,
+                taskCatalogSnapshotService.resolveCatalogSummary(
+                        taskId,
+                        attachments,
+                        TaskQuerySupport.currentInventoryVersion(taskState)
+                ),
+                objectMapper
+        );
         return response;
     }
 }

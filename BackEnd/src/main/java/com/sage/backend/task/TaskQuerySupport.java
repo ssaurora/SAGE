@@ -3,15 +3,19 @@ package com.sage.backend.task;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sage.backend.model.AnalysisManifest;
+import com.sage.backend.model.AuditRecord;
 import com.sage.backend.model.JobRecord;
 import com.sage.backend.model.RepairRecord;
 import com.sage.backend.model.TaskAttachment;
+import com.sage.backend.model.TaskCatalogSnapshot;
 import com.sage.backend.model.TaskState;
 import com.sage.backend.model.TaskStatus;
 import com.sage.backend.task.dto.CatalogGovernanceView;
 import com.sage.backend.task.dto.CorruptionStateView;
 import com.sage.backend.task.dto.ContractGovernanceView;
 import com.sage.backend.task.dto.ResumeTransactionView;
+import com.sage.backend.task.dto.TaskAuditResponse;
+import com.sage.backend.task.dto.TaskCatalogResponse;
 import com.sage.backend.task.dto.TaskContractResponse;
 import com.sage.backend.task.dto.TaskDetailResponse;
 import com.sage.backend.task.dto.TaskManifestResponse;
@@ -168,6 +172,10 @@ final class TaskQuerySupport {
                 attachments,
                 currentInventoryVersion(taskState)
         );
+    }
+
+    static Map<String, Object> resolveManifestContractSummary(AnalysisManifest manifest, ObjectMapper objectMapper) {
+        return readJsonMap(manifest == null ? null : manifest.getContractSummaryJson(), objectMapper);
     }
 
     static RouteProjection buildRouteProjection(
@@ -909,6 +917,230 @@ final class TaskQuerySupport {
         return new ContractProjection(frozenSummary, currentSummary, consistency, governance);
     }
 
+    static void applyAuditQueryPayload(
+            TaskAuditResponse response,
+            List<AuditRecord> auditRecords,
+            Map<String, Object> currentCatalogSummary,
+            ObjectMapper objectMapper
+    ) {
+        if (response == null || auditRecords == null) {
+            return;
+        }
+        for (AuditRecord auditRecord : auditRecords) {
+            response.getItems().add(buildTaskAuditItem(auditRecord, currentCatalogSummary, objectMapper));
+        }
+    }
+
+    static void applyCatalogQueryPayload(
+            TaskCatalogResponse response,
+            TaskState taskState,
+            List<TaskAttachment> attachments,
+            Map<String, Object> currentCatalogSummary,
+            TaskCatalogSnapshot latestSnapshot,
+            List<AuditRecord> auditRecords,
+            ObjectMapper objectMapper
+    ) {
+        if (response == null) {
+            return;
+        }
+        response.setInventoryVersion(currentInventoryVersion(taskState));
+        response.setCatalogSummary(currentCatalogSummary);
+        response.setCatalogFacts(AttachmentCatalogProjector.project(attachments));
+
+        Map<String, Object> latestSnapshotSummary = readJsonMap(
+                latestSnapshot == null ? null : latestSnapshot.getCatalogSummaryJson(),
+                objectMapper
+        );
+        response.setLatestSnapshot(buildCatalogSnapshotView(latestSnapshot, latestSnapshotSummary));
+        Map<String, Object> queryCatalogConsistency = CatalogConsistencyProjector.buildFrozenCatalogConsistency(
+                "task_catalog_query",
+                latestSnapshotSummary,
+                currentCatalogSummary
+        );
+        response.setCatalogGovernance(CatalogGovernanceAssembler.build(
+                "task_catalog_query_governance",
+                latestSnapshotSummary,
+                currentCatalogSummary,
+                queryCatalogConsistency
+        ));
+
+        if (auditRecords == null) {
+            return;
+        }
+        for (AuditRecord auditRecord : auditRecords) {
+            TaskCatalogResponse.AuditCatalogItem item = buildAuditCatalogItem(
+                    auditRecord,
+                    currentCatalogSummary,
+                    objectMapper
+            );
+            if (item != null) {
+                response.getAuditItems().add(item);
+            }
+        }
+    }
+
+    static void applyContractQueryPayload(
+            TaskContractResponse response,
+            TaskState taskState,
+            AnalysisManifest activeManifest,
+            List<AuditRecord> auditRecords,
+            ObjectMapper objectMapper
+    ) {
+        if (response == null) {
+            return;
+        }
+        JsonNode pass1Projection = readJsonNode(taskState == null ? null : taskState.getPass1ResultJson(), objectMapper);
+        Map<String, Object> manifestContractSummary = resolveManifestContractSummary(activeManifest, objectMapper);
+        ContractProjection contractProjection = buildDetailContractProjection(
+                pass1Projection,
+                manifestContractSummary,
+                buildResumeTransaction(taskState, objectMapper),
+                "task_contract_query_governance"
+        );
+        applyContractProjection(response, contractProjection);
+        response.setActiveManifest(buildManifestContractView(activeManifest, manifestContractSummary));
+
+        if (auditRecords == null) {
+            return;
+        }
+        for (AuditRecord auditRecord : auditRecords) {
+            TaskContractResponse.AuditContractItem item = buildAuditContractItem(auditRecord, objectMapper);
+            if (item != null) {
+                response.getAuditItems().add(item);
+            }
+        }
+    }
+
+    static TaskAuditResponse.AuditItem buildTaskAuditItem(
+            AuditRecord auditRecord,
+            Map<String, Object> currentCatalogSummary,
+            ObjectMapper objectMapper
+    ) {
+        if (auditRecord == null) {
+            return null;
+        }
+        AuditRecordProjection auditProjection = buildAuditRecordProjection(auditRecord, objectMapper);
+        TaskAuditResponse.AuditItem item = new TaskAuditResponse.AuditItem();
+        applyAuditRecordProjection(item, auditProjection);
+        item.setDetail(auditProjection.detail());
+        item.setContractGovernance(ContractGovernanceAssembler.buildAudit(auditProjection.detail()));
+        item.setCatalogGovernance(CatalogGovernanceAssembler.buildAudit(auditProjection.detail(), currentCatalogSummary));
+        return item;
+    }
+
+    static TaskCatalogResponse.AuditCatalogItem buildAuditCatalogItem(
+            AuditRecord auditRecord,
+            Map<String, Object> currentCatalogSummary,
+            ObjectMapper objectMapper
+    ) {
+        if (auditRecord == null) {
+            return null;
+        }
+        AuditRecordProjection auditProjection = buildAuditRecordProjection(auditRecord, objectMapper);
+        if (!CatalogGovernanceAssembler.hasAuditCatalogEvidence(auditProjection.detail())) {
+            return null;
+        }
+        TaskCatalogResponse.AuditCatalogItem item = new TaskCatalogResponse.AuditCatalogItem();
+        applyAuditRecordProjection(item, auditProjection);
+        item.setCatalogGovernance(CatalogGovernanceAssembler.buildAudit(auditProjection.detail(), currentCatalogSummary));
+        return item;
+    }
+
+    static TaskContractResponse.AuditContractItem buildAuditContractItem(
+            AuditRecord auditRecord,
+            ObjectMapper objectMapper
+    ) {
+        if (auditRecord == null) {
+            return null;
+        }
+        AuditRecordProjection auditProjection = buildAuditRecordProjection(auditRecord, objectMapper);
+        if (!ContractGovernanceAssembler.hasAuditContractEvidence(auditProjection.detail())) {
+            return null;
+        }
+        TaskContractResponse.AuditContractItem item = new TaskContractResponse.AuditContractItem();
+        applyAuditRecordProjection(item, auditProjection);
+        item.setContractGovernance(ContractGovernanceAssembler.buildAudit(auditProjection.detail()));
+        return item;
+    }
+
+    static TaskCatalogResponse.SnapshotView buildCatalogSnapshotView(
+            TaskCatalogSnapshot snapshot,
+            Map<String, Object> catalogSummary
+    ) {
+        if (snapshot == null) {
+            return null;
+        }
+        TaskCatalogResponse.SnapshotView view = new TaskCatalogResponse.SnapshotView();
+        view.setId(snapshot.getId());
+        view.setInventoryVersion(snapshot.getInventoryVersion());
+        view.setCatalogRevision(snapshot.getCatalogRevision());
+        view.setCatalogFingerprint(snapshot.getCatalogFingerprint());
+        view.setCatalogSource(snapshot.getCatalogSource());
+        view.setCreatedAt(snapshot.getCreatedAt() == null ? null : snapshot.getCreatedAt().toString());
+        view.setCatalogSummary(catalogSummary);
+        return view;
+    }
+
+    static TaskContractResponse.ManifestContractView buildManifestContractView(
+            AnalysisManifest manifest,
+            Map<String, Object> contractSummary
+    ) {
+        if (manifest == null) {
+            return null;
+        }
+        TaskContractResponse.ManifestContractView view = new TaskContractResponse.ManifestContractView();
+        view.setManifestId(manifest.getManifestId());
+        view.setManifestVersion(manifest.getManifestVersion());
+        view.setFreezeStatus(manifest.getFreezeStatus());
+        view.setContractSummary(contractSummary);
+        return view;
+    }
+
+    private static AuditRecordProjection buildAuditRecordProjection(AuditRecord auditRecord, ObjectMapper objectMapper) {
+        Map<String, Object> detail = readJsonMap(auditRecord.getDetailJson(), objectMapper);
+        return new AuditRecordProjection(
+                auditRecord.getId(),
+                auditRecord.getActionType(),
+                auditRecord.getActionResult(),
+                auditRecord.getTraceId(),
+                auditRecord.getCreatedAt() == null ? null : auditRecord.getCreatedAt().toString(),
+                detail == null ? Map.of() : detail
+        );
+    }
+
+    private static void applyAuditRecordProjection(TaskAuditResponse.AuditItem item, AuditRecordProjection projection) {
+        if (item == null || projection == null) {
+            return;
+        }
+        item.setId(projection.id());
+        item.setActionType(projection.actionType());
+        item.setActionResult(projection.actionResult());
+        item.setTraceId(projection.traceId());
+        item.setCreatedAt(projection.createdAt());
+    }
+
+    private static void applyAuditRecordProjection(TaskCatalogResponse.AuditCatalogItem item, AuditRecordProjection projection) {
+        if (item == null || projection == null) {
+            return;
+        }
+        item.setId(projection.id());
+        item.setActionType(projection.actionType());
+        item.setActionResult(projection.actionResult());
+        item.setTraceId(projection.traceId());
+        item.setCreatedAt(projection.createdAt());
+    }
+
+    private static void applyAuditRecordProjection(TaskContractResponse.AuditContractItem item, AuditRecordProjection projection) {
+        if (item == null || projection == null) {
+            return;
+        }
+        item.setId(projection.id());
+        item.setActionType(projection.actionType());
+        item.setActionResult(projection.actionResult());
+        item.setTraceId(projection.traceId());
+        item.setCreatedAt(projection.createdAt());
+    }
+
     static List<String> extractManifestRoleNames(List<TaskManifestResponse.SlotBinding> slotBindings) {
         if (slotBindings == null || slotBindings.isEmpty()) {
             return List.of();
@@ -960,6 +1192,16 @@ final class TaskQuerySupport {
             Map<String, Object> currentSummary,
             Map<String, Object> consistency,
             ContractGovernanceView governance
+    ) {
+    }
+
+    record AuditRecordProjection(
+            Long id,
+            String actionType,
+            String actionResult,
+            String traceId,
+            String createdAt,
+            Map<String, Object> detail
     ) {
     }
 }

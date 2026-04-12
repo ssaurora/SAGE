@@ -70,7 +70,7 @@ public class TaskDetailQueryService {
         TaskQuerySupport.applyCatalogProjection(response, catalogProjection);
         TaskQuerySupport.ContractProjection contractProjection = TaskQuerySupport.buildDetailContractProjection(
                 pass1Projection,
-                TaskQuerySupport.readJsonMap(activeManifest == null ? null : activeManifest.getContractSummaryJson(), objectMapper),
+                TaskQuerySupport.resolveManifestContractSummary(activeManifest, objectMapper),
                 response.getResumeTransaction(),
                 "task_contract_governance"
         );
