@@ -59,19 +59,7 @@ public class TaskDetailQueryService {
         response.setPlanningRevision(taskState.getPlanningRevision());
         response.setCheckpointVersion(taskState.getCheckpointVersion());
         TaskQuerySupport.applyLifecycleProjection(response, taskState, objectMapper);
-        response.setGoalParseSummary(TaskProjectionBuilder.buildGoalParseSummary(routeProjection.goalParse()));
-        response.setSkillRouteSummary(TaskProjectionBuilder.buildSkillRouteSummary(routeProjection.skillRoute()));
-        response.setPass1Summary(TaskProjectionBuilder.buildPass1Summary(pass1Projection));
-        response.setSlotBindingsSummary(TaskProjectionBuilder.buildSlotBindingsSummary(
-                TaskQuerySupport.readJsonNode(taskState.getSlotBindingsSummaryJson(), objectMapper)
-        ));
-        response.setArgsDraftSummary(TaskProjectionBuilder.buildArgsDraftSummary(
-                TaskQuerySupport.readJsonNode(taskState.getArgsDraftSummaryJson(), objectMapper)
-        ));
-        response.setValidationSummary(TaskProjectionBuilder.buildValidationSummary(
-                TaskQuerySupport.readJsonNode(taskState.getValidationSummaryJson(), objectMapper)
-        ));
-        response.setInputChainStatus(taskState.getInputChainStatus());
+        TaskQuerySupport.applyDetailSummaryProjection(response, pass1Projection, routeProjection, taskState, objectMapper);
         TaskQuerySupport.applyDetailOutcomeProjection(response, taskState, objectMapper);
         response.setWaitingContext(TaskProjectionBuilder.buildWaitingContext(
                 TaskQuerySupport.readJsonNode(taskState.getWaitingContextJson(), objectMapper)
@@ -90,22 +78,9 @@ public class TaskDetailQueryService {
         TaskQuerySupport.applyContractProjection(response, contractProjection);
         response.setLatestResultBundleId(taskState.getLatestResultBundleId());
         response.setLatestWorkspaceId(taskState.getLatestWorkspaceId());
-        JsonNode goalParseRoot = TaskQuerySupport.readJsonNode(taskState.getGoalParseJson(), objectMapper);
-        JsonNode passBRoot = TaskQuerySupport.readJsonNode(taskState.getPassbResultJson(), objectMapper);
-        TaskQuerySupport.applySkillBindingProjection(
-                response,
-                goalParseRoot,
-                routeProjection.skillRoute(),
-                passBRoot,
-                objectMapper
-        );
-        TaskQuerySupport.applyStageProjection(
-                response,
-                routeProjection.goalParse(),
-                routeProjection.skillRoute(),
-                passBRoot,
-                objectMapper
-        );
+        TaskQuerySupport.StageRoots stageRoots = TaskQuerySupport.readStageRoots(routeProjection, taskState, objectMapper);
+        TaskQuerySupport.applySkillBindingProjection(response, stageRoots, objectMapper);
+        TaskQuerySupport.applyStageProjection(response, stageRoots, objectMapper);
 
         TaskQuerySupport.applyRepairProjection(response, latestRepair, objectMapper);
 

@@ -41,16 +41,8 @@ public class TaskResultQueryService {
         response.setPlanningRevision(taskState.getPlanningRevision());
         response.setCheckpointVersion(taskState.getCheckpointVersion());
         response.setCaseId(activeCaseId);
-        JsonNode goalParseRoot = TaskQuerySupport.readJsonNode(taskState.getGoalParseJson(), objectMapper);
-        JsonNode passBRoot = TaskQuerySupport.readJsonNode(taskState.getPassbResultJson(), objectMapper);
-        JsonNode skillRouteRoot = TaskQuerySupport.readJsonNode(taskState.getSkillRouteJson(), objectMapper);
-        TaskQuerySupport.applySkillBindingProjection(
-                response,
-                goalParseRoot,
-                skillRouteRoot,
-                passBRoot,
-                objectMapper
-        );
+        TaskQuerySupport.StageRoots stageRoots = TaskQuerySupport.readStageRoots(taskState, objectMapper);
+        TaskQuerySupport.applySkillBindingProjection(response, stageRoots, objectMapper);
         Map<String, Object> frozenCatalogSummary = TaskQuerySupport.readJsonMap(
                 activeManifest == null ? null : activeManifest.getCatalogSummaryJson(),
                 objectMapper
@@ -88,7 +80,7 @@ public class TaskResultQueryService {
                 "result_contract_governance"
         );
         TaskQuerySupport.applyContractProjection(response, contractProjection);
-        TaskQuerySupport.applyStageProjection(response, goalParseRoot, skillRouteRoot, passBRoot, objectMapper);
+        TaskQuerySupport.applyStageProjection(response, stageRoots, objectMapper);
         TaskQuerySupport.applyResultPass2Projection(response, taskState, objectMapper);
         if (jobRecord != null) {
             TaskQuerySupport.applyResultJobProjection(response, jobRecord, activeCaseId, objectMapper);

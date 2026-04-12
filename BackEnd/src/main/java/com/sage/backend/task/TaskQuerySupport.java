@@ -183,6 +183,25 @@ final class TaskQuerySupport {
         );
     }
 
+    static StageRoots readStageRoots(TaskState taskState, ObjectMapper objectMapper) {
+        if (taskState == null) {
+            return new StageRoots(null, null, null);
+        }
+        JsonNode goalParseRoot = readJsonNode(taskState.getGoalParseJson(), objectMapper);
+        JsonNode skillRouteRoot = readJsonNode(taskState.getSkillRouteJson(), objectMapper);
+        JsonNode passBRoot = readJsonNode(taskState.getPassbResultJson(), objectMapper);
+        return new StageRoots(goalParseRoot, skillRouteRoot, passBRoot);
+    }
+
+    static StageRoots readStageRoots(RouteProjection routeProjection, TaskState taskState, ObjectMapper objectMapper) {
+        JsonNode passBRoot = readJsonNode(taskState == null ? null : taskState.getPassbResultJson(), objectMapper);
+        return new StageRoots(
+                routeProjection == null ? null : routeProjection.goalParse(),
+                routeProjection == null ? null : routeProjection.skillRoute(),
+                passBRoot
+        );
+    }
+
     static void applyStageProjection(
             TaskDetailResponse response,
             JsonNode goalParseRoot,
@@ -197,6 +216,18 @@ final class TaskQuerySupport {
         response.setGoalRouteOutput(TaskProjectionBuilder.buildGoalRouteOutput(goalParseRoot, skillRouteRoot, objectMapper));
         response.setPassbCognition(TaskProjectionBuilder.buildCognitionView(passBRoot, objectMapper));
         response.setPassbOutput(TaskProjectionBuilder.buildStageOutput(passBRoot, objectMapper));
+    }
+
+    static void applyStageProjection(
+            TaskDetailResponse response,
+            StageRoots stageRoots,
+            ObjectMapper objectMapper
+    ) {
+        if (stageRoots == null) {
+            applyStageProjection(response, null, null, null, objectMapper);
+            return;
+        }
+        applyStageProjection(response, stageRoots.goalParse(), stageRoots.skillRoute(), stageRoots.passB(), objectMapper);
     }
 
     static void applyStageProjection(
@@ -216,6 +247,18 @@ final class TaskQuerySupport {
     }
 
     static void applyStageProjection(
+            TaskManifestResponse response,
+            StageRoots stageRoots,
+            ObjectMapper objectMapper
+    ) {
+        if (stageRoots == null) {
+            applyStageProjection(response, null, null, null, objectMapper);
+            return;
+        }
+        applyStageProjection(response, stageRoots.goalParse(), stageRoots.skillRoute(), stageRoots.passB(), objectMapper);
+    }
+
+    static void applyStageProjection(
             TaskResultResponse response,
             JsonNode goalParseRoot,
             JsonNode skillRouteRoot,
@@ -229,6 +272,18 @@ final class TaskQuerySupport {
         response.setGoalRouteOutput(TaskProjectionBuilder.buildGoalRouteOutput(goalParseRoot, skillRouteRoot, objectMapper));
         response.setPassbCognition(TaskProjectionBuilder.buildCognitionView(passBRoot, objectMapper));
         response.setPassbOutput(TaskProjectionBuilder.buildStageOutput(passBRoot, objectMapper));
+    }
+
+    static void applyStageProjection(
+            TaskResultResponse response,
+            StageRoots stageRoots,
+            ObjectMapper objectMapper
+    ) {
+        if (stageRoots == null) {
+            applyStageProjection(response, null, null, null, objectMapper);
+            return;
+        }
+        applyStageProjection(response, stageRoots.goalParse(), stageRoots.skillRoute(), stageRoots.passB(), objectMapper);
     }
 
     static Map<String, Object> resolvePlanningSummary(
@@ -433,6 +488,35 @@ final class TaskQuerySupport {
         ));
     }
 
+    static void applyDetailSummaryProjection(
+            TaskDetailResponse response,
+            JsonNode pass1Projection,
+            RouteProjection routeProjection,
+            TaskState taskState,
+            ObjectMapper objectMapper
+    ) {
+        if (response == null || taskState == null) {
+            return;
+        }
+        response.setGoalParseSummary(TaskProjectionBuilder.buildGoalParseSummary(
+                routeProjection == null ? null : routeProjection.goalParse()
+        ));
+        response.setSkillRouteSummary(TaskProjectionBuilder.buildSkillRouteSummary(
+                routeProjection == null ? null : routeProjection.skillRoute()
+        ));
+        response.setPass1Summary(TaskProjectionBuilder.buildPass1Summary(pass1Projection));
+        response.setSlotBindingsSummary(TaskProjectionBuilder.buildSlotBindingsSummary(
+                readJsonNode(taskState.getSlotBindingsSummaryJson(), objectMapper)
+        ));
+        response.setArgsDraftSummary(TaskProjectionBuilder.buildArgsDraftSummary(
+                readJsonNode(taskState.getArgsDraftSummaryJson(), objectMapper)
+        ));
+        response.setValidationSummary(TaskProjectionBuilder.buildValidationSummary(
+                readJsonNode(taskState.getValidationSummaryJson(), objectMapper)
+        ));
+        response.setInputChainStatus(taskState.getInputChainStatus());
+    }
+
     static void applySkillBindingProjection(
             TaskDetailResponse response,
             JsonNode goalParseRoot,
@@ -459,6 +543,24 @@ final class TaskQuerySupport {
                         : null
         );
         response.setCaseProjection(TaskProjectionBuilder.buildCaseProjection(goalParseRoot, passBRoot, objectMapper));
+    }
+
+    static void applySkillBindingProjection(
+            TaskDetailResponse response,
+            StageRoots stageRoots,
+            ObjectMapper objectMapper
+    ) {
+        if (stageRoots == null) {
+            applySkillBindingProjection(response, null, null, null, objectMapper);
+            return;
+        }
+        applySkillBindingProjection(
+                response,
+                stageRoots.goalParse(),
+                stageRoots.skillRoute(),
+                stageRoots.passB(),
+                objectMapper
+        );
     }
 
     static void applySkillBindingProjection(
@@ -494,6 +596,24 @@ final class TaskQuerySupport {
     }
 
     static void applySkillBindingProjection(
+            TaskManifestResponse response,
+            StageRoots stageRoots,
+            ObjectMapper objectMapper
+    ) {
+        if (stageRoots == null) {
+            applySkillBindingProjection(response, null, null, null, objectMapper);
+            return;
+        }
+        applySkillBindingProjection(
+                response,
+                stageRoots.goalParse(),
+                stageRoots.skillRoute(),
+                stageRoots.passB(),
+                objectMapper
+        );
+    }
+
+    static void applySkillBindingProjection(
             TaskResultResponse response,
             JsonNode goalParseRoot,
             JsonNode skillRouteRoot,
@@ -523,6 +643,24 @@ final class TaskQuerySupport {
                         : null
         );
         response.setCaseProjection(TaskProjectionBuilder.buildCaseProjection(goalParseRoot, passBRoot, objectMapper));
+    }
+
+    static void applySkillBindingProjection(
+            TaskResultResponse response,
+            StageRoots stageRoots,
+            ObjectMapper objectMapper
+    ) {
+        if (stageRoots == null) {
+            applySkillBindingProjection(response, null, null, null, objectMapper);
+            return;
+        }
+        applySkillBindingProjection(
+                response,
+                stageRoots.goalParse(),
+                stageRoots.skillRoute(),
+                stageRoots.passB(),
+                objectMapper
+        );
     }
 
     static CatalogProjection buildDetailCatalogProjection(
@@ -715,6 +853,13 @@ final class TaskQuerySupport {
     record RouteProjection(
             JsonNode goalParse,
             JsonNode skillRoute
+    ) {
+    }
+
+    record StageRoots(
+            JsonNode goalParse,
+            JsonNode skillRoute,
+            JsonNode passB
     ) {
     }
 

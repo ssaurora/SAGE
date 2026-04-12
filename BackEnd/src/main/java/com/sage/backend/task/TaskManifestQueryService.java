@@ -71,17 +71,9 @@ public class TaskManifestQueryService {
         );
         TaskQuerySupport.applyLifecycleProjection(response, taskState, objectMapper);
 
-        JsonNode goalParseRoot = TaskQuerySupport.readJsonNode(taskState.getGoalParseJson(), objectMapper);
-        JsonNode skillRouteRoot = TaskQuerySupport.readJsonNode(taskState.getSkillRouteJson(), objectMapper);
-        JsonNode passBRoot = TaskQuerySupport.readJsonNode(taskState.getPassbResultJson(), objectMapper);
-        TaskQuerySupport.applySkillBindingProjection(
-                response,
-                goalParseRoot,
-                skillRouteRoot,
-                passBRoot,
-                objectMapper
-        );
-        TaskQuerySupport.applyStageProjection(response, goalParseRoot, skillRouteRoot, passBRoot, objectMapper);
+        TaskQuerySupport.StageRoots stageRoots = TaskQuerySupport.readStageRoots(taskState, objectMapper);
+        TaskQuerySupport.applySkillBindingProjection(response, stageRoots, objectMapper);
+        TaskQuerySupport.applyStageProjection(response, stageRoots, objectMapper);
         TaskQuerySupport.applyManifestPass2Projection(response, taskState, objectMapper);
 
         JsonNode pass1Projection = TaskQuerySupport.readJsonNode(taskState.getPass1ResultJson(), objectMapper);
