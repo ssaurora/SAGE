@@ -1,447 +1,287 @@
-# SAGE Agent Guidelines
+# AGENTS.md
 
-_Current baseline: Phase1 Week6 (repair loop + traceability layer established)_
+## Purpose
 
-This document defines the implementation boundaries for agents and automation working in this repository.
-The current goal is not to spread more "intelligence" across the system, but to preserve a stable baseline built on top of `Phase0 + Week5 + Week6`:
+This repository, `SAGE`, is the **real governed analysis execution system**.
 
-`task orchestration -> WAITING_USER / resume -> execution -> traceable results / artifacts / run history`
+It is the source of truth for:
+- workflow semantics
+- task-state authority
+- waiting/resume behavior
+- manifest freezing
+- orchestration
+- audit and traceability
+- execution/runtime facts
+- contract and catalog governance
 
----
-
-## 1. Directory Boundaries
-
-- Frontend code belongs only in `FrontEnd`
-- Java backend code belongs only in `BackEnd`
-- Python service / runtime code belongs only in `Service`
-- Scripts and acceptance flows belong only in `scripts`
-- Architecture and planning documents belong only in `Docs`
-
----
-
-## 2. Current Scope Baseline
-
-### Completed Baseline
-
-- The minimal `Phase0` executable core exists
-- The `Week5` repair loop exists: `WAITING_USER -> upload/fix -> /resume -> re-enter execution`
-- The `Week6` traceability layer exists: `workspace / result_bundle_record / artifact_index / runs / artifacts`
-
-### Current In Scope
-
-- Extend fields, APIs, projections, artifacts, and visualizations without violating architecture boundaries
-- Fix bugs in state machines, scheduling, artifact indexing, and runtime coordination
-- Improve separation between control, cognition, execution, and data ownership
-- Prepare clean boundaries for future cognition-service extraction, provider abstraction, and capability expansion
-
-### Current Out of Scope
-
-- Do not introduce multi-skill orchestration complexity
-- Do not push business workflow decisions into frontend or execution layers
-- Do not spread prompt / provider / model logic into the Java control layer
-- Do not bypass Dispatcher / Validation / Pass2 with shortcuts
-- Do not treat read models as a new source of truth
+Codex may also work on the related frontend repository, `sage-web`.
+When doing cross-repo work, this repository must remain the semantic authority.
 
 ---
 
-## 3. Hard Constraints
+## Repository Role
 
-### 3.1 Dispatcher Authority
+`SAGE` owns:
 
-Only Dispatcher / control-layer routing may decide:
+- backend workflow state
+- task transitions
+- orchestration and dispatch
+- waiting / resume semantics
+- manifest and frozen contract meaning
+- result, artifact, and run facts
+- audit truth
+- catalog and contract governance meaning
+- backend-facing DTOs and read models
+- stable task APIs
+- real runtime evidence
 
-- `RECOVERABLE` vs `FATAL`
-- `WAITING_USER` vs `FAILED`
-- `can_resume`
-- `required_user_actions`
+`SAGE` does **not** own:
 
-LLM output must not decide these values.
+- final productized UX
+- user-facing visual hierarchy
+- frontend page composition
+- presentation-level status copy
+- frontend interaction shell details
 
-### 3.2 `waiting_context` Definition
-
-- `waiting_context_json` is the canonical repair view model for the current `WAITING_USER` state
-- It is derived by the control layer from lower-level facts
-- Frontend consumes it and must not reconstruct repair semantics on its own
-
-### 3.3 Attempt Rules
-
-- One task may have multiple attempts
-- At most one active attempt may exist at a time
-- A new attempt may only be created after task creation is accepted or `/resume` is accepted
-- Attempt terminal states are limited to: `SUCCEEDED | FAILED | CANCELLED | WAITING_USER`
-- Historical attempts are archival/debug records, not current workflow authority
-
-### 3.4 State Ownership
-
-- `job_record` is the source of truth for execution state
-- `task_state` is the source of truth for task workflow state
-- `repair_proposal_json` is enhancement only, not workflow authority
-- `task_attempt.status_snapshot_json` is archival/debug only, not an independent state authority
-
-### 3.5 Resume Boundary
-
-- `/resume` may only be accepted from `WAITING_USER`
-- Resume must re-enter the defined validation / dispatcher / pass2 path
-- Resume must not bypass Validation or Pass2 preconditions
-- Repeated resume requests must remain idempotent
-- Any successful attachment upload or accepted override must trigger `waiting_context` re-evaluation before `can_resume` is determined
-- Resume must never be accepted against stale `waiting_context` data
-
-### 3.6 LLM Output Constraints
-
-- Any LLM output must conform to an explicit schema
-- LLM timeout / failure must degrade automatically and must not block the main path
-- LLM output is suggestion / explanation only, never workflow authority
+Those belong primarily to `sage-web`.
 
 ---
 
-## Architecture Boundaries (Six-Layer Rules)
+## Core Working Principle
 
-This project follows a strict six-layer architecture.
-When modifying code, always preserve layer ownership and do not move responsibilities across layers.
+This repository must preserve a strict layered ownership model.
 
-### Layer 1 - Presentation Layer (FrontEnd)
+The backend is not a passive data dump for frontend invention.
+The backend remains the workflow authority.
 
-Scope:
+Frontend work in `sage-web` may motivate:
+- better read models
+- cleaner DTOs
+- better summary projections
+- more stable governance-facing APIs
 
-- user-facing pages
-- task detail view
-- result view
-- repair / WAITING_USER panels
-- upload and resume interactions
-- SSE / polling UI updates
-
-Allowed:
-
-- render structured data returned by backend
-- trigger backend APIs
-- display task/job/result/repair states
-
-Forbidden:
-
-- do not implement business rules here
-- do not decide `WAITING_USER` vs `FAILED`
-- do not infer resume eligibility in UI
-- do not reconstruct missing repair logic from raw fields
-- do not call LLM providers directly from frontend
-
-Rule:
-Frontend is a display and interaction layer only.
-It must consume structured backend facts, not invent workflow decisions.
+But frontend needs must not casually rewrite backend semantics.
 
 ---
 
-### Layer 2 - Control Layer (BackEnd / Java)
+## Semantic Authority Rules
 
-Scope:
+### 1. Backend owns workflow meaning
+Do not allow workflow semantics to drift into the frontend.
 
-- task state machine
-- auth / permissions
-- idempotency
-- API contracts
-- orchestration flow
-- persistence coordination
-- event writing
-- task/job projection
-- resume / cancel entry handling
-- repair routing via Dispatcher
+`SAGE` remains the authority for:
+- when a task enters waiting
+- what `WAITING_USER` means
+- what `/resume` means
+- what is frozen vs mutable
+- what constitutes success/failure/cancel
+- what promotion, artifact, audit, and runtime evidence mean
 
-Allowed:
+### 2. Waiting/resume is a real governed path
+Do not weaken or bypass the real repair/resume semantics.
 
-- own `task_state` transitions
-- own `event_log` and `audit_record` writing
-- own resume acceptance / rejection
-- own Dispatcher routing (`WAITING_USER` vs `FAILED`)
-- assemble structured context objects for cognition-layer calls
-- provide rule-based fallback when cognition layer is unavailable
+The waiting path must remain governed:
+- incomplete inputs produce structured waiting
+- `/resume` re-enters formal validation/dispatch
+- waiting context and repair semantics remain queryable and explicit
 
-Forbidden:
+Do not convert this into a cosmetic frontend-only interaction.
 
-- do not own prompt templates
-- do not own model selection logic
-- do not call OpenAI or other LLM providers directly for business cognition as a long-term architecture
-- do not embed provider-specific prompt engineering here
-- do not own execution runtime internals
-- do not directly mutate execution results outside the defined persistence flow
+### 3. Catalog and contract remain governance concepts
+Catalog and contract are not decorative metadata.
+They are governance boundaries.
 
-Rule:
-The control layer owns state, workflow, contracts, and persistence coordination.
-It may call cognition services, but must not become the cognition layer.
+Do not treat them as incidental fields added only for frontend display.
+Preserve their stable meaning in:
+- task detail
+- manifest
+- result
+- audit
+- contract/catalog projections
 
----
+### 4. Read models are allowed to evolve
+This repository may add or improve:
+- list projections
+- summary DTOs
+- governance projections
+- scene/task summary views
+- result summary views
+- artifact summary views
 
-### Layer 3 - Cognition Layer (LLM / Reasoning Layer)
-
-Scope:
-
-- prompt templates
-- model/provider selection
-- structured reasoning outputs
-- repair proposal generation
-- future Pass1 / PassB / explanation intelligence
-- schema-constrained cognitive outputs
-
-Allowed:
-
-- generate `repair_proposal`
-- generate user-facing explanations
-- generate suggestions under strict schemas
-- choose provider/model internally
-- apply retry / fallback / degradation inside the cognition service
-
-Forbidden:
-
-- do not own `task_state` transitions
-- do not decide `WAITING_USER` vs `FAILED`
-- do not decide `can_resume`
-- do not bypass Validation or Dispatcher
-- do not directly write database state
-- do not directly submit jobs
-- do not become the source of truth for system state
-
-Rule:
-Cognition generates structured suggestions and explanations only.
-It is never the authority for workflow state or execution truth.
+This is encouraged when it supports real product surfaces and reduces brittle frontend reconstruction.
 
 ---
 
-### Layer 4 - Capability Layer (Skill / Tool / Model Capability Abstraction)
+## Cross-Repo Alignment Rules
 
-Scope:
+### 1. `sage-web` is the product shell, not the workflow authority
+When aligning with `sage-web`, support it with:
+- stable objects
+- stable read models
+- stable field semantics
+- explicit DTOs/projections
 
-- skill definitions
-- capability registry
-- parameter schemas
-- tool contracts
-- template metadata
-- model-specific input requirements
-- provider / capability negotiation metadata
+Do not move workflow ownership into frontend assumptions.
 
-Allowed:
+### 2. Prefer additive backend support over frontend invention
+If the frontend needs a stable summary or projection, prefer adding a proper backend read model rather than forcing `sage-web` to infer it from scattered raw data.
 
-- define what a skill/model requires
-- define parameter schemas and role schemas
-- expose reusable capability metadata
-- describe execution prerequisites
+Examples of acceptable additions:
+- scene-level summary projection
+- priority task summary
+- result card summary projection
+- governance summary DTO
+- clearer artifact summary response
 
-Forbidden:
+### 3. Do not change semantics for cosmetic reasons
+Do not rename or reshape core backend concepts merely because a temporary frontend draft prefers another wording.
 
-- do not own task orchestration
-- do not own runtime job state
-- do not contain UI logic
-- do not contain provider-specific LLM prompts unless they are explicitly part of cognition assets
-- do not directly execute long-running jobs
-
-Rule:
-The capability layer defines what can be done and what inputs are required.
-It does not decide when or why a task should run.
+Change backend semantics only when:
+- the current model is genuinely unclear or unstable
+- alignment would otherwise remain brittle long-term
+- the change improves the system, not just the UI draft
 
 ---
 
-### Layer 5 - Execution Layer (Worker / Runtime Layer)
+## Backend Change Rules
 
-Scope:
+### Allowed
+Codex may change backend code when needed to:
+- add or improve read models
+- expose stable summary views
+- reduce duplicated projection assembly
+- improve DTO clarity
+- reduce frontend-backend semantic drift
+- support real product pages in a stable way
 
-- job execution
-- worker lifecycle
-- runtime state production
-- heartbeats
-- result object generation
-- cancellation handling
-- runtime error generation
-- Docker / container / process execution
+### Not allowed casually
+Do not casually change:
+- task-state meaning
+- waiting/resume meaning
+- manifest freeze semantics
+- audit semantics
+- artifact/result identity
+- contract/catalog semantics
 
-Allowed:
-
-- own `job_state` lifecycle
-- produce runtime facts
-- write result objects / failure summaries through defined channels
-- perform physical cancellation / process termination
-- emit execution-facing status
-
-Forbidden:
-
-- do not own `task_state` transitions
-- do not own `WAITING_USER` routing
-- do not generate business repair logic
-- do not own prompt semantics
-- do not directly decide frontend-facing workflow outcomes
-
-Rule:
-The execution layer runs jobs and produces runtime facts.
-It must not become the workflow authority.
+These are system-level truths, not temporary frontend implementation details.
 
 ---
 
-### Layer 6 - Data Layer (Persistence / Facts / Read Models)
+## API and DTO Discipline
 
-Scope:
+### 1. Favor explicit read models
+If a frontend page needs a stable shape, create or refine an explicit DTO/projection rather than expecting the frontend to reverse-engineer internal service fields.
 
-- database schema
-- source-of-truth records
-- projections / read models
-- attachments
-- repair records
-- attempts
-- result persistence
-- audit persistence
+### 2. Preserve semantic naming
+When exposing DTOs or projections, prefer names and fields that clearly reflect real system meaning.
 
-Allowed:
+### 3. Avoid UI-only DTO pollution
+Do not add random presentation-only fields unless they reflect a stable backend read concern.
 
-- persist immutable facts and controlled projections
-- separate source-of-truth records from read models
-- preserve append-only event history
-- store attempt / attachment / repair records
+Bad pattern:
+- adding arbitrary color/status text fields only because a UI card wants them
 
-Forbidden:
+Better pattern:
+- expose stable state/fact fields
+- let the frontend map them into presentation
 
-- do not implement business decisions in schema or triggers unless explicitly designed
-- do not let read models become independent truth
-- do not duplicate source-of-truth logic across multiple tables without explicit derivation rules
-
-Rule:
-The data layer stores facts and projections.
-It does not decide workflow semantics.
+### 4. Support list views with summary projections
+The frontend will need productized list pages, including scene-level and result-level summaries.
+Where necessary, add summary/read models for these pages rather than forcing full-detail fetches plus frontend recomposition.
 
 ---
 
-## Cross-Layer Ownership Rules
+## Architecture Discipline
 
-### Source of Truth
+### 1. Keep workflow authority centralized
+Do not let workflow meaning leak into:
+- ad hoc controllers
+- duplicated service-local condition trees
+- frontend-driven assumptions
 
-- `job_record` is the source of truth for execution state
-- `task_state` is the source of truth for task workflow state
-- `waiting_context_json` follows the canonical repair view model defined above
-- `repair_proposal_json` is enhancement only, not authority
-- frontend must read projections, not infer state independently
+### 2. Keep read models explicit
+If different product surfaces need different views, expose explicit read models.
 
-### LLM Boundary
+### 3. Favor thinner orchestration boundaries
+Continue the existing direction of:
+- moving repeated projection assembly out of orchestration shells
+- keeping query/read semantics stable
+- reducing field-stacking duplication
 
-- LLM participation belongs to the Cognition Layer
-- Java backend must not directly own prompts, provider logic, or model-specific parsing as a long-term architecture
-- Any temporary direct model call in backend must be treated as transitional and migrated out later
+### 4. Preserve traceability
+Do not regress on:
+- runs
+- artifacts
+- result bundles
+- audit records
+- runtime evidence
+- waiting/resume trace
 
-### Dispatcher Authority
-
-Only Dispatcher may decide:
-
-- `RECOVERABLE` vs `FATAL`
-- `WAITING_USER` vs `FAILED`
-- `can_resume`
-- `required_user_actions`
-
-LLM must not decide these.
-
-### Resume Boundary
-
-- `/resume` is accepted only from `WAITING_USER`
-- resume must re-enter through the defined validation path
-- resume must not bypass Validation or Pass2 preconditions
-- repeated resume requests must be idempotent
-
-### Attempt Boundary
-
-- one task may have multiple attempts
-- only one active attempt may exist at a time
-- historical attempts are archival/debug records, not current workflow authority
-
-### Result Boundary
-
-- `result_bundle` is the success-path business output
-- `failure_summary` is the failure-path structured output
-- `docker_runtime_evidence` is top-level runtime evidence only
-- execution evidence must not pollute business result semantics
+These are core differentiators of the system.
 
 ---
 
-## Architecture Safety Rules
+## When To Coordinate With `sage-web`
 
-When implementing new features, prefer adding a new boundary-respecting component over leaking logic into the wrong layer.
+Coordinate changes with `sage-web` when:
+- a frontend page is blocked by unstable or scattered backend data
+- there is semantic naming drift
+- a page needs a stable summary projection
+- mock-to-real migration requires clearer DTOs
+- a frontend action needs a stable backend contract
 
-Examples:
-
-- If prompt logic is needed, add it to cognition-layer assets/services, not Java orchestration services
-- If workflow routing is needed, add it to Dispatcher or control-layer services, not frontend or worker
-- If runtime status is needed, derive it from execution facts, not frontend heuristics
-- If a UI needs new fields, extend backend contracts instead of recomputing meaning in frontend
-
-Never solve a missing-layer problem by pushing logic into a neighboring layer.
+If a change affects frontend-facing meaning, ensure the corresponding frontend types/adapters can be updated consistently.
 
 ---
 
-## Docker Build & Compose Rules
+## Required Check Before Finalizing Any Change
 
-These rules define the canonical local container workflow. Follow them unless explicitly overridden.
+Before finalizing a meaningful change in this repo, check:
 
-### Compose and Env Usage
-
-- Use `docker compose --env-file .env.compose` for all stack commands (`up`, `down`, `ps`, `logs`).
-- Keep defaults in `docker-compose.yml` via `${VAR:-default}` so manual compose commands never collapse to empty values.
-- Prefer the scripted entrypoint `scripts/compose-up.ps1 -Build` as the single one-click startup path.
-
-### Backend Image (Option A)
-
-- Package the backend jar on the host (`mvn -q -DskipTests package`) before building the image.
-- Backend Dockerfile must be runtime-only and copy `target/backend-0.0.1-SNAPSHOT.jar`.
-- Do not run Maven inside the backend Docker build to avoid slow, brittle dependency fetches.
-
-### Frontend Image
-
-- Always ensure a `public/` directory exists before copying to the runtime stage.
-- Keep `.dockerignore` for frontend (`node_modules`, `.next`) to reduce build context size.
-
-### Service Image
-
-- Use `python:3.12-slim` as the base image for the service container.
-
-### Healthchecks
-
-- Healthchecks must only use tools present in the base image.
-- Backend uses `curl` (installed in the image) to check `/actuator/health`.
-- Do not rely on Python inside the Java runtime image.
-
-### Network Conventions
-
-- Backend talks to postgres/service by Compose service names (`postgres:5432`, `service:8001`).
-- Frontend talks to backend via `http://localhost:${SAGE_BACKEND_PORT:-8080}` (browser-facing).
+1. Does this preserve backend workflow authority?
+2. Am I improving a stable read concern, or just reacting to a temporary UI idea?
+3. Will this reduce semantic drift with `sage-web`?
+4. Is this an additive read-model/DTO improvement or a risky semantic rewrite?
+5. Will frontend still be able to present this as a productized surface without inventing meaning?
+6. Have I preserved traceability, waiting/resume rigor, and frozen-object semantics?
 
 ---
 
-## Phase1 Stability Guardrails
+## Anti-Patterns To Avoid
 
-Do not introduce the following unless explicitly requested:
+Avoid all of the following:
 
-- multi-skill orchestration
-- multi-provider cognition routing
-- broad Pass1 / PassB LLM replacement
-- full object-storage migration
-- generalized retry / rerun frameworks
-- parallel workflow engines
-
-Prefer strengthening the current repair, execution, and traceability baseline over expanding architectural breadth.
-
----
-
-## Temporary Transitional Rule
-
-If some cognition logic is still temporarily implemented in the Java backend:
-
-- keep it isolated behind a dedicated service/client boundary
-- mark it as transitional architecture
-- do not spread prompt logic across controllers/services
-- do not let temporary implementation become permanent through copy-paste reuse
-
-### Transitional Exception: `RepairProposalService`
-
-Any direct LLM/provider call currently living in the Java backend is a temporary Phase1 implementation only.
-Do not expand this pattern.
-All future prompt / model / provider logic must move to the Cognition Layer behind a backend client boundary.
+- making backend semantics match temporary UI wording
+- weakening waiting/resume rigor to simplify frontend implementation
+- turning catalog/contract into cosmetic metadata
+- exposing only scattered internals and expecting frontend to reconstruct stable views
+- duplicating similar projections across services with slightly different meanings
+- allowing frontend convenience to silently redefine core workflow meaning
+- treating the backend as a passive store while frontend becomes the true workflow engine
 
 ---
 
-## Conflict Priority
+## Recommended Change Strategy
 
-1. Explicit user instruction in the current turn
-2. System / developer instruction
-3. This document (`AGENTS.md`)
-4. Existing repository conventions
+When a feature spans both `SAGE` and `sage-web`, prefer this order:
+
+1. identify the real system meaning in `SAGE`
+2. determine whether an explicit read model is needed
+3. implement or refine backend projection/DTO/API support
+4. update frontend adapters/types in `sage-web`
+5. let `sage-web` productize the surface
+
+Do not invert this sequence by allowing frontend speculation to drive backend semantics.
+
+---
+
+## Summary
+
+In `SAGE`, Codex should behave like a **workflow-and-read-model engineer**:
+
+- protect backend authority
+- preserve governed semantics
+- improve read models when necessary
+- support product surfaces without becoming UI-driven
+- reduce semantic drift across repos
+- keep waiting/resume, traceability, catalog, and contract boundaries strong
