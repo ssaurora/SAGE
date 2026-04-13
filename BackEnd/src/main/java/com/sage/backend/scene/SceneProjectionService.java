@@ -3,6 +3,8 @@ package com.sage.backend.scene;
 import com.sage.backend.model.AnalysisSession;
 import com.sage.backend.model.TaskState;
 import com.sage.backend.model.TaskStatus;
+import com.sage.backend.scene.dto.PostSceneSessionMessageRequest;
+import com.sage.backend.scene.dto.PostSceneSessionMessageResponse;
 import com.sage.backend.scene.dto.SceneActionRecommendationDTO;
 import com.sage.backend.scene.dto.SceneAuditSummaryDTO;
 import com.sage.backend.scene.dto.SceneBlockingSummaryDTO;
@@ -11,14 +13,22 @@ import com.sage.backend.scene.dto.SceneListResponse;
 import com.sage.backend.scene.dto.SceneListSummaryDTO;
 import com.sage.backend.scene.dto.SceneResultSummaryDTO;
 import com.sage.backend.scene.dto.SceneSummaryDTO;
+import com.sage.backend.scene.dto.SessionMessageDTO;
+import com.sage.backend.scene.dto.SessionMessagesResponseDTO;
 import com.sage.backend.scene.dto.SessionProjectionDTO;
 import com.sage.backend.session.SessionService;
 import com.sage.backend.session.dto.AnalysisSessionResponse;
+import com.sage.backend.session.dto.PostSessionMessageRequest;
+import com.sage.backend.session.dto.SessionMessageDto;
+import com.sage.backend.session.dto.SessionMessagesResponse;
+import com.sage.backend.session.dto.UploadSessionAttachmentResponse;
 import com.sage.backend.task.TaskService;
 import com.sage.backend.task.dto.TaskAuditResponse;
 import com.sage.backend.task.dto.TaskDetailResponse;
 import com.sage.backend.task.dto.TaskEventsResponse;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
@@ -27,7 +37,10 @@ import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
+
+import static org.springframework.http.HttpStatus.NOT_FOUND;
 
 @Service
 public class SceneProjectionService {
@@ -102,6 +115,38 @@ public class SceneProjectionService {
         return loadSessionProjection(userId, context.getCurrentSession());
     }
 
+    public SessionMessagesResponseDTO getSceneSessionMessages(Long userId, String sceneId) {
+        SceneProjectionContext context = sceneProjectionQueryService.loadSceneContext(userId, sceneId);
+        AnalysisSession currentSession = requireCurrentSession(context);
+        return toSceneMessagesResponse(sessionService.getMessages(userId, currentSession.getSessionId()));
+    }
+
+    public PostSceneSessionMessageResponse postSceneSessionMessage(Long userId, String sceneId, PostSceneSessionMessageRequest request) {
+        SceneProjectionContext context = sceneProjectionQueryService.loadSceneContext(userId, sceneId);
+        AnalysisSession currentSession = requireCurrentSession(context);
+
+        PostSessionMessageRequest delegate = new PostSessionMessageRequest();
+        delegate.setContent(request.getContent());
+        delegate.setClientRequestId(request.getClientRequestId());
+        delegate.setAttachmentIds(request.getAttachmentIds());
+        delegate.setSlotOverrides(request.getSlotOverrides());
+        delegate.setArgsOverrides(request.getArgsOverrides());
+
+        AnalysisSessionResponse updatedSession = sessionService.postMessage(userId, currentSession.getSessionId(), delegate);
+        SessionMessagesResponse updatedMessages = sessionService.getMessages(userId, currentSession.getSessionId());
+
+        PostSceneSessionMessageResponse response = new PostSceneSessionMessageResponse();
+        response.setAcceptedMessage(findAcceptedMessage(updatedMessages, request.getClientRequestId()));
+        response.setSession(toSessionProjection(updatedSession));
+        return response;
+    }
+
+    public UploadSessionAttachmentResponse uploadSceneSessionAttachment(Long userId, String sceneId, MultipartFile file, String logicalSlot) {
+        SceneProjectionContext context = sceneProjectionQueryService.loadSceneContext(userId, sceneId);
+        AnalysisSession currentSession = requireCurrentSession(context);
+        return sessionService.uploadAttachment(userId, currentSession.getSessionId(), file, logicalSlot);
+    }
+
     private SceneSummaryDTO buildSceneSummary(Long userId, SceneProjectionContext context) {
         TaskDetailResponse currentTaskDetail = loadTaskDetail(userId, context.getCurrentTask());
         List<TaskDetailResponse> readyResultTaskDetails = loadReadyResultTaskDetails(userId, context, currentTaskDetail);
@@ -130,6 +175,10 @@ public class SceneProjectionService {
             return null;
         }
         AnalysisSessionResponse response = sessionService.getSession(userId, session.getSessionId());
+        return toSessionProjection(response);
+    }
+
+    private SessionProjectionDTO toSessionProjection(AnalysisSessionResponse response) {
         SessionProjectionDTO projection = new SessionProjectionDTO();
         projection.setSessionId(response.getSessionId());
         projection.setTitle(response.getTitle());
@@ -147,6 +196,115 @@ public class SceneProjectionService {
         projection.setProgressProjection(response.getProgressProjection());
         projection.setWaitingProjection(response.getWaitingProjection());
         return projection;
+    }
+
+    private SessionMessagesResponseDTO toSceneMessagesResponse(SessionMessagesResponse response) {
+        SessionMessagesResponseDTO dto = new SessionMessagesResponseDTO();
+        dto.setSessionId(response.getSessionId());
+        dto.setNextCursor(null);
+        for (SessionMessageDto item : response.getItems()) {
+            dto.getItems().add(toSceneMessage(item));
+        }
+        return dto;
+    }
+
+    private SessionMessageDTO toSceneMessage(SessionMessageDto source) {
+        SessionMessageDTO dto = new SessionMessageDTO();
+        dto.setMessageId(source.getMessageId());
+        dto.setSessionId(source.getSessionId());
+        dto.setRole(source.getRole());
+        dto.setMessageType(source.getMessageType());
+        dto.setContent(normalizeMessageContent(source));
+        dto.setCreatedAt(source.getCreatedAt());
+        dto.setRelatedTaskId(source.getTaskId());
+        dto.setRelatedResultBundleId(source.getResultBundleId());
+        dto.setRelatedWaitingReasonType(extractWaitingReasonType(source));
+        dto.setAttachmentRefs(source.getAttachmentRefs());
+        dto.setActionSchema(source.getActionSchema());
+        dto.setRelatedObjectRefs(source.getRelatedObjectRefs());
+        return dto;
+    }
+
+    private Map<String, Object> normalizeMessageContent(SessionMessageDto source) {
+        Map<String, Object> content = source.getContent() == null
+                ? new java.util.LinkedHashMap<>()
+                : new java.util.LinkedHashMap<>(source.getContent());
+
+        if (!hasText(asString(content.get("text")))) {
+            String derivedText = switch (safe(source.getMessageType())) {
+                case "progress_update" -> deriveProgressText(content);
+                case "waiting_notice", "clarification_request", "missing_input_request" -> nonBlank(
+                        asString(content.get("user_facing_phrasing")),
+                        nonBlank(asString(content.get("waiting_reason_type")), "The session is waiting for user input.")
+                );
+                case "result_summary" -> nonBlank(
+                        asString(content.get("summary")),
+                        nonBlank(asString(content.get("narrative")), "A governed result is ready.")
+                );
+                case "failure_explanation" -> nonBlank(
+                        asString(content.get("failure_message")),
+                        "The governed task failed during execution."
+                );
+                default -> null;
+            };
+            if (hasText(derivedText)) {
+                content.put("text", derivedText);
+            }
+        }
+
+        return content;
+    }
+
+    private String deriveProgressText(Map<String, Object> content) {
+        List<String> parts = new ArrayList<>();
+        if (hasText(asString(content.get("current_phase_label")))) {
+            parts.add("Phase: " + asString(content.get("current_phase_label")));
+        }
+        if (hasText(asString(content.get("current_system_action")))) {
+            parts.add("Action: " + asString(content.get("current_system_action")));
+        }
+        if (hasText(asString(content.get("latest_progress_note")))) {
+            parts.add("Progress: " + asString(content.get("latest_progress_note")));
+        }
+        if (hasText(asString(content.get("estimated_next_milestone")))) {
+            parts.add("Next: " + asString(content.get("estimated_next_milestone")));
+        }
+        return String.join("\n", parts);
+    }
+
+    private SessionMessageDTO findAcceptedMessage(SessionMessagesResponse response, String clientRequestId) {
+        List<SessionMessageDto> items = response.getItems();
+        for (int index = items.size() - 1; index >= 0; index -= 1) {
+            SessionMessageDto candidate = items.get(index);
+            if (!"user".equals(candidate.getRole()) || candidate.getContent() == null) {
+                continue;
+            }
+            if (Objects.equals(clientRequestId, asString(candidate.getContent().get("client_request_id")))) {
+                return toSceneMessage(candidate);
+            }
+        }
+        return null;
+    }
+
+    private String extractWaitingReasonType(SessionMessageDto source) {
+        if (source.getContent() == null) {
+            return null;
+        }
+        return nonBlank(
+                asString(source.getContent().get("waiting_reason_type")),
+                asString(source.getContent().get("why_blocked"))
+        );
+    }
+
+    private AnalysisSession requireCurrentSession(SceneProjectionContext context) {
+        if (context.getCurrentSession() == null) {
+            throw new ResponseStatusException(NOT_FOUND, "Scene has no current session");
+        }
+        return context.getCurrentSession();
+    }
+
+    private String asString(Object value) {
+        return value instanceof String text ? text : null;
     }
 
     private TaskDetailResponse loadTaskDetail(Long userId, TaskState task) {
