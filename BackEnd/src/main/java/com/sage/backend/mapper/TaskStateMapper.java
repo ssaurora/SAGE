@@ -7,6 +7,8 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
+import java.util.List;
+
 @Mapper
 public interface TaskStateMapper {
 
@@ -497,4 +499,61 @@ public interface TaskStateMapper {
             WHERE task_id = #{taskId}
             """)
     TaskState findByTaskId(@Param("taskId") String taskId);
+
+    @Select({
+            "<script>",
+            "SELECT task_id,",
+            "       session_id,",
+            "       user_id,",
+            "       current_state,",
+            "       state_version,",
+            "       user_query,",
+            "       pass1_result_json,",
+            "       goal_parse_json,",
+            "       skill_route_json,",
+            "       passb_result_json,",
+            "       slot_bindings_summary_json,",
+            "       args_draft_summary_json,",
+            "       validation_summary_json,",
+            "       input_chain_status,",
+            "       job_id,",
+            "       pass2_result_json,",
+            "       result_object_summary_json,",
+            "       result_bundle_summary_json,",
+            "       final_explanation_summary_json,",
+            "       last_failure_summary_json,",
+            "       waiting_context_json,",
+            "       waiting_reason_type,",
+            "       resume_payload_json,",
+            "       resume_txn_json,",
+            "       resume_attempt_count,",
+            "       active_attempt_no,",
+            "       active_manifest_id,",
+            "       active_manifest_version,",
+            "       planning_revision,",
+            "       checkpoint_version,",
+            "       inventory_version,",
+            "       cognition_verdict,",
+            "       corruption_reason,",
+            "       latest_result_bundle_id,",
+            "       latest_workspace_id,",
+            "       corrupted_since,",
+            "       waiting_since,",
+            "       created_at,",
+            "       updated_at",
+            "FROM task_state",
+            "WHERE user_id = #{userId}",
+            "  <if test='sessionIds != null and sessionIds.size() > 0'>",
+            "    AND session_id IN",
+            "    <foreach collection='sessionIds' item='sessionId' open='(' separator=',' close=')'>",
+            "      #{sessionId}",
+            "    </foreach>",
+            "  </if>",
+            "ORDER BY updated_at DESC, state_version DESC, task_id ASC",
+            "</script>"
+    })
+    List<TaskState> findByUserIdAndSessionIds(
+            @Param("userId") Long userId,
+            @Param("sessionIds") List<String> sessionIds
+    );
 }
