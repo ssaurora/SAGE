@@ -212,8 +212,8 @@ public class SceneProjectionService {
         SessionMessageDTO dto = new SessionMessageDTO();
         dto.setMessageId(source.getMessageId());
         dto.setSessionId(source.getSessionId());
-        dto.setRole(source.getRole());
-        dto.setMessageType(source.getMessageType());
+        dto.setRole(normalizeSceneMessageRole(source.getRole()));
+        dto.setMessageType(mapSceneMessageType(source));
         dto.setContent(normalizeMessageContent(source));
         dto.setCreatedAt(source.getCreatedAt());
         dto.setRelatedTaskId(source.getTaskId());
@@ -231,20 +231,27 @@ public class SceneProjectionService {
                 : new java.util.LinkedHashMap<>(source.getContent());
 
         if (!hasText(asString(content.get("text")))) {
-            String derivedText = switch (safe(source.getMessageType())) {
-                case "progress_update" -> deriveProgressText(content);
-                case "waiting_notice", "clarification_request", "missing_input_request" -> nonBlank(
-                        asString(content.get("user_facing_phrasing")),
-                        nonBlank(asString(content.get("waiting_reason_type")), "The session is waiting for user input.")
+            String derivedText = switch (mapSceneMessageType(source)) {
+                case "understanding" -> nonBlank(
+                        asString(content.get("text")),
+                        "SAGE acknowledged the current request and established the working understanding."
                 );
-                case "result_summary" -> nonBlank(
+                case "waiting_notice" -> nonBlank(
+                        asString(content.get("user_facing_phrasing")),
+                        nonBlank(
+                                asString(content.get("waiting_reason_type")),
+                                "The session is waiting for additional user input."
+                        )
+                );
+                case "result_notice" -> nonBlank(
                         asString(content.get("summary")),
                         nonBlank(asString(content.get("narrative")), "A governed result is ready.")
                 );
-                case "failure_explanation" -> nonBlank(
+                case "governance_note" -> nonBlank(
                         asString(content.get("failure_message")),
-                        "The governed task failed during execution."
+                        nonBlank(deriveProgressText(content), "SAGE recorded a governance update for this session.")
                 );
+                case "conversation" -> nonBlank(asString(content.get("text")), "A session message was recorded.");
                 default -> null;
             };
             if (hasText(derivedText)) {
@@ -253,6 +260,25 @@ public class SceneProjectionService {
         }
 
         return content;
+    }
+
+    private String mapSceneMessageType(SessionMessageDto source) {
+        return switch (safe(source.getMessageType())) {
+            case "assistant_understanding" -> "understanding";
+            case "waiting_notice", "clarification_request", "missing_input_request", "resume_notice", "upload_ack" -> "waiting_notice";
+            case "result_summary" -> "result_notice";
+            case "progress_update", "failure_explanation", "next_step_guidance", "system_note" -> "governance_note";
+            case "user_goal", "user_reply", "user_clarification_answer" -> "conversation";
+            default -> "conversation";
+        };
+    }
+
+    private String normalizeSceneMessageRole(String role) {
+        return switch (safe(role)) {
+            case "assistant" -> "assistant";
+            case "system" -> "system";
+            default -> "user";
+        };
     }
 
     private String deriveProgressText(Map<String, Object> content) {
