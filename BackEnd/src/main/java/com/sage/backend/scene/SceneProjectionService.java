@@ -76,8 +76,8 @@ public class SceneProjectionService {
         TaskDetailResponse currentTaskDetail = loadTaskDetail(userId, context.getCurrentTask());
         TaskAuditResponse currentTaskAudit = loadTaskAudit(userId, context.getCurrentTask());
         TaskEventsResponse currentTaskEvents = loadTaskEvents(userId, context.getCurrentTask());
-        TaskDetailResponse latestResultTaskDetail = loadLatestResultTaskDetail(userId, context, currentTaskDetail);
-        SceneResultSummaryDTO resultSummary = buildResultSummary(context, latestResultTaskDetail);
+        List<TaskDetailResponse> readyResultTaskDetails = loadReadyResultTaskDetails(userId, context, currentTaskDetail);
+        SceneResultSummaryDTO resultSummary = buildResultSummary(readyResultTaskDetails);
 
         SceneDetailDTO detail = new SceneDetailDTO();
         detail.setSceneId(context.getSceneId());
@@ -104,8 +104,8 @@ public class SceneProjectionService {
 
     private SceneSummaryDTO buildSceneSummary(Long userId, SceneProjectionContext context) {
         TaskDetailResponse currentTaskDetail = loadTaskDetail(userId, context.getCurrentTask());
-        TaskDetailResponse latestResultTaskDetail = loadLatestResultTaskDetail(userId, context, currentTaskDetail);
-        SceneResultSummaryDTO resultSummary = buildResultSummary(context, latestResultTaskDetail);
+        List<TaskDetailResponse> readyResultTaskDetails = loadReadyResultTaskDetails(userId, context, currentTaskDetail);
+        SceneResultSummaryDTO resultSummary = buildResultSummary(readyResultTaskDetails);
         String sceneStatus = resolveSceneStatus(context, resultSummary);
         SceneBlockingSummaryDTO blockingSummary = buildBlockingSummary(currentTaskDetail);
 
@@ -119,7 +119,7 @@ public class SceneProjectionService {
         summary.setTaskState(currentTaskDetail == null ? null : currentTaskDetail.getState());
         summary.setBlockingSummary(blockingSummary);
         summary.setResultSummary(resultSummary);
-        summary.setNeedsAttention(!"NONE".equals(blockingSummary.getBlockingType()));
+        summary.setNeedsAttention(resolveNeedsAttention(sceneStatus, blockingSummary));
         summary.setUpdatedAt(resolveUpdatedAt(context, resultSummary, null, null));
         summary.setActionRecommendation(buildActionRecommendation(sceneStatus, blockingSummary, resultSummary, currentTaskDetail));
         return summary;
@@ -161,22 +161,23 @@ public class SceneProjectionService {
         return task == null ? null : taskService.getEvents(task.getTaskId(), userId);
     }
 
-    private TaskDetailResponse loadLatestResultTaskDetail(Long userId, SceneProjectionContext context, TaskDetailResponse currentTaskDetail) {
-        TaskState latestResultTask = context.getTasks().stream()
-                .filter(task -> hasText(task.getLatestResultBundleId()))
-                .min(
-                        Comparator.comparing(TaskState::getUpdatedAt, Comparator.nullsLast(Comparator.reverseOrder()))
-                                .thenComparing(TaskState::getStateVersion, Comparator.nullsLast(Comparator.reverseOrder()))
-                                .thenComparing(TaskState::getTaskId, Comparator.nullsLast(String::compareTo))
-                )
-                .orElse(null);
-        if (latestResultTask == null) {
-            return null;
+    private List<TaskDetailResponse> loadReadyResultTaskDetails(Long userId, SceneProjectionContext context, TaskDetailResponse currentTaskDetail) {
+        List<TaskDetailResponse> readyCandidates = new ArrayList<>();
+        for (TaskState task : context.getTasks()) {
+            if (!hasText(task.getLatestResultBundleId()) || !TaskStatus.SUCCEEDED.name().equals(task.getCurrentState())) {
+                continue;
+            }
+            TaskDetailResponse detail;
+            if (currentTaskDetail != null && Objects.equals(currentTaskDetail.getTaskId(), task.getTaskId())) {
+                detail = currentTaskDetail;
+            } else {
+                detail = taskService.getTask(task.getTaskId(), userId);
+            }
+            if (isReadyResultDetail(detail)) {
+                readyCandidates.add(detail);
+            }
         }
-        if (currentTaskDetail != null && Objects.equals(currentTaskDetail.getTaskId(), latestResultTask.getTaskId())) {
-            return currentTaskDetail;
-        }
-        return taskService.getTask(latestResultTask.getTaskId(), userId);
+        return readyCandidates;
     }
 
     private SceneBlockingSummaryDTO buildBlockingSummary(TaskDetailResponse taskDetail) {
@@ -223,41 +224,46 @@ public class SceneProjectionService {
         return summary;
     }
 
-    private SceneResultSummaryDTO buildResultSummary(SceneProjectionContext context, TaskDetailResponse latestResultTaskDetail) {
+    private SceneResultSummaryDTO buildResultSummary(List<TaskDetailResponse> readyResultTaskDetails) {
         SceneResultSummaryDTO summary = new SceneResultSummaryDTO();
         LinkedHashSet<String> readyResultIds = new LinkedHashSet<>();
-        TaskState latestResultTask = null;
-        for (TaskState task : context.getTasks()) {
-            if (hasText(task.getLatestResultBundleId())) {
-                readyResultIds.add(task.getLatestResultBundleId());
-                if (latestResultTask == null || newerTask(task, latestResultTask)) {
-                    latestResultTask = task;
+        TaskDetailResponse latestReadyDetail = null;
+
+        // Scene-facing ready result is stricter than "latest_result_bundle_id exists".
+        // A task contributes to ready scene results only when it is SUCCEEDED,
+        // has a non-blank latest_result_bundle_id, and exposes either a result bundle
+        // summary or an available final explanation summary.
+        for (TaskDetailResponse detail : readyResultTaskDetails) {
+            if (hasText(detail.getLatestResultBundleId())) {
+                readyResultIds.add(detail.getLatestResultBundleId());
+                if (latestReadyDetail == null || newerReadyDetail(detail, latestReadyDetail)) {
+                    latestReadyDetail = detail;
                 }
             }
         }
 
         summary.setReadyResultCount(readyResultIds.size());
         summary.setHasReadyResult(!readyResultIds.isEmpty());
-        summary.setLatestResultBundleId(latestResultTask == null ? null : latestResultTask.getLatestResultBundleId());
+        summary.setLatestResultBundleId(latestReadyDetail == null ? null : latestReadyDetail.getLatestResultBundleId());
         summary.setFinalExplanationAvailable(false);
 
-        if (latestResultTaskDetail != null) {
-            if (latestResultTaskDetail.getResultBundleSummary() != null) {
-                summary.setLatestResultCreatedAt(latestResultTaskDetail.getResultBundleSummary().getCreatedAt());
-                summary.setResultSummaryText(latestResultTaskDetail.getResultBundleSummary().getSummary());
+        if (latestReadyDetail != null) {
+            if (latestReadyDetail.getResultBundleSummary() != null) {
+                summary.setLatestResultCreatedAt(latestReadyDetail.getResultBundleSummary().getCreatedAt());
+                summary.setResultSummaryText(latestReadyDetail.getResultBundleSummary().getSummary());
             }
-            if (!hasText(summary.getLatestResultCreatedAt()) && latestResultTaskDetail.getFinalExplanationSummary() != null) {
-                summary.setLatestResultCreatedAt(latestResultTaskDetail.getFinalExplanationSummary().getGeneratedAt());
+            if (!hasText(summary.getLatestResultCreatedAt()) && latestReadyDetail.getFinalExplanationSummary() != null) {
+                summary.setLatestResultCreatedAt(latestReadyDetail.getFinalExplanationSummary().getGeneratedAt());
             }
             summary.setFinalExplanationAvailable(
-                    latestResultTaskDetail.getFinalExplanationSummary() != null
-                            && Boolean.TRUE.equals(latestResultTaskDetail.getFinalExplanationSummary().getAvailable())
+                    latestReadyDetail.getFinalExplanationSummary() != null
+                            && Boolean.TRUE.equals(latestReadyDetail.getFinalExplanationSummary().getAvailable())
             );
-            if (!hasText(summary.getResultSummaryText()) && latestResultTaskDetail.getFinalExplanationSummary() != null) {
-                summary.setResultSummaryText(latestResultTaskDetail.getFinalExplanationSummary().getTitle());
+            if (!hasText(summary.getResultSummaryText()) && latestReadyDetail.getFinalExplanationSummary() != null) {
+                summary.setResultSummaryText(latestReadyDetail.getFinalExplanationSummary().getTitle());
             }
-            if (!hasText(summary.getLatestResultBundleId()) && hasText(latestResultTaskDetail.getLatestResultBundleId())) {
-                summary.setLatestResultBundleId(latestResultTaskDetail.getLatestResultBundleId());
+            if (!hasText(summary.getLatestResultBundleId()) && hasText(latestReadyDetail.getLatestResultBundleId())) {
+                summary.setLatestResultBundleId(latestReadyDetail.getLatestResultBundleId());
             }
         }
 
@@ -351,6 +357,11 @@ public class SceneProjectionService {
             };
         }
 
+        // The selected current task is the authority-bearing task for scene-facing status in v1.
+        // Multi-task scenes may contain older succeeded or failed tasks, but current scene entry
+        // state follows the selected current task rather than attempting to merge all task states.
+        // CANCELLED intentionally maps to ARCHIVED because the scene-facing contract does not expose
+        // CANCELLED as a top-level scene status in v1.x.
         return switch (safe(currentTask.getCurrentState())) {
             case "WAITING_USER" -> "WAITING_USER";
             case "RESUMING", "RUNNING", "RESULT_PROCESSING", "ARTIFACT_PROMOTING", "QUEUED", "VALIDATING", "PLANNING", "COGNIZING", "CREATED" -> "RUNNING";
@@ -359,6 +370,13 @@ public class SceneProjectionService {
             case "CANCELLED" -> "ARCHIVED";
             default -> "ACTIVE";
         };
+    }
+
+    private boolean resolveNeedsAttention(String sceneStatus, SceneBlockingSummaryDTO blockingSummary) {
+        if (blockingSummary != null && !"NONE".equals(blockingSummary.getBlockingType())) {
+            return true;
+        }
+        return "FAILED".equals(sceneStatus);
     }
 
     private String resolveUserGoalSummary(SceneProjectionContext context) {
@@ -479,18 +497,39 @@ public class SceneProjectionService {
         return "Open scene";
     }
 
-    private boolean newerTask(TaskState left, TaskState right) {
-        OffsetDateTime leftUpdated = left.getUpdatedAt();
-        OffsetDateTime rightUpdated = right.getUpdatedAt();
-        if (leftUpdated != null && rightUpdated != null && !leftUpdated.equals(rightUpdated)) {
-            return leftUpdated.isAfter(rightUpdated);
+    private boolean isReadyResultDetail(TaskDetailResponse detail) {
+        if (detail == null) {
+            return false;
         }
-        Integer leftVersion = left.getStateVersion();
-        Integer rightVersion = right.getStateVersion();
-        if (leftVersion != null && rightVersion != null && !leftVersion.equals(rightVersion)) {
-            return leftVersion > rightVersion;
+        if (!TaskStatus.SUCCEEDED.name().equals(detail.getState()) || !hasText(detail.getLatestResultBundleId())) {
+            return false;
         }
-        return safe(left.getTaskId()).compareTo(safe(right.getTaskId())) < 0;
+        return detail.getResultBundleSummary() != null
+                || (detail.getFinalExplanationSummary() != null && Boolean.TRUE.equals(detail.getFinalExplanationSummary().getAvailable()));
+    }
+
+    private boolean newerReadyDetail(TaskDetailResponse left, TaskDetailResponse right) {
+        OffsetDateTime leftTime = resolveReadyResultTime(left);
+        OffsetDateTime rightTime = resolveReadyResultTime(right);
+        if (leftTime != null && rightTime != null && !leftTime.equals(rightTime)) {
+            return leftTime.isAfter(rightTime);
+        }
+        if (leftTime != null && rightTime == null) {
+            return true;
+        }
+        if (leftTime == null && rightTime != null) {
+            return false;
+        }
+        return safe(left.getLatestResultBundleId()).compareTo(safe(right.getLatestResultBundleId())) < 0;
+    }
+
+    private OffsetDateTime resolveReadyResultTime(TaskDetailResponse detail) {
+        if (detail == null) {
+            return null;
+        }
+        OffsetDateTime resultBundleTime = detail.getResultBundleSummary() == null ? null : parseTime(detail.getResultBundleSummary().getCreatedAt());
+        OffsetDateTime finalExplanationTime = detail.getFinalExplanationSummary() == null ? null : parseTime(detail.getFinalExplanationSummary().getGeneratedAt());
+        return max(resultBundleTime, finalExplanationTime);
     }
 
     private OffsetDateTime max(OffsetDateTime left, OffsetDateTime right) {
