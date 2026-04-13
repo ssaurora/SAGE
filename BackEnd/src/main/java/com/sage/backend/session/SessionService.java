@@ -10,14 +10,22 @@ import com.sage.backend.model.SessionMessage;
 import com.sage.backend.model.TaskState;
 import com.sage.backend.model.TaskStatus;
 import com.sage.backend.session.dto.AnalysisSessionResponse;
+import com.sage.backend.session.dto.CurrentRequiredUserActionDto;
+import com.sage.backend.session.dto.CurrentTaskSummaryDto;
 import com.sage.backend.session.dto.CreateSessionRequest;
 import com.sage.backend.session.dto.CreateSessionResponse;
 import com.sage.backend.session.dto.PostSessionMessageRequest;
+import com.sage.backend.session.dto.ResultConversationProjectionDto;
 import com.sage.backend.session.dto.SessionListResponse;
+import com.sage.backend.session.dto.SessionListItemDto;
+import com.sage.backend.session.dto.SessionListSummaryProjectionDto;
 import com.sage.backend.session.dto.SessionMessageDto;
 import com.sage.backend.session.dto.SessionMessagesResponse;
+import com.sage.backend.session.dto.SessionContextSummaryDto;
+import com.sage.backend.session.dto.SessionProgressProjectionDto;
 import com.sage.backend.session.dto.SessionStreamResponse;
 import com.sage.backend.session.dto.UploadSessionAttachmentResponse;
+import com.sage.backend.session.dto.WaitingForUserProjectionDto;
 import com.sage.backend.task.TaskService;
 import com.sage.backend.task.dto.CreateTaskRequest;
 import com.sage.backend.task.dto.ResumeTaskRequest;
@@ -98,7 +106,7 @@ public class SessionService {
             response.getItems().add(toListItem(session));
         }
 
-        SessionListResponse.SessionListSummaryProjection summary = new SessionListResponse.SessionListSummaryProjection();
+        SessionListSummaryProjectionDto summary = new SessionListSummaryProjectionDto();
         summary.setTotalSessions(sessions.size());
         summary.setNeedsActionCount((int) sessions.stream().filter(session -> "WAITING_USER".equals(session.getStatus())).count());
         summary.setRunningCount((int) sessions.stream().filter(session -> "RUNNING".equals(session.getStatus())).count());
@@ -122,8 +130,8 @@ public class SessionService {
         response.setLatestResultBundleId(session.getLatestResultBundleId());
         response.setCreatedAt(toIsoString(session.getCreatedAt()));
         response.setUpdatedAt(toIsoString(session.getUpdatedAt()));
-        response.setCurrentRequiredUserAction(readMap(session.getCurrentRequiredUserActionJson()));
-        response.setSessionContextSummary(readMap(session.getSessionSummaryJson()));
+        response.setCurrentRequiredUserAction(readTyped(session.getCurrentRequiredUserActionJson(), CurrentRequiredUserActionDto.class));
+        response.setSessionContextSummary(readTyped(session.getSessionSummaryJson(), SessionContextSummaryDto.class));
 
         if (currentTask != null) {
             TaskDetailResponse taskDetail = taskService.getTask(currentTask.getTaskId(), userId);
@@ -269,8 +277,8 @@ public class SessionService {
         return taskStateMapper.findByTaskId(session.getCurrentTaskId());
     }
 
-    private SessionListResponse.SessionListItem toListItem(AnalysisSession session) {
-        SessionListResponse.SessionListItem item = new SessionListResponse.SessionListItem();
+    private SessionListItemDto toListItem(AnalysisSession session) {
+        SessionListItemDto item = new SessionListItemDto();
         item.setSessionId(session.getSessionId());
         item.setTitle(session.getTitle());
         item.setUserGoal(session.getUserGoal());
@@ -278,7 +286,7 @@ public class SessionService {
         item.setSceneId(session.getSceneId());
         item.setCurrentTaskId(session.getCurrentTaskId());
         item.setLatestResultBundleId(session.getLatestResultBundleId());
-        item.setSessionSummary(readMap(session.getSessionSummaryJson()));
+        item.setSessionSummary(readTyped(session.getSessionSummaryJson(), SessionContextSummaryDto.class));
         item.setCreatedAt(toIsoString(session.getCreatedAt()));
         item.setUpdatedAt(toIsoString(session.getUpdatedAt()));
         return item;
@@ -320,47 +328,47 @@ public class SessionService {
         return created;
     }
 
-    private Map<String, Object> buildCurrentTaskSummary(TaskDetailResponse taskDetail) {
-        Map<String, Object> summary = new LinkedHashMap<>();
-        summary.put("task_id", taskDetail.getTaskId());
-        summary.put("task_state", taskDetail.getState());
-        summary.put("state_version", taskDetail.getStateVersion());
-        summary.put("planning_revision", taskDetail.getPlanningRevision());
-        summary.put("checkpoint_version", taskDetail.getCheckpointVersion());
-        summary.put("promotion_status", taskDetail.getPromotionStatus());
-        summary.put("cognition_verdict", taskDetail.getCognitionVerdict());
-        summary.put("latest_result_bundle_id", taskDetail.getLatestResultBundleId());
+    private CurrentTaskSummaryDto buildCurrentTaskSummary(TaskDetailResponse taskDetail) {
+        CurrentTaskSummaryDto summary = new CurrentTaskSummaryDto();
+        summary.setTaskId(taskDetail.getTaskId());
+        summary.setTaskState(taskDetail.getState());
+        summary.setStateVersion(taskDetail.getStateVersion());
+        summary.setPlanningRevision(taskDetail.getPlanningRevision());
+        summary.setCheckpointVersion(taskDetail.getCheckpointVersion());
+        summary.setPromotionStatus(taskDetail.getPromotionStatus());
+        summary.setCognitionVerdict(taskDetail.getCognitionVerdict());
+        summary.setLatestResultBundleId(taskDetail.getLatestResultBundleId());
         return summary;
     }
 
-    private Map<String, Object> buildProgressProjection(TaskDetailResponse taskDetail) {
-        Map<String, Object> projection = new LinkedHashMap<>();
-        projection.put("current_phase_label", taskDetail.getState());
-        projection.put("current_system_action", describeTaskState(taskDetail.getState()));
-        projection.put("latest_progress_note", taskDetail.getState() + " is the current governed phase.");
-        projection.put("estimated_next_milestone", estimateNextMilestone(taskDetail.getState()));
-        projection.put("related_task_id", taskDetail.getTaskId());
-        projection.put("related_result_bundle_id", taskDetail.getLatestResultBundleId());
+    private SessionProgressProjectionDto buildProgressProjection(TaskDetailResponse taskDetail) {
+        SessionProgressProjectionDto projection = new SessionProgressProjectionDto();
+        projection.setCurrentPhaseLabel(taskDetail.getState());
+        projection.setCurrentSystemAction(describeTaskState(taskDetail.getState()));
+        projection.setLatestProgressNote(taskDetail.getState() + " is the current governed phase.");
+        projection.setEstimatedNextMilestone(estimateNextMilestone(taskDetail.getState()));
+        projection.setRelatedTaskId(taskDetail.getTaskId());
+        projection.setRelatedResultBundleId(taskDetail.getLatestResultBundleId());
         return projection;
     }
 
-    private Map<String, Object> buildWaitingProjection(TaskDetailResponse taskDetail) {
+    private WaitingForUserProjectionDto buildWaitingProjection(TaskDetailResponse taskDetail) {
         if (taskDetail.getWaitingContext() == null) {
             return null;
         }
-        Map<String, Object> root = objectMapper.convertValue(taskDetail.getWaitingContext(), new TypeReference<>() {});
-        root.put("why_blocked", taskDetail.getWaitingContext().getWaitingReasonType());
-        root.put("user_facing_phrasing", "The system is blocked on additional input before governed execution can continue.");
+        WaitingForUserProjectionDto root = objectMapper.convertValue(taskDetail.getWaitingContext(), WaitingForUserProjectionDto.class);
+        root.setWhyBlocked(taskDetail.getWaitingContext().getWaitingReasonType());
+        root.setUserFacingPhrasing("The system is blocked on additional input before governed execution can continue.");
         return root;
     }
 
-    private Map<String, Object> buildLatestResultSummary(TaskResultResponse taskResult) {
-        Map<String, Object> summary = new LinkedHashMap<>();
-        summary.put("task_id", taskResult.getTaskId());
-        summary.put("task_state", taskResult.getTaskState());
-        summary.put("result_bundle", objectMapper.convertValue(taskResult.getResultBundle(), new TypeReference<Map<String, Object>>() {}));
-        summary.put("final_explanation", objectMapper.convertValue(taskResult.getFinalExplanation(), new TypeReference<Map<String, Object>>() {}));
-        summary.put("latest_result_bundle_id", taskResult.getResultBundle() == null ? null : taskResult.getResultBundle().getResultId());
+    private ResultConversationProjectionDto buildLatestResultSummary(TaskResultResponse taskResult) {
+        ResultConversationProjectionDto summary = new ResultConversationProjectionDto();
+        summary.setTaskId(taskResult.getTaskId());
+        summary.setTaskState(taskResult.getTaskState());
+        summary.setResultBundle(taskResult.getResultBundle());
+        summary.setFinalExplanation(taskResult.getFinalExplanation());
+        summary.setLatestResultBundleId(taskResult.getResultBundle() == null ? null : taskResult.getResultBundle().getResultId());
         return summary;
     }
 
@@ -448,6 +456,17 @@ public class SessionService {
             Map<String, Object> fallback = new LinkedHashMap<>();
             fallback.put("raw", sourceJson);
             return fallback;
+        }
+    }
+
+    private <T> T readTyped(String sourceJson, Class<T> type) {
+        if (sourceJson == null || sourceJson.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(sourceJson, type);
+        } catch (Exception exception) {
+            return null;
         }
     }
 

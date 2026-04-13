@@ -2,21 +2,19 @@ package com.sage.backend.session.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.util.Map;
-
 public class SessionStreamResponse {
     private AnalysisSessionResponse session;
 
     private SessionMessagesResponse messages;
 
     @JsonProperty("progress_projection")
-    private Map<String, Object> progressProjection;
+    private SessionProgressProjectionDto progressProjection;
 
     @JsonProperty("waiting_projection")
-    private Map<String, Object> waitingProjection;
+    private WaitingForUserProjectionDto waitingProjection;
 
     @JsonProperty("latest_result_summary")
-    private Map<String, Object> latestResultSummary;
+    private ResultConversationProjectionDto latestResultSummary;
 
     public AnalysisSessionResponse getSession() {
         return session;
@@ -34,27 +32,27 @@ public class SessionStreamResponse {
         this.messages = messages;
     }
 
-    public Map<String, Object> getProgressProjection() {
+    public SessionProgressProjectionDto getProgressProjection() {
         return progressProjection;
     }
 
-    public void setProgressProjection(Map<String, Object> progressProjection) {
+    public void setProgressProjection(SessionProgressProjectionDto progressProjection) {
         this.progressProjection = progressProjection;
     }
 
-    public Map<String, Object> getWaitingProjection() {
+    public WaitingForUserProjectionDto getWaitingProjection() {
         return waitingProjection;
     }
 
-    public void setWaitingProjection(Map<String, Object> waitingProjection) {
+    public void setWaitingProjection(WaitingForUserProjectionDto waitingProjection) {
         this.waitingProjection = waitingProjection;
     }
 
-    public Map<String, Object> getLatestResultSummary() {
+    public ResultConversationProjectionDto getLatestResultSummary() {
         return latestResultSummary;
     }
 
-    public void setLatestResultSummary(Map<String, Object> latestResultSummary) {
+    public void setLatestResultSummary(ResultConversationProjectionDto latestResultSummary) {
         this.latestResultSummary = latestResultSummary;
     }
 }

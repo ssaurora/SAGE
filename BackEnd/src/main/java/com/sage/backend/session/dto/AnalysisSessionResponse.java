@@ -2,8 +2,6 @@ package com.sage.backend.session.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.util.Map;
-
 public class AnalysisSessionResponse {
     @JsonProperty("session_id")
     private String sessionId;
@@ -31,22 +29,22 @@ public class AnalysisSessionResponse {
     private String updatedAt;
 
     @JsonProperty("current_required_user_action")
-    private Map<String, Object> currentRequiredUserAction;
+    private CurrentRequiredUserActionDto currentRequiredUserAction;
 
     @JsonProperty("session_context_summary")
-    private Map<String, Object> sessionContextSummary;
+    private SessionContextSummaryDto sessionContextSummary;
 
     @JsonProperty("current_task_summary")
-    private Map<String, Object> currentTaskSummary;
+    private CurrentTaskSummaryDto currentTaskSummary;
 
     @JsonProperty("latest_result_summary")
-    private Map<String, Object> latestResultSummary;
+    private ResultConversationProjectionDto latestResultSummary;
 
     @JsonProperty("progress_projection")
-    private Map<String, Object> progressProjection;
+    private SessionProgressProjectionDto progressProjection;
 
     @JsonProperty("waiting_projection")
-    private Map<String, Object> waitingProjection;
+    private WaitingForUserProjectionDto waitingProjection;
 
     public String getSessionId() {
         return sessionId;
@@ -120,51 +118,51 @@ public class AnalysisSessionResponse {
         this.updatedAt = updatedAt;
     }
 
-    public Map<String, Object> getCurrentRequiredUserAction() {
+    public CurrentRequiredUserActionDto getCurrentRequiredUserAction() {
         return currentRequiredUserAction;
     }
 
-    public void setCurrentRequiredUserAction(Map<String, Object> currentRequiredUserAction) {
+    public void setCurrentRequiredUserAction(CurrentRequiredUserActionDto currentRequiredUserAction) {
         this.currentRequiredUserAction = currentRequiredUserAction;
     }
 
-    public Map<String, Object> getSessionContextSummary() {
+    public SessionContextSummaryDto getSessionContextSummary() {
         return sessionContextSummary;
     }
 
-    public void setSessionContextSummary(Map<String, Object> sessionContextSummary) {
+    public void setSessionContextSummary(SessionContextSummaryDto sessionContextSummary) {
         this.sessionContextSummary = sessionContextSummary;
     }
 
-    public Map<String, Object> getCurrentTaskSummary() {
+    public CurrentTaskSummaryDto getCurrentTaskSummary() {
         return currentTaskSummary;
     }
 
-    public void setCurrentTaskSummary(Map<String, Object> currentTaskSummary) {
+    public void setCurrentTaskSummary(CurrentTaskSummaryDto currentTaskSummary) {
         this.currentTaskSummary = currentTaskSummary;
     }
 
-    public Map<String, Object> getLatestResultSummary() {
+    public ResultConversationProjectionDto getLatestResultSummary() {
         return latestResultSummary;
     }
 
-    public void setLatestResultSummary(Map<String, Object> latestResultSummary) {
+    public void setLatestResultSummary(ResultConversationProjectionDto latestResultSummary) {
         this.latestResultSummary = latestResultSummary;
     }
 
-    public Map<String, Object> getProgressProjection() {
+    public SessionProgressProjectionDto getProgressProjection() {
         return progressProjection;
     }
 
-    public void setProgressProjection(Map<String, Object> progressProjection) {
+    public void setProgressProjection(SessionProgressProjectionDto progressProjection) {
         this.progressProjection = progressProjection;
     }
 
-    public Map<String, Object> getWaitingProjection() {
+    public WaitingForUserProjectionDto getWaitingProjection() {
         return waitingProjection;
     }
 
-    public void setWaitingProjection(Map<String, Object> waitingProjection) {
+    public void setWaitingProjection(WaitingForUserProjectionDto waitingProjection) {
         this.waitingProjection = waitingProjection;
     }
 }
