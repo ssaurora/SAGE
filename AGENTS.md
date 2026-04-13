@@ -153,6 +153,7 @@ When aligning with `sage-web`, assume:
 - projections bridge the two
 
 Do not force the frontend to reconstruct scene semantics from scattered task APIs.
+Do not let scene pages in `sage-web` bind long-term to raw `/tasks/{taskId}` detail DTOs as their primary product contract.
 
 ### 2. Prefer additive backend support over frontend invention
 
