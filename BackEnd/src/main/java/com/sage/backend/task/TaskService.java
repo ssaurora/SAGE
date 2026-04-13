@@ -84,6 +84,7 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -150,6 +151,7 @@ public class TaskService {
     private final Path uploadRoot;
     private final ExecutorService streamExecutor = Executors.newCachedThreadPool();
 
+    @Autowired
     public TaskService(
             TaskStateMapper taskStateMapper,
             AnalysisManifestMapper analysisManifestMapper,

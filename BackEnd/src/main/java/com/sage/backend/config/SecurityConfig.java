@@ -26,7 +26,7 @@ public class SecurityConfig {
 
     public SecurityConfig(
             JwtAuthenticationFilter jwtAuthenticationFilter,
-            @Value("${sage.cors.allowed-origins:http://localhost:3000,http://127.0.0.1:3000,http://localhost:3100,http://127.0.0.1:3100,http://localhost:3301,http://127.0.0.1:3301}")
+            @Value("${sage.cors.allowed-origins:http://localhost:3000,http://127.0.0.1:3000,http://localhost:3100,http://127.0.0.1:3100,http://localhost:3301,http://127.0.0.1:3301,http://localhost:5173,http://127.0.0.1:5173}")
             String allowedOrigins
     ) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
