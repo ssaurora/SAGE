@@ -14,6 +14,9 @@ public class SessionMessagesResponseDTO {
     @JsonProperty("next_cursor")
     private String nextCursor;
 
+    @JsonProperty("developer_trace_support_data")
+    private DeveloperTraceSupportDataDTO developerTraceSupportData;
+
     public String getSessionId() {
         return sessionId;
     }
@@ -32,5 +35,13 @@ public class SessionMessagesResponseDTO {
 
     public void setNextCursor(String nextCursor) {
         this.nextCursor = nextCursor;
+    }
+
+    public DeveloperTraceSupportDataDTO getDeveloperTraceSupportData() {
+        return developerTraceSupportData;
+    }
+
+    public void setDeveloperTraceSupportData(DeveloperTraceSupportDataDTO developerTraceSupportData) {
+        this.developerTraceSupportData = developerTraceSupportData;
     }
 }

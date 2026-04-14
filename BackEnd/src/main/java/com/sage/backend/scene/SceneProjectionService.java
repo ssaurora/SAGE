@@ -121,7 +121,10 @@ public class SceneProjectionService {
     public SessionMessagesResponseDTO getSceneSessionMessages(Long userId, String sceneId) {
         SceneProjectionContext context = sceneProjectionQueryService.loadSceneContext(userId, sceneId);
         AnalysisSession currentSession = requireCurrentSession(context);
-        return toSceneMessagesResponse(sessionService.getMessages(userId, currentSession.getSessionId()));
+        return toSceneMessagesResponse(
+                sessionService.getMessages(userId, currentSession.getSessionId()),
+                demoSceneSessionSimulationService.buildDeveloperTraceSupportData(currentSession)
+        );
     }
 
     public PostSceneSessionMessageResponse postSceneSessionMessage(Long userId, String sceneId, PostSceneSessionMessageRequest request) {
@@ -136,8 +139,8 @@ public class SceneProjectionService {
         delegate.setArgsOverrides(request.getArgsOverrides());
 
         AnalysisSessionResponse updatedSession;
-        if (demoSceneSessionSimulationService.shouldSimulate(sceneId, currentSession)) {
-            demoSceneSessionSimulationService.simulateFirstTurn(currentSession, request);
+        if (demoSceneSessionSimulationService.isDemoLiveSimulationSession(sceneId, currentSession)) {
+            demoSceneSessionSimulationService.handleDemoLiveSimulationPost(currentSession, request);
             updatedSession = sessionService.getSession(userId, currentSession.getSessionId());
         } else {
             updatedSession = sessionService.postMessage(userId, currentSession.getSessionId(), delegate);
@@ -207,10 +210,14 @@ public class SceneProjectionService {
         return projection;
     }
 
-    private SessionMessagesResponseDTO toSceneMessagesResponse(SessionMessagesResponse response) {
+    private SessionMessagesResponseDTO toSceneMessagesResponse(
+            SessionMessagesResponse response,
+            com.sage.backend.scene.dto.DeveloperTraceSupportDataDTO developerTraceSupportData
+    ) {
         SessionMessagesResponseDTO dto = new SessionMessagesResponseDTO();
         dto.setSessionId(response.getSessionId());
         dto.setNextCursor(null);
+        dto.setDeveloperTraceSupportData(developerTraceSupportData);
         for (SessionMessageDto item : response.getItems()) {
             dto.getItems().addAll(toSceneMessages(item));
         }
