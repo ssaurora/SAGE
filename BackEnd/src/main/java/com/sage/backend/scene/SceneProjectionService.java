@@ -1,4 +1,4 @@
-﻿package com.sage.backend.scene;
+package com.sage.backend.scene;
 
 import com.sage.backend.model.AnalysisSession;
 import com.sage.backend.model.TaskState;
@@ -48,15 +48,18 @@ public class SceneProjectionService {
     private final SceneProjectionQueryService sceneProjectionQueryService;
     private final SessionService sessionService;
     private final TaskService taskService;
+    private final DemoSceneSessionSimulationService demoSceneSessionSimulationService;
 
     public SceneProjectionService(
             SceneProjectionQueryService sceneProjectionQueryService,
             SessionService sessionService,
-            TaskService taskService
+            TaskService taskService,
+            DemoSceneSessionSimulationService demoSceneSessionSimulationService
     ) {
         this.sceneProjectionQueryService = sceneProjectionQueryService;
         this.sessionService = sessionService;
         this.taskService = taskService;
+        this.demoSceneSessionSimulationService = demoSceneSessionSimulationService;
     }
 
     public SceneListResponse getScenes(Long userId, String status, String query, Integer limit) {
@@ -132,7 +135,13 @@ public class SceneProjectionService {
         delegate.setSlotOverrides(request.getSlotOverrides());
         delegate.setArgsOverrides(request.getArgsOverrides());
 
-        AnalysisSessionResponse updatedSession = sessionService.postMessage(userId, currentSession.getSessionId(), delegate);
+        AnalysisSessionResponse updatedSession;
+        if (demoSceneSessionSimulationService.shouldSimulate(sceneId, currentSession)) {
+            demoSceneSessionSimulationService.simulateFirstTurn(currentSession, request);
+            updatedSession = sessionService.getSession(userId, currentSession.getSessionId());
+        } else {
+            updatedSession = sessionService.postMessage(userId, currentSession.getSessionId(), delegate);
+        }
         SessionMessagesResponse updatedMessages = sessionService.getMessages(userId, currentSession.getSessionId());
 
         PostSceneSessionMessageResponse response = new PostSceneSessionMessageResponse();
@@ -443,7 +452,8 @@ public class SceneProjectionService {
                 continue;
             }
             if (Objects.equals(clientRequestId, asString(candidate.getContent().get("client_request_id")))) {
-                return buildSceneMessage(candidate, "user", "conversation", "main_conversation", "follow_up", normalizeConversationContent(candidate), false, null);
+                String stage = "user_goal".equals(safe(candidate.getMessageType())) ? "goal_parse" : "follow_up";
+                return buildSceneMessage(candidate, "user", "conversation", "main_conversation", stage, normalizeConversationContent(candidate), false, null);
             }
         }
         return null;

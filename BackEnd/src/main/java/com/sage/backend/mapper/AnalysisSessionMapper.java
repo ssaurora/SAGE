@@ -151,4 +151,17 @@ public interface AnalysisSessionMapper {
             @Param("currentRequiredUserActionJson") String currentRequiredUserActionJson,
             @Param("sessionSummaryJson") String sessionSummaryJson
     );
+
+    @Update("""
+            UPDATE analysis_session
+            SET title = COALESCE(#{title}, title),
+                user_goal = COALESCE(#{userGoal}, user_goal),
+                updated_at = NOW()
+            WHERE session_id = #{sessionId}
+            """)
+    int updateTitleAndUserGoal(
+            @Param("sessionId") String sessionId,
+            @Param("title") String title,
+            @Param("userGoal") String userGoal
+    );
 }
