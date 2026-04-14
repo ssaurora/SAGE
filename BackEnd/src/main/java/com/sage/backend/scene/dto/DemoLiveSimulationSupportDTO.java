@@ -34,6 +34,8 @@ public class DemoLiveSimulationSupportDTO {
     @JsonProperty("demo_reset_required")
     private Boolean demoResetRequired;
 
+    private final List<DemoTraceStageDTO> stages = new ArrayList<>();
+
     public String getDemoRunScope() {
         return demoRunScope;
     }
@@ -100,5 +102,9 @@ public class DemoLiveSimulationSupportDTO {
 
     public void setDemoResetRequired(Boolean demoResetRequired) {
         this.demoResetRequired = demoResetRequired;
+    }
+
+    public List<DemoTraceStageDTO> getStages() {
+        return stages;
     }
 }

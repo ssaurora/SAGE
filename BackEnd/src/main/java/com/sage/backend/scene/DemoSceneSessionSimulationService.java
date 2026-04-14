@@ -12,6 +12,7 @@ import com.sage.backend.model.AnalysisSession;
 import com.sage.backend.model.SessionMessage;
 import com.sage.backend.model.SessionStatus;
 import com.sage.backend.scene.dto.DemoLiveSimulationSupportDTO;
+import com.sage.backend.scene.dto.DemoTraceStageDTO;
 import com.sage.backend.scene.dto.DeveloperTraceSupportDataDTO;
 import com.sage.backend.scene.dto.PostSceneSessionMessageRequest;
 import org.springframework.stereotype.Service;
@@ -22,8 +23,10 @@ import org.springframework.web.server.ResponseStatusException;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -53,6 +56,11 @@ public class DemoSceneSessionSimulationService {
     private static final String DEMO_STEP_FOLLOW_UP_INVITATION_EMITTED = "demo_follow_up_invitation_emitted";
     private static final String DEMO_STEP_COMPLETED = "demo_completed";
     private static final String DEMO_STEP_RUN_STATE_UNAVAILABLE = "demo_run_state_unavailable";
+
+    private static final String DEMO_TRACE_AUTHORITY_BACKED = "authority_backed";
+    private static final String DEMO_TRACE_DEMO_ORCHESTRATED = "demo_orchestrated";
+    private static final String DEMO_TRACE_DERIVED_SUMMARY = "derived_summary";
+    private static final String DEMO_TRACE_UNSUPPORTED = "unsupported";
 
     private static final long DEMO_ASSISTANT_UNDERSTANDING_DELAY_MS = 1100L;
     private static final long DEMO_PREPARED_VALIDATED_SUBMITTED_DELAY_MS = 1800L;
@@ -158,11 +166,13 @@ public class DemoSceneSessionSimulationService {
     private DemoLiveSimulationSupportDTO buildDemoLiveSimulationSupport(AnalysisSession currentSession) {
         DemoLiveSimulationSupportDTO support = new DemoLiveSimulationSupportDTO();
         support.setDemoRunScope(DEMO_RUN_SCOPE);
+        List<SessionMessage> demoMessages = sessionMessageMapper.findBySessionId(currentSession.getSessionId());
 
         DemoLiveSimulationRunState demoRunState = demoLiveSimulationRuns.get(currentSession.getSessionId());
         if (demoRunState != null) {
             demoRunState.copyInto(support);
             support.setDemoResetRequired(SessionStatus.READY_RESULT.name().equals(currentSession.getStatus()));
+            support.getStages().addAll(DemoLiveSimulationTraceStageFactory.build(currentSession, demoMessages, support, objectMapper));
             return support;
         }
 
@@ -176,16 +186,19 @@ public class DemoSceneSessionSimulationService {
         if (SessionStatus.READY_RESULT.name().equals(currentSession.getStatus())) {
             support.setDemoCurrentStep(DEMO_STEP_COMPLETED);
             support.getDemoCompletedSteps().addAll(allDemoCompletedSteps());
+            support.getStages().addAll(DemoLiveSimulationTraceStageFactory.build(currentSession, demoMessages, support, objectMapper));
             return support;
         }
 
-        if (sessionMessageMapper.findBySessionId(currentSession.getSessionId()).isEmpty()) {
+        if (demoMessages.isEmpty()) {
             support.setDemoCurrentStep(DEMO_STEP_IDLE);
+            support.getStages().addAll(DemoLiveSimulationTraceStageFactory.build(currentSession, demoMessages, support, objectMapper));
             return support;
         }
 
         support.setDemoCurrentStep(DEMO_STEP_RUN_STATE_UNAVAILABLE);
         support.getDemoCompletedSteps().add(DEMO_STEP_USER_GOAL_ACCEPTED);
+        support.getStages().addAll(DemoLiveSimulationTraceStageFactory.build(currentSession, demoMessages, support, objectMapper));
         return support;
     }
 
