@@ -16,6 +16,10 @@ public class SessionMessageDTO {
     @JsonProperty("message_type")
     private String messageType;
 
+    private String surface;
+
+    private String stage;
+
     private Map<String, Object> content;
 
     @JsonProperty("created_at")
@@ -29,6 +33,12 @@ public class SessionMessageDTO {
 
     @JsonProperty("related_waiting_reason_type")
     private String relatedWaitingReasonType;
+
+    @JsonProperty("primary_explanation")
+    private Boolean primaryExplanation;
+
+    @JsonProperty("developer_trace")
+    private Map<String, Object> developerTrace;
 
     @JsonProperty("attachment_refs")
     private Map<String, Object> attachmentRefs;
@@ -71,6 +81,22 @@ public class SessionMessageDTO {
         this.messageType = messageType;
     }
 
+    public String getSurface() {
+        return surface;
+    }
+
+    public void setSurface(String surface) {
+        this.surface = surface;
+    }
+
+    public String getStage() {
+        return stage;
+    }
+
+    public void setStage(String stage) {
+        this.stage = stage;
+    }
+
     public Map<String, Object> getContent() {
         return content;
     }
@@ -109,6 +135,22 @@ public class SessionMessageDTO {
 
     public void setRelatedWaitingReasonType(String relatedWaitingReasonType) {
         this.relatedWaitingReasonType = relatedWaitingReasonType;
+    }
+
+    public Boolean getPrimaryExplanation() {
+        return primaryExplanation;
+    }
+
+    public void setPrimaryExplanation(Boolean primaryExplanation) {
+        this.primaryExplanation = primaryExplanation;
+    }
+
+    public Map<String, Object> getDeveloperTrace() {
+        return developerTrace;
+    }
+
+    public void setDeveloperTrace(Map<String, Object> developerTrace) {
+        this.developerTrace = developerTrace;
     }
 
     public Map<String, Object> getAttachmentRefs() {

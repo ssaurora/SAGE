@@ -1,4 +1,4 @@
-package com.sage.backend.scene;
+﻿package com.sage.backend.scene;
 
 import com.sage.backend.model.AnalysisSession;
 import com.sage.backend.model.TaskState;
@@ -203,74 +203,228 @@ public class SceneProjectionService {
         dto.setSessionId(response.getSessionId());
         dto.setNextCursor(null);
         for (SessionMessageDto item : response.getItems()) {
-            dto.getItems().add(toSceneMessage(item));
+            dto.getItems().addAll(toSceneMessages(item));
         }
         return dto;
     }
 
-    private SessionMessageDTO toSceneMessage(SessionMessageDto source) {
+    private List<SessionMessageDTO> toSceneMessages(SessionMessageDto source) {
+        List<SessionMessageDTO> mapped = new ArrayList<>();
+        String rawType = safe(source.getMessageType());
+        switch (rawType) {
+            case "user_goal" ->
+                    mapped.add(buildSceneMessage(source, normalizeSceneMessageRole(source.getRole()), "conversation", "main_conversation", "goal_parse", normalizeConversationContent(source), false, null));
+            case "user_reply", "user_clarification_answer" ->
+                    mapped.add(buildSceneMessage(source, "user", "conversation", "main_conversation", "follow_up", normalizeConversationContent(source), false, null));
+            case "assistant_understanding" -> {
+                mapped.add(buildSceneMessage(source, "assistant", "understanding", "main_conversation", "goal_parse_skill_route", buildUnderstandingContent(source), false, null));
+                mapped.add(buildTraceMessage(source, "goal_parse_skill_route"));
+            }
+            case "progress_update" -> {
+                mapped.add(buildSceneMessage(source, "assistant", "governance_note", "main_conversation", "validate_submit", buildPreparedAndSubmittedContent(source), false, null));
+                mapped.add(buildTraceMessage(source, "execution"));
+            }
+            case "result_summary" -> {
+                mapped.add(buildSceneMessage(source, "system", "result_notice", "main_conversation", "result_ready", buildResultReadyContent(source), false, null));
+                mapped.add(buildSceneMessage(source, "assistant", "result_notice", "main_conversation", "skill_grounded_explanation", buildExplanationContent(source), true, null));
+                mapped.add(buildTraceMessage(source, "result_extract_summarize"));
+            }
+            case "next_step_guidance" ->
+                    mapped.add(buildSceneMessage(source, "assistant", "conversation", "main_conversation", "final_response", buildFollowUpInvitationContent(source), false, null));
+            case "waiting_notice", "clarification_request", "missing_input_request" -> {
+                mapped.add(buildSceneMessage(source, "assistant", "waiting_notice", "main_conversation", "waiting_user", normalizeWaitingContent(source), false, null));
+                mapped.add(buildTraceMessage(source, "waiting_user"));
+            }
+            case "resume_notice", "upload_ack" -> {
+                mapped.add(buildSceneMessage(source, "assistant", "governance_note", "main_conversation", "validate_submit", normalizeGovernanceContent(source), false, null));
+                mapped.add(buildTraceMessage(source, "validate_submit"));
+            }
+            case "failure_explanation" -> {
+                mapped.add(buildSceneMessage(source, "assistant", "governance_note", "main_conversation", "skill_grounded_explanation", normalizeFailureContent(source), false, null));
+                mapped.add(buildTraceMessage(source, "skill_grounded_explanation"));
+            }
+            case "system_note" -> mapped.add(buildTraceMessage(source, "execution"));
+            default ->
+                    mapped.add(buildSceneMessage(source, normalizeSceneMessageRole(source.getRole()), "conversation", "main_conversation", null, normalizeConversationContent(source), false, null));
+        }
+        return mapped;
+    }
+
+    private SessionMessageDTO buildSceneMessage(
+            SessionMessageDto source,
+            String role,
+            String messageType,
+            String surface,
+            String stage,
+            Map<String, Object> content,
+            boolean primaryExplanation,
+            Map<String, Object> developerTrace
+    ) {
         SessionMessageDTO dto = new SessionMessageDTO();
-        dto.setMessageId(source.getMessageId());
+        dto.setMessageId(source.getMessageId() + ("developer_trace".equals(surface) ? "__trace" : "__" + nonBlank(stage, messageType)));
         dto.setSessionId(source.getSessionId());
-        dto.setRole(normalizeSceneMessageRole(source.getRole()));
-        dto.setMessageType(mapSceneMessageType(source));
-        dto.setContent(normalizeMessageContent(source));
+        dto.setRole(role);
+        dto.setMessageType(messageType);
+        dto.setSurface(surface);
+        dto.setStage(stage);
+        dto.setContent(content);
         dto.setCreatedAt(source.getCreatedAt());
         dto.setRelatedTaskId(source.getTaskId());
         dto.setRelatedResultBundleId(source.getResultBundleId());
         dto.setRelatedWaitingReasonType(extractWaitingReasonType(source));
+        dto.setPrimaryExplanation(primaryExplanation);
+        dto.setDeveloperTrace(developerTrace);
         dto.setAttachmentRefs(source.getAttachmentRefs());
         dto.setActionSchema(source.getActionSchema());
         dto.setRelatedObjectRefs(source.getRelatedObjectRefs());
         return dto;
     }
 
-    private Map<String, Object> normalizeMessageContent(SessionMessageDto source) {
-        Map<String, Object> content = source.getContent() == null
-                ? new java.util.LinkedHashMap<>()
-                : new java.util.LinkedHashMap<>(source.getContent());
+    private SessionMessageDTO buildTraceMessage(SessionMessageDto source, String stage) {
+        Map<String, Object> content = new java.util.LinkedHashMap<>();
+        content.put("text", "Developer trace entry recorded for " + nonBlank(stage, "internal orchestration") + ".");
+        return buildSceneMessage(
+                source,
+                "system",
+                "governance_note",
+                "developer_trace",
+                stage,
+                content,
+                false,
+                buildDeveloperTracePayload(source, stage)
+        );
+    }
 
+    private Map<String, Object> normalizeConversationContent(SessionMessageDto source) {
+        Map<String, Object> content = copyContent(source);
         if (!hasText(asString(content.get("text")))) {
-            String derivedText = switch (mapSceneMessageType(source)) {
-                case "understanding" -> nonBlank(
-                        asString(content.get("text")),
-                        "SAGE acknowledged the current request and established the working understanding."
-                );
-                case "waiting_notice" -> nonBlank(
-                        asString(content.get("user_facing_phrasing")),
-                        nonBlank(
-                                asString(content.get("waiting_reason_type")),
-                                "The session is waiting for additional user input."
-                        )
-                );
-                case "result_notice" -> nonBlank(
-                        asString(content.get("summary")),
-                        nonBlank(asString(content.get("narrative")), "A governed result is ready.")
-                );
-                case "governance_note" -> nonBlank(
-                        asString(content.get("failure_message")),
-                        nonBlank(deriveProgressText(content), "SAGE recorded a governance update for this session.")
-                );
-                case "conversation" -> nonBlank(asString(content.get("text")), "A session message was recorded.");
-                default -> null;
-            };
-            if (hasText(derivedText)) {
-                content.put("text", derivedText);
-            }
+            content.put("text", "A session message was recorded.");
         }
-
         return content;
     }
 
-    private String mapSceneMessageType(SessionMessageDto source) {
-        return switch (safe(source.getMessageType())) {
-            case "assistant_understanding" -> "understanding";
-            case "waiting_notice", "clarification_request", "missing_input_request", "resume_notice", "upload_ack" -> "waiting_notice";
-            case "result_summary" -> "result_notice";
-            case "progress_update", "failure_explanation", "next_step_guidance", "system_note" -> "governance_note";
-            case "user_goal", "user_reply", "user_clarification_answer" -> "conversation";
-            default -> "conversation";
-        };
+    private Map<String, Object> buildUnderstandingContent(SessionMessageDto source) {
+        Map<String, Object> content = copyContent(source);
+        String text = asString(content.get("text"));
+        if (hasText(text) && text.startsWith("I understood this as ")) {
+            String remainder = trimTrailingPeriod(text.substring("I understood this as ".length()));
+            remainder = remainder.replace("request focused on", "with focus on");
+            remainder = remainder.replace("request for", "to address");
+            remainder = remainder.replaceFirst("^(an|a)\\s+", "");
+            content.put("text", "I'll organize the analysis around " + remainder + ".");
+        } else if (!hasText(text)) {
+            content.put("text", "I've organized the analysis around the requested ecological outcome and where intervention is most likely to matter.");
+        }
+        return content;
+    }
+
+    private Map<String, Object> buildPreparedAndSubmittedContent(SessionMessageDto source) {
+        Map<String, Object> content = new java.util.LinkedHashMap<>();
+        content.put("text", "The analysis has been prepared, validated, and submitted under governed execution. I'll update you when the result is ready.");
+        if (source.getContent() != null && hasText(asString(source.getContent().get("estimated_next_milestone")))) {
+            content.put("next_milestone", asString(source.getContent().get("estimated_next_milestone")));
+        }
+        return content;
+    }
+
+    private Map<String, Object> buildResultReadyContent(SessionMessageDto source) {
+        Map<String, Object> content = new java.util.LinkedHashMap<>();
+        content.put("text", deriveResultReadyText(source));
+        return content;
+    }
+
+    private Map<String, Object> buildExplanationContent(SessionMessageDto source) {
+        Map<String, Object> content = normalizeResultContent(source);
+        String text = asString(content.get("text"));
+        if (hasText(text) && text.startsWith("A governed result is ready. ")) {
+            content.put("text", text.substring("A governed result is ready. ".length()).trim());
+        }
+        return content;
+    }
+
+    private Map<String, Object> buildFollowUpInvitationContent(SessionMessageDto source) {
+        Map<String, Object> content = new java.util.LinkedHashMap<>();
+        content.put("text", "If you want, I can continue by comparing intervention types, narrowing this to one district or corridor, or turning the priority zones into an action shortlist.");
+        if (source.getContent() != null && hasText(asString(source.getContent().get("text")))) {
+            content.put("source_text", source.getContent().get("text"));
+        }
+        return content;
+    }
+
+    private Map<String, Object> normalizeWaitingContent(SessionMessageDto source) {
+        Map<String, Object> content = copyContent(source);
+        if (!hasText(asString(content.get("text")))) {
+            content.put(
+                    "text",
+                    nonBlank(
+                            asString(content.get("user_facing_phrasing")),
+                            "The session is waiting for additional user input before governed execution can continue."
+                    )
+            );
+        }
+        return content;
+    }
+
+    private Map<String, Object> normalizeGovernanceContent(SessionMessageDto source) {
+        Map<String, Object> content = copyContent(source);
+        if (!hasText(asString(content.get("text")))) {
+            content.put("text", "SAGE recorded a governance update for this session.");
+        }
+        return content;
+    }
+
+    private Map<String, Object> normalizeFailureContent(SessionMessageDto source) {
+        Map<String, Object> content = copyContent(source);
+        if (!hasText(asString(content.get("text")))) {
+            content.put("text", nonBlank(asString(content.get("failure_message")), "The governed analysis failed."));
+        }
+        return content;
+    }
+
+    private Map<String, Object> normalizeResultContent(SessionMessageDto source) {
+        Map<String, Object> content = copyContent(source);
+        if (!hasText(asString(content.get("text")))) {
+            content.put(
+                    "text",
+                    nonBlank(
+                            asString(content.get("summary")),
+                            "A governed result is ready."
+                    )
+            );
+        }
+        return content;
+    }
+
+    private Map<String, Object> copyContent(SessionMessageDto source) {
+        return source.getContent() == null
+                ? new java.util.LinkedHashMap<>()
+                : new java.util.LinkedHashMap<>(source.getContent());
+    }
+
+    private String deriveResultReadyText(SessionMessageDto source) {
+        Map<String, Object> content = source.getContent();
+        String combined = nonBlank(
+                content == null ? null : asString(content.get("summary")),
+                content == null ? null : asString(content.get("text"))
+        );
+        if (hasText(combined) && combined.toLowerCase(Locale.ROOT).contains("cooling priority")) {
+            return "The result is ready. Cooling priority zones have been identified and ranked.";
+        }
+        return "The result is ready. The governed analysis output is available.";
+    }
+
+    private Map<String, Object> buildDeveloperTracePayload(SessionMessageDto source, String stage) {
+        Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("stage", stage);
+        payload.put("raw_message_type", source.getMessageType());
+        payload.put("raw_role", source.getRole());
+        payload.put("task_id", source.getTaskId());
+        payload.put("result_bundle_id", source.getResultBundleId());
+        payload.put("content", source.getContent());
+        payload.put("attachment_refs", source.getAttachmentRefs());
+        payload.put("action_schema", source.getActionSchema());
+        payload.put("related_object_refs", source.getRelatedObjectRefs());
+        return payload;
     }
 
     private String normalizeSceneMessageRole(String role) {
@@ -281,23 +435,6 @@ public class SceneProjectionService {
         };
     }
 
-    private String deriveProgressText(Map<String, Object> content) {
-        List<String> parts = new ArrayList<>();
-        if (hasText(asString(content.get("current_phase_label")))) {
-            parts.add("Phase: " + asString(content.get("current_phase_label")));
-        }
-        if (hasText(asString(content.get("current_system_action")))) {
-            parts.add("Action: " + asString(content.get("current_system_action")));
-        }
-        if (hasText(asString(content.get("latest_progress_note")))) {
-            parts.add("Progress: " + asString(content.get("latest_progress_note")));
-        }
-        if (hasText(asString(content.get("estimated_next_milestone")))) {
-            parts.add("Next: " + asString(content.get("estimated_next_milestone")));
-        }
-        return String.join("\n", parts);
-    }
-
     private SessionMessageDTO findAcceptedMessage(SessionMessagesResponse response, String clientRequestId) {
         List<SessionMessageDto> items = response.getItems();
         for (int index = items.size() - 1; index >= 0; index -= 1) {
@@ -306,7 +443,7 @@ public class SceneProjectionService {
                 continue;
             }
             if (Objects.equals(clientRequestId, asString(candidate.getContent().get("client_request_id")))) {
-                return toSceneMessage(candidate);
+                return buildSceneMessage(candidate, "user", "conversation", "main_conversation", "follow_up", normalizeConversationContent(candidate), false, null);
             }
         }
         return null;
@@ -320,6 +457,13 @@ public class SceneProjectionService {
                 asString(source.getContent().get("waiting_reason_type")),
                 asString(source.getContent().get("why_blocked"))
         );
+    }
+
+    private String trimTrailingPeriod(String value) {
+        if (!hasText(value)) {
+            return value;
+        }
+        return value.endsWith(".") ? value.substring(0, value.length() - 1) : value;
     }
 
     private AnalysisSession requireCurrentSession(SceneProjectionContext context) {
@@ -753,3 +897,4 @@ public class SceneProjectionService {
         return value == null ? "" : value;
     }
 }
+
