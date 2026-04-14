@@ -1,6 +1,7 @@
 package com.sage.backend.mapper;
 
 import com.sage.backend.model.SessionMessage;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -58,4 +59,10 @@ public interface SessionMessageMapper {
             ORDER BY created_at ASC, message_id ASC
             """)
     List<SessionMessage> findBySessionId(@Param("sessionId") String sessionId);
+
+    @Delete("""
+            DELETE FROM session_message
+            WHERE session_id = #{sessionId}
+            """)
+    int deleteBySessionId(@Param("sessionId") String sessionId);
 }

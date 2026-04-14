@@ -159,6 +159,13 @@ public class SceneProjectionService {
         return sessionService.uploadAttachment(userId, currentSession.getSessionId(), file, logicalSlot);
     }
 
+    public SessionProjectionDTO resetDemoLiveSimulationSession(Long userId, String sceneId) {
+        SceneProjectionContext context = sceneProjectionQueryService.loadSceneContext(userId, sceneId);
+        AnalysisSession currentSession = requireCurrentSession(context);
+        demoSceneSessionSimulationService.resetDemoLiveSimulationSession(currentSession);
+        return loadSessionProjection(userId, requireCurrentSession(sceneProjectionQueryService.loadSceneContext(userId, sceneId)));
+    }
+
     private SceneSummaryDTO buildSceneSummary(Long userId, SceneProjectionContext context) {
         TaskDetailResponse currentTaskDetail = loadTaskDetail(userId, context.getCurrentTask());
         List<TaskDetailResponse> readyResultTaskDetails = loadReadyResultTaskDetails(userId, context, currentTaskDetail);

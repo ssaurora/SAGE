@@ -79,6 +79,15 @@ public class SceneController {
         return ResponseEntity.ok(sceneProjectionService.postSceneSessionMessage(currentUser.userId(), sceneId, request));
     }
 
+    @PostMapping("/{sceneId}/session/demo-live-simulation/reset")
+    public ResponseEntity<SessionProjectionDTO> resetDemoLiveSimulationSession(
+            @PathVariable String sceneId,
+            Authentication authentication
+    ) {
+        CurrentUser currentUser = (CurrentUser) authentication.getPrincipal();
+        return ResponseEntity.ok(sceneProjectionService.resetDemoLiveSimulationSession(currentUser.userId(), sceneId));
+    }
+
     @PostMapping(value = "/{sceneId}/session/attachments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<UploadSessionAttachmentResponse> uploadSceneSessionAttachment(
             @PathVariable String sceneId,

@@ -153,6 +153,37 @@ public class DemoSceneSessionSimulationService {
         scheduleDemoAssistantUnderstanding(currentSession.getSessionId(), demoRunId, userGoal);
     }
 
+    public void resetDemoLiveSimulationSession(AnalysisSession currentSession) {
+        if (currentSession == null || !DEMO_LIVE_SIMULATION_SESSION_ID.equals(currentSession.getSessionId())) {
+            throw new ResponseStatusException(CONFLICT, DEMO_RUN_RESET_REQUIRED_MESSAGE);
+        }
+
+        demoLiveSimulationRuns.remove(currentSession.getSessionId());
+        String defaultUserGoal = normalizeUserGoal(null);
+
+        transactionTemplate.executeWithoutResult(status -> {
+            sessionMessageMapper.deleteBySessionId(currentSession.getSessionId());
+            analysisSessionMapper.updateTitleAndUserGoal(
+                    currentSession.getSessionId(),
+                    DEMO_DEFAULT_TITLE,
+                    defaultUserGoal
+            );
+            analysisSessionMapper.updateStateAndPointers(
+                    currentSession.getSessionId(),
+                    DEMO_LIVE_SIMULATION_TASK_ID,
+                    null,
+                    SessionStatus.RUNNING.name(),
+                    null,
+                    writeJson(buildSessionSummaryPayload(
+                            DEMO_LIVE_SIMULATION_TASK_ID,
+                            SessionStatus.RUNNING.name(),
+                            defaultUserGoal,
+                            null
+                    ))
+            );
+        });
+    }
+
     public DeveloperTraceSupportDataDTO buildDeveloperTraceSupportData(AnalysisSession currentSession) {
         if (currentSession == null || !DEMO_LIVE_SIMULATION_SESSION_ID.equals(currentSession.getSessionId())) {
             return null;
