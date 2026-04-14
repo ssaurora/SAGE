@@ -7,6 +7,9 @@ import java.util.List;
 
 public class DemoLiveSimulationSupportDTO {
 
+    @JsonProperty("demo_narrative_type")
+    private String demoNarrativeType;
+
     @JsonProperty("demo_run_scope")
     private String demoRunScope;
 
@@ -35,6 +38,14 @@ public class DemoLiveSimulationSupportDTO {
     private Boolean demoResetRequired;
 
     private final List<DemoTraceStageDTO> stages = new ArrayList<>();
+
+    public String getDemoNarrativeType() {
+        return demoNarrativeType;
+    }
+
+    public void setDemoNarrativeType(String demoNarrativeType) {
+        this.demoNarrativeType = demoNarrativeType;
+    }
 
     public String getDemoRunScope() {
         return demoRunScope;

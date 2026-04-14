@@ -3,7 +3,6 @@ package com.sage.backend.scene;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sage.backend.common.SessionMessageIdGenerator;
 import com.sage.backend.mapper.AnalysisSessionMapper;
@@ -11,8 +10,8 @@ import com.sage.backend.mapper.SessionMessageMapper;
 import com.sage.backend.model.AnalysisSession;
 import com.sage.backend.model.SessionMessage;
 import com.sage.backend.model.SessionStatus;
+import com.sage.backend.scene.DemoLiveSimulationNarratives.DemoLiveSimulationNarrative;
 import com.sage.backend.scene.dto.DemoLiveSimulationSupportDTO;
-import com.sage.backend.scene.dto.DemoTraceStageDTO;
 import com.sage.backend.scene.dto.DeveloperTraceSupportDataDTO;
 import com.sage.backend.scene.dto.PostSceneSessionMessageRequest;
 import org.springframework.stereotype.Service;
@@ -23,10 +22,8 @@ import org.springframework.web.server.ResponseStatusException;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -40,14 +37,6 @@ import static org.springframework.http.HttpStatus.CONFLICT;
 @Service
 public class DemoSceneSessionSimulationService {
 
-    private static final String DEMO_URBAN_SCENE_ID = "scene-urban-cooling-for-heat-mitigation";
-    private static final String DEMO_LIVE_SIMULATION_SESSION_ID = "sess_live_urban_cooling";
-    private static final String DEMO_LIVE_SIMULATION_TASK_ID = "task_live_urban_cooling";
-    private static final String DEMO_REPLAY_TASK_ID = "task_demo_urban_cooling";
-    private static final String DEMO_REPLAY_RESULT_BUNDLE_ID = "rb_demo_urban_cooling_2024";
-    private static final String DEMO_DEFAULT_TITLE = "Urban Cooling for Heat Mitigation";
-    private static final String DEMO_RUN_SCOPE = "urban_cooling_first_turn_live_success";
-
     private static final String DEMO_STEP_IDLE = "demo_idle";
     private static final String DEMO_STEP_USER_GOAL_ACCEPTED = "demo_user_goal_accepted";
     private static final String DEMO_STEP_ASSISTANT_UNDERSTANDING_EMITTED = "demo_assistant_understanding_emitted";
@@ -56,11 +45,6 @@ public class DemoSceneSessionSimulationService {
     private static final String DEMO_STEP_FOLLOW_UP_INVITATION_EMITTED = "demo_follow_up_invitation_emitted";
     private static final String DEMO_STEP_COMPLETED = "demo_completed";
     private static final String DEMO_STEP_RUN_STATE_UNAVAILABLE = "demo_run_state_unavailable";
-
-    private static final String DEMO_TRACE_AUTHORITY_BACKED = "authority_backed";
-    private static final String DEMO_TRACE_DEMO_ORCHESTRATED = "demo_orchestrated";
-    private static final String DEMO_TRACE_DERIVED_SUMMARY = "derived_summary";
-    private static final String DEMO_TRACE_UNSUPPORTED = "unsupported";
 
     private static final long DEMO_ASSISTANT_UNDERSTANDING_DELAY_MS = 1100L;
     private static final long DEMO_PREPARED_VALIDATED_SUBMITTED_DELAY_MS = 1800L;
@@ -94,20 +78,16 @@ public class DemoSceneSessionSimulationService {
     }
 
     public boolean isDemoLiveSimulationSession(String sceneId, AnalysisSession currentSession) {
-        return DEMO_URBAN_SCENE_ID.equals(sceneId)
-                && currentSession != null
-                && DEMO_LIVE_SIMULATION_SESSION_ID.equals(currentSession.getSessionId());
+        return DemoLiveSimulationNarratives.findBySceneAndSession(sceneId, currentSession) != null;
     }
 
-    public void handleDemoLiveSimulationPost(AnalysisSession currentSession, PostSceneSessionMessageRequest request) {
-        if (!DEMO_LIVE_SIMULATION_SESSION_ID.equals(currentSession.getSessionId())) {
-            throw new ResponseStatusException(CONFLICT, DEMO_RUN_RESET_REQUIRED_MESSAGE);
-        }
+    public void handleDemoLiveSimulationPost(String sceneId, AnalysisSession currentSession, PostSceneSessionMessageRequest request) {
+        DemoLiveSimulationNarrative narrative = requireDemoNarrative(sceneId, currentSession);
 
-        AnalysisSession latestSession = requireDemoLiveSimulationSession(currentSession.getSessionId());
-        DemoLiveSimulationRunState activeDemoRun = demoLiveSimulationRuns.get(currentSession.getSessionId());
+        AnalysisSession latestSession = requireDemoLiveSimulationSession(narrative.liveSessionId());
+        DemoLiveSimulationRunState activeDemoRun = demoLiveSimulationRuns.get(narrative.liveSessionId());
         if (activeDemoRun != null && activeDemoRun.demoRunActive() && isExternallyResetDemoSession(latestSession)) {
-            demoLiveSimulationRuns.remove(currentSession.getSessionId(), activeDemoRun);
+            demoLiveSimulationRuns.remove(narrative.liveSessionId(), activeDemoRun);
             activeDemoRun = null;
         }
         if (activeDemoRun != null && activeDemoRun.demoRunActive()) {
@@ -116,66 +96,69 @@ public class DemoSceneSessionSimulationService {
         if (SessionStatus.READY_RESULT.name().equals(latestSession.getStatus())) {
             throw new ResponseStatusException(CONFLICT, DEMO_RUN_COMPLETE_MESSAGE);
         }
-        if (!sessionMessageMapper.findBySessionId(currentSession.getSessionId()).isEmpty()) {
+        if (!sessionMessageMapper.findBySessionId(narrative.liveSessionId()).isEmpty()) {
             throw new ResponseStatusException(CONFLICT, DEMO_RUN_RESET_REQUIRED_MESSAGE);
         }
 
         String demoRunId = "demo_run_" + UUID.randomUUID();
-        String userGoal = normalizeUserGoal(request.getContent());
+        String userGoal = normalizeUserGoal(request.getContent(), narrative);
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
 
         DemoLiveSimulationRunState demoRunState = DemoLiveSimulationRunState.start(demoRunId, now);
-        demoLiveSimulationRuns.put(currentSession.getSessionId(), demoRunState);
+        demoLiveSimulationRuns.put(narrative.liveSessionId(), demoRunState);
 
         transactionTemplate.executeWithoutResult(status -> {
-            analysisSessionMapper.updateTitleAndUserGoal(currentSession.getSessionId(), DEMO_DEFAULT_TITLE, userGoal);
+            analysisSessionMapper.updateTitleAndUserGoal(narrative.liveSessionId(), narrative.defaultTitle(), userGoal);
             analysisSessionMapper.updateStateAndPointers(
-                    currentSession.getSessionId(),
-                    DEMO_LIVE_SIMULATION_TASK_ID,
+                    narrative.liveSessionId(),
+                    narrative.liveTaskId(),
                     null,
                     SessionStatus.RUNNING.name(),
                     null,
-                    writeJson(buildSessionSummaryPayload(DEMO_LIVE_SIMULATION_TASK_ID, SessionStatus.RUNNING.name(), userGoal, null))
+                    writeJson(buildSessionSummaryPayload(narrative.liveTaskId(), SessionStatus.RUNNING.name(), userGoal, null))
             );
             appendMessage(
-                    currentSession.getSessionId(),
-                    DEMO_LIVE_SIMULATION_TASK_ID,
+                    narrative.liveSessionId(),
+                    narrative.liveTaskId(),
                     null,
                     "user",
                     "user_goal",
                     buildUserGoalPayload(userGoal, request.getClientRequestId()),
-                    buildTaskRef(DEMO_LIVE_SIMULATION_TASK_ID),
+                    buildTaskRef(narrative.liveTaskId()),
                     now
             );
         });
 
         demoRunState.markDemoStepCompleted(DEMO_STEP_USER_GOAL_ACCEPTED, now);
-        scheduleDemoAssistantUnderstanding(currentSession.getSessionId(), demoRunId, userGoal);
+        scheduleDemoAssistantUnderstanding(narrative, demoRunId, userGoal);
     }
 
     public void resetDemoLiveSimulationSession(AnalysisSession currentSession) {
-        if (currentSession == null || !DEMO_LIVE_SIMULATION_SESSION_ID.equals(currentSession.getSessionId())) {
+        DemoLiveSimulationNarrative narrative = DemoLiveSimulationNarratives.findBySessionId(
+                currentSession == null ? null : currentSession.getSessionId()
+        );
+        if (narrative == null) {
             throw new ResponseStatusException(CONFLICT, DEMO_RUN_RESET_REQUIRED_MESSAGE);
         }
 
-        demoLiveSimulationRuns.remove(currentSession.getSessionId());
-        String defaultUserGoal = normalizeUserGoal(null);
+        demoLiveSimulationRuns.remove(narrative.liveSessionId());
+        String defaultUserGoal = narrative.defaultUserGoal();
 
         transactionTemplate.executeWithoutResult(status -> {
-            sessionMessageMapper.deleteBySessionId(currentSession.getSessionId());
+            sessionMessageMapper.deleteBySessionId(narrative.liveSessionId());
             analysisSessionMapper.updateTitleAndUserGoal(
-                    currentSession.getSessionId(),
-                    DEMO_DEFAULT_TITLE,
+                    narrative.liveSessionId(),
+                    narrative.defaultTitle(),
                     defaultUserGoal
             );
             analysisSessionMapper.updateStateAndPointers(
-                    currentSession.getSessionId(),
-                    DEMO_LIVE_SIMULATION_TASK_ID,
+                    narrative.liveSessionId(),
+                    narrative.liveTaskId(),
                     null,
                     SessionStatus.RUNNING.name(),
                     null,
                     writeJson(buildSessionSummaryPayload(
-                            DEMO_LIVE_SIMULATION_TASK_ID,
+                            narrative.liveTaskId(),
                             SessionStatus.RUNNING.name(),
                             defaultUserGoal,
                             null
@@ -185,25 +168,33 @@ public class DemoSceneSessionSimulationService {
     }
 
     public DeveloperTraceSupportDataDTO buildDeveloperTraceSupportData(AnalysisSession currentSession) {
-        if (currentSession == null || !DEMO_LIVE_SIMULATION_SESSION_ID.equals(currentSession.getSessionId())) {
+        DemoLiveSimulationNarrative narrative = DemoLiveSimulationNarratives.findBySessionId(
+                currentSession == null ? null : currentSession.getSessionId()
+        );
+        if (narrative == null) {
             return null;
         }
 
         DeveloperTraceSupportDataDTO supportData = new DeveloperTraceSupportDataDTO();
-        supportData.setDemoLiveSimulation(buildDemoLiveSimulationSupport(currentSession));
+        supportData.setDemoLiveSimulation(buildDemoLiveSimulationSupport(currentSession, narrative));
         return supportData;
     }
 
-    private DemoLiveSimulationSupportDTO buildDemoLiveSimulationSupport(AnalysisSession currentSession) {
+    private DemoLiveSimulationSupportDTO buildDemoLiveSimulationSupport(
+            AnalysisSession currentSession,
+            DemoLiveSimulationNarrative narrative
+    ) {
         DemoLiveSimulationSupportDTO support = new DemoLiveSimulationSupportDTO();
-        support.setDemoRunScope(DEMO_RUN_SCOPE);
+        support.setDemoNarrativeType(narrative.demoNarrativeType());
+        support.setDemoRunScope(narrative.demoRunScope());
         List<SessionMessage> demoMessages = sessionMessageMapper.findBySessionId(currentSession.getSessionId());
 
         DemoLiveSimulationRunState demoRunState = demoLiveSimulationRuns.get(currentSession.getSessionId());
         if (demoRunState != null) {
             demoRunState.copyInto(support);
+            support.setDemoNarrativeType(narrative.demoNarrativeType());
             support.setDemoResetRequired(SessionStatus.READY_RESULT.name().equals(currentSession.getStatus()));
-            support.getStages().addAll(DemoLiveSimulationTraceStageFactory.build(currentSession, demoMessages, support, objectMapper));
+            support.getStages().addAll(DemoLiveSimulationTraceStageFactory.build(currentSession, demoMessages, support, objectMapper, narrative));
             return support;
         }
 
@@ -217,118 +208,118 @@ public class DemoSceneSessionSimulationService {
         if (SessionStatus.READY_RESULT.name().equals(currentSession.getStatus())) {
             support.setDemoCurrentStep(DEMO_STEP_COMPLETED);
             support.getDemoCompletedSteps().addAll(allDemoCompletedSteps());
-            support.getStages().addAll(DemoLiveSimulationTraceStageFactory.build(currentSession, demoMessages, support, objectMapper));
+            support.getStages().addAll(DemoLiveSimulationTraceStageFactory.build(currentSession, demoMessages, support, objectMapper, narrative));
             return support;
         }
 
         if (demoMessages.isEmpty()) {
             support.setDemoCurrentStep(DEMO_STEP_IDLE);
-            support.getStages().addAll(DemoLiveSimulationTraceStageFactory.build(currentSession, demoMessages, support, objectMapper));
+            support.getStages().addAll(DemoLiveSimulationTraceStageFactory.build(currentSession, demoMessages, support, objectMapper, narrative));
             return support;
         }
 
         support.setDemoCurrentStep(DEMO_STEP_RUN_STATE_UNAVAILABLE);
         support.getDemoCompletedSteps().add(DEMO_STEP_USER_GOAL_ACCEPTED);
-        support.getStages().addAll(DemoLiveSimulationTraceStageFactory.build(currentSession, demoMessages, support, objectMapper));
+        support.getStages().addAll(DemoLiveSimulationTraceStageFactory.build(currentSession, demoMessages, support, objectMapper, narrative));
         return support;
     }
 
-    private void scheduleDemoAssistantUnderstanding(String sessionId, String demoRunId, String userGoal) {
+    private void scheduleDemoAssistantUnderstanding(DemoLiveSimulationNarrative narrative, String demoRunId, String userGoal) {
         scheduleDemoStep(
-                sessionId,
+                narrative.liveSessionId(),
                 demoRunId,
                 DEMO_STEP_ASSISTANT_UNDERSTANDING_EMITTED,
                 DEMO_ASSISTANT_UNDERSTANDING_DELAY_MS,
                 () -> {
                     appendMessage(
-                            sessionId,
-                            DEMO_LIVE_SIMULATION_TASK_ID,
+                            narrative.liveSessionId(),
+                            narrative.liveTaskId(),
                             null,
                             "assistant",
                             "assistant_understanding",
-                            buildAssistantUnderstandingPayload(userGoal),
-                            buildTaskRef(DEMO_LIVE_SIMULATION_TASK_ID),
+                            narrative.buildAssistantUnderstandingPayload(objectMapper, userGoal),
+                            buildTaskRef(narrative.liveTaskId()),
                             OffsetDateTime.now(ZoneOffset.UTC)
                     );
-                    scheduleDemoPreparedValidatedSubmitted(sessionId, demoRunId);
+                    scheduleDemoPreparedValidatedSubmitted(narrative, demoRunId);
                 }
         );
     }
 
-    private void scheduleDemoPreparedValidatedSubmitted(String sessionId, String demoRunId) {
+    private void scheduleDemoPreparedValidatedSubmitted(DemoLiveSimulationNarrative narrative, String demoRunId) {
         scheduleDemoStep(
-                sessionId,
+                narrative.liveSessionId(),
                 demoRunId,
                 DEMO_STEP_PREPARED_VALIDATED_SUBMITTED_EMITTED,
                 DEMO_PREPARED_VALIDATED_SUBMITTED_DELAY_MS,
                 () -> {
                     appendMessage(
-                            sessionId,
-                            DEMO_LIVE_SIMULATION_TASK_ID,
+                            narrative.liveSessionId(),
+                            narrative.liveTaskId(),
                             null,
                             "assistant",
                             "progress_update",
-                            buildProgressUpdatePayload(),
-                            buildTaskRef(DEMO_LIVE_SIMULATION_TASK_ID),
+                            narrative.buildProgressUpdatePayload(objectMapper),
+                            buildTaskRef(narrative.liveTaskId()),
                             OffsetDateTime.now(ZoneOffset.UTC)
                     );
-                    scheduleDemoResultReady(sessionId, demoRunId);
+                    scheduleDemoResultReady(narrative, demoRunId);
                 }
         );
     }
 
-    private void scheduleDemoResultReady(String sessionId, String demoRunId) {
+    private void scheduleDemoResultReady(DemoLiveSimulationNarrative narrative, String demoRunId) {
         scheduleDemoStep(
-                sessionId,
+                narrative.liveSessionId(),
                 demoRunId,
                 DEMO_STEP_RESULT_READY_EMITTED,
                 DEMO_RESULT_READY_DELAY_MS,
                 () -> {
                     OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
                     appendMessage(
-                            sessionId,
-                            DEMO_REPLAY_TASK_ID,
-                            DEMO_REPLAY_RESULT_BUNDLE_ID,
+                            narrative.liveSessionId(),
+                            narrative.replayTaskId(),
+                            narrative.replayResultBundleId(),
                             "assistant",
                             "result_summary",
-                            buildResultSummaryPayload(),
-                            buildResultRef(DEMO_REPLAY_TASK_ID, DEMO_REPLAY_RESULT_BUNDLE_ID),
+                            narrative.buildResultSummaryPayload(objectMapper),
+                            buildResultRef(narrative.replayTaskId(), narrative.replayResultBundleId()),
                             now
                     );
 
-                    AnalysisSession refreshedSession = requireDemoLiveSimulationSession(sessionId);
+                    AnalysisSession refreshedSession = requireDemoLiveSimulationSession(narrative.liveSessionId());
                     analysisSessionMapper.updateStateAndPointers(
-                            sessionId,
-                            DEMO_REPLAY_TASK_ID,
-                            DEMO_REPLAY_RESULT_BUNDLE_ID,
+                            narrative.liveSessionId(),
+                            narrative.replayTaskId(),
+                            narrative.replayResultBundleId(),
                             SessionStatus.READY_RESULT.name(),
                             null,
                             writeJson(buildSessionSummaryPayload(
-                                    DEMO_REPLAY_TASK_ID,
+                                    narrative.replayTaskId(),
                                     SessionStatus.READY_RESULT.name(),
-                                    nonBlank(refreshedSession.getUserGoal(), normalizeUserGoal(null)),
-                                    DEMO_REPLAY_RESULT_BUNDLE_ID
+                                    nonBlank(refreshedSession.getUserGoal(), narrative.defaultUserGoal()),
+                                    narrative.replayResultBundleId()
                             ))
                     );
-                    scheduleDemoFollowUpInvitation(sessionId, demoRunId);
+                    scheduleDemoFollowUpInvitation(narrative, demoRunId);
                 }
         );
     }
 
-    private void scheduleDemoFollowUpInvitation(String sessionId, String demoRunId) {
+    private void scheduleDemoFollowUpInvitation(DemoLiveSimulationNarrative narrative, String demoRunId) {
         scheduleDemoStep(
-                sessionId,
+                narrative.liveSessionId(),
                 demoRunId,
                 DEMO_STEP_FOLLOW_UP_INVITATION_EMITTED,
                 DEMO_FOLLOW_UP_INVITATION_DELAY_MS,
                 () -> appendMessage(
-                        sessionId,
-                        DEMO_REPLAY_TASK_ID,
-                        DEMO_REPLAY_RESULT_BUNDLE_ID,
+                        narrative.liveSessionId(),
+                        narrative.replayTaskId(),
+                        narrative.replayResultBundleId(),
                         "assistant",
                         "next_step_guidance",
-                        buildFollowUpPayload(),
-                        buildResultRef(DEMO_REPLAY_TASK_ID, DEMO_REPLAY_RESULT_BUNDLE_ID),
+                        narrative.buildFollowUpPayload(objectMapper),
+                        buildResultRef(narrative.replayTaskId(), narrative.replayResultBundleId()),
                         OffsetDateTime.now(ZoneOffset.UTC)
                 )
         );
@@ -400,56 +391,6 @@ public class DemoSceneSessionSimulationService {
         return root;
     }
 
-    private ObjectNode buildAssistantUnderstandingPayload(String userGoal) {
-        ObjectNode root = objectMapper.createObjectNode();
-        root.put(
-                "text",
-                "I'll identify where added tree canopy and park expansion are most likely to reduce extreme heat exposure across the city, with priority given to places where heat burden and lack of green access overlap."
-        );
-        root.put("analysis_kind", "urban cooling prioritization");
-        root.put("goal_type", "heat mitigation");
-        root.put("route_mode", "skill_grounded");
-        root.put("capability_key", "urban_cooling_priority");
-        root.put("selected_template", "urban_cooling_v1");
-        root.put("source_user_goal", userGoal);
-        return root;
-    }
-
-    private ObjectNode buildProgressUpdatePayload() {
-        ObjectNode root = objectMapper.createObjectNode();
-        root.put("current_phase_label", "RUNNING");
-        root.put("current_system_action", "Preparing governed urban cooling analysis");
-        root.put("latest_progress_note", "Analysis prepared, validated, and submitted for governed execution.");
-        root.put("estimated_next_milestone", "Cooling priority zones ranked");
-        return root;
-    }
-
-    private ObjectNode buildResultSummaryPayload() {
-        ObjectNode root = objectMapper.createObjectNode();
-        root.put(
-                "text",
-                "A governed result is ready. The strongest cooling opportunities cluster in low-canopy neighborhoods with high afternoon heat burden and limited park access."
-        );
-        root.put(
-                "summary",
-                "Priority zones concentrate in low-canopy neighborhoods with high heat burden and limited park access."
-        );
-        ArrayNode highlights = root.putArray("highlights");
-        highlights.add("Southwest residential heat islands rank highest for canopy expansion.");
-        highlights.add("The central transit corridor shows the largest cooling benefit per hectare of added shade.");
-        highlights.add("Pocket park expansion is recommended around dense apartment clusters with limited green relief.");
-        return root;
-    }
-
-    private ObjectNode buildFollowUpPayload() {
-        ObjectNode root = objectMapper.createObjectNode();
-        root.put(
-                "text",
-                "If you want, I can continue by comparing tree canopy expansion versus park expansion, narrowing this to one district or corridor, or turning these priority zones into a phased action shortlist."
-        );
-        return root;
-    }
-
     private ObjectNode buildTaskRef(String taskId) {
         ObjectNode root = objectMapper.createObjectNode();
         root.put("task_id", taskId);
@@ -483,6 +424,14 @@ public class DemoSceneSessionSimulationService {
         return current;
     }
 
+    private DemoLiveSimulationNarrative requireDemoNarrative(String sceneId, AnalysisSession currentSession) {
+        DemoLiveSimulationNarrative narrative = DemoLiveSimulationNarratives.findBySceneAndSession(sceneId, currentSession);
+        if (narrative == null) {
+            throw new ResponseStatusException(CONFLICT, DEMO_RUN_RESET_REQUIRED_MESSAGE);
+        }
+        return narrative;
+    }
+
     private boolean isExternallyResetDemoSession(AnalysisSession session) {
         return SessionStatus.RUNNING.name().equals(session.getStatus())
                 && (session.getLatestResultBundleId() == null || session.getLatestResultBundleId().isBlank())
@@ -500,9 +449,9 @@ public class DemoSceneSessionSimulationService {
         return steps;
     }
 
-    private String normalizeUserGoal(String content) {
+    private String normalizeUserGoal(String content, DemoLiveSimulationNarrative narrative) {
         if (content == null || content.isBlank()) {
-            return "Identify urban cooling priority zones where tree canopy and park expansion would most reduce extreme heat exposure.";
+            return narrative.defaultUserGoal();
         }
         return content.trim();
     }
@@ -561,22 +510,23 @@ public class DemoSceneSessionSimulationService {
             this.demoNextScheduledStepAt = null;
         }
 
-        private synchronized void finishDemoRun(OffsetDateTime emittedAt) {
-            this.demoRunActive = false;
+        private synchronized void finishDemoRun(OffsetDateTime completedAt) {
             this.demoCurrentStep = DEMO_STEP_COMPLETED;
             this.demoCompletedSteps.add(DEMO_STEP_COMPLETED);
-            this.demoLastStepEmittedAt = emittedAt;
+            this.demoLastStepEmittedAt = completedAt;
             this.demoNextScheduledStepAt = null;
+            this.demoRunActive = false;
         }
 
-        private synchronized void copyInto(DemoLiveSimulationSupportDTO target) {
-            target.setDemoRunActive(demoRunActive);
-            target.setDemoRunId(demoRunId);
-            target.setDemoCurrentStep(demoCurrentStep);
-            target.getDemoCompletedSteps().addAll(demoCompletedSteps);
-            target.setDemoNextScheduledStepAt(demoNextScheduledStepAt == null ? null : demoNextScheduledStepAt.toString());
-            target.setDemoStartedAt(demoStartedAt.toString());
-            target.setDemoLastStepEmittedAt(demoLastStepEmittedAt == null ? null : demoLastStepEmittedAt.toString());
+        private synchronized void copyInto(DemoLiveSimulationSupportDTO support) {
+            support.setDemoRunActive(demoRunActive);
+            support.setDemoRunId(demoRunId);
+            support.setDemoCurrentStep(demoCurrentStep);
+            support.getDemoCompletedSteps().clear();
+            support.getDemoCompletedSteps().addAll(demoCompletedSteps);
+            support.setDemoStartedAt(demoStartedAt == null ? null : demoStartedAt.toString());
+            support.setDemoLastStepEmittedAt(demoLastStepEmittedAt == null ? null : demoLastStepEmittedAt.toString());
+            support.setDemoNextScheduledStepAt(demoNextScheduledStepAt == null ? null : demoNextScheduledStepAt.toString());
         }
     }
 }

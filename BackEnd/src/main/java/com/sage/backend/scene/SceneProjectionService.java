@@ -97,7 +97,7 @@ public class SceneProjectionService {
 
         SceneDetailDTO detail = new SceneDetailDTO();
         detail.setSceneId(context.getSceneId());
-        detail.setSceneName(null);
+        detail.setSceneName(resolveSceneName(context));
         detail.setSceneStatus(resolveSceneStatus(context, resultSummary));
         detail.setCreatedAt(resolveCreatedAt(context));
         detail.setUpdatedAt(resolveUpdatedAt(context, resultSummary, currentTaskAudit, currentTaskEvents));
@@ -140,7 +140,7 @@ public class SceneProjectionService {
 
         AnalysisSessionResponse updatedSession;
         if (demoSceneSessionSimulationService.isDemoLiveSimulationSession(sceneId, currentSession)) {
-            demoSceneSessionSimulationService.handleDemoLiveSimulationPost(currentSession, request);
+            demoSceneSessionSimulationService.handleDemoLiveSimulationPost(sceneId, currentSession, request);
             updatedSession = sessionService.getSession(userId, currentSession.getSessionId());
         } else {
             updatedSession = sessionService.postMessage(userId, currentSession.getSessionId(), delegate);
@@ -175,7 +175,7 @@ public class SceneProjectionService {
 
         SceneSummaryDTO summary = new SceneSummaryDTO();
         summary.setSceneId(context.getSceneId());
-        summary.setSceneName(null);
+        summary.setSceneName(resolveSceneName(context));
         summary.setSceneStatus(sceneStatus);
         summary.setCurrentSessionId(context.getCurrentSession() == null ? null : context.getCurrentSession().getSessionId());
         summary.setCurrentTaskId(context.getCurrentTask() == null ? null : context.getCurrentTask().getTaskId());
@@ -342,8 +342,10 @@ public class SceneProjectionService {
     }
 
     private Map<String, Object> buildPreparedAndSubmittedContent(SessionMessageDto source) {
-        Map<String, Object> content = new java.util.LinkedHashMap<>();
-        content.put("text", "The analysis has been prepared, validated, and submitted under governed execution. I'll update you when the result is ready.");
+        Map<String, Object> content = copyContent(source);
+        if (!hasText(asString(content.get("text")))) {
+            content.put("text", "The analysis has been prepared, validated, and submitted under governed execution. I'll update you when the result is ready.");
+        }
         if (source.getContent() != null && hasText(asString(source.getContent().get("estimated_next_milestone")))) {
             content.put("next_milestone", asString(source.getContent().get("estimated_next_milestone")));
         }
@@ -366,8 +368,10 @@ public class SceneProjectionService {
     }
 
     private Map<String, Object> buildFollowUpInvitationContent(SessionMessageDto source) {
-        Map<String, Object> content = new java.util.LinkedHashMap<>();
-        content.put("text", "If you want, I can continue by comparing intervention types, narrowing this to one district or corridor, or turning the priority zones into an action shortlist.");
+        Map<String, Object> content = copyContent(source);
+        if (!hasText(asString(content.get("text")))) {
+            content.put("text", "If you want, I can continue by comparing intervention types, narrowing this to one district or corridor, or turning the priority zones into an action shortlist.");
+        }
         if (source.getContent() != null && hasText(asString(source.getContent().get("text")))) {
             content.put("source_text", source.getContent().get("text"));
         }
@@ -426,12 +430,19 @@ public class SceneProjectionService {
 
     private String deriveResultReadyText(SessionMessageDto source) {
         Map<String, Object> content = source.getContent();
+        String explicitReadyText = content == null ? null : asString(content.get("result_ready_text"));
+        if (hasText(explicitReadyText)) {
+            return explicitReadyText;
+        }
         String combined = nonBlank(
                 content == null ? null : asString(content.get("summary")),
                 content == null ? null : asString(content.get("text"))
         );
         if (hasText(combined) && combined.toLowerCase(Locale.ROOT).contains("cooling priority")) {
             return "The result is ready. Cooling priority zones have been identified and ranked.";
+        }
+        if (hasText(combined) && combined.toLowerCase(Locale.ROOT).contains("water yield")) {
+            return "The result is ready. Annual water yield outputs are available for the watershed and subwatersheds.";
         }
         return "The result is ready. The governed analysis output is available.";
     }
@@ -737,6 +748,17 @@ public class SceneProjectionService {
         }
         return context.getSessions().stream()
                 .map(AnalysisSession::getUserGoal)
+                .filter(this::hasText)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private String resolveSceneName(SceneProjectionContext context) {
+        if (context.getCurrentSession() != null && hasText(context.getCurrentSession().getTitle())) {
+            return context.getCurrentSession().getTitle();
+        }
+        return context.getSessions().stream()
+                .map(AnalysisSession::getTitle)
                 .filter(this::hasText)
                 .findFirst()
                 .orElse(null);
