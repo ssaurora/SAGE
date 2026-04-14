@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sage.backend.model.AnalysisSession;
+import com.sage.backend.scene.DemoCaseProfileFactory.DemoCaseProfile;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -14,8 +15,11 @@ final class DemoLiveSimulationNarratives {
     static final String DEMO_NARRATIVE_TYPE_URBAN_COOLING = "urban_cooling";
     static final String DEMO_NARRATIVE_TYPE_WATER_YIELD = "water_yield";
 
+    private static final DemoCaseProfile WATER_YIELD_GURA_PROFILE = DemoCaseProfileFactory.waterYieldGuraProfile();
+
     private static final DemoLiveSimulationNarrative URBAN_COOLING = new DemoLiveSimulationNarrative(
             DEMO_NARRATIVE_TYPE_URBAN_COOLING,
+            null,
             "scene-urban-cooling-for-heat-mitigation",
             "sess_live_urban_cooling",
             "task_live_urban_cooling",
@@ -60,47 +64,39 @@ final class DemoLiveSimulationNarratives {
 
     private static final DemoLiveSimulationNarrative WATER_YIELD = new DemoLiveSimulationNarrative(
             DEMO_NARRATIVE_TYPE_WATER_YIELD,
+            WATER_YIELD_GURA_PROFILE,
             "scene-water-yield-for-gura-subwatersheds",
             "sess_live_water_yield",
             "task_live_water_yield",
             "task_demo_water_yield",
             "rb_demo_water_yield_gura_2024",
-            "Water Yield for Gura Subwatersheds",
-            "Identify which subwatersheds contribute the most annual water yield and summarize what the pattern implies for watershed management.",
+            WATER_YIELD_GURA_PROFILE.caseDisplayName(),
+            WATER_YIELD_GURA_PROFILE.canonicalUserGoal(),
             "water_yield_first_turn_live_success",
-            "water_yield",
+            WATER_YIELD_GURA_PROFILE.capabilityKey(),
             "Water Yield",
-            "annual water yield analysis",
+            WATER_YIELD_GURA_PROFILE.analysisKind(),
             "water supply contribution",
-            "water_yield_v1",
-            "I'll analyze annual water yield across the Gura watershed and subwatersheds to identify where water supply contribution is strongest and where the pattern has the clearest management implications.",
+            WATER_YIELD_GURA_PROFILE.selectedTemplate(),
+            "I'll analyze annual water yield across the " + WATER_YIELD_GURA_PROFILE.studyAreaName() + " and its subwatersheds to identify where water supply contribution is strongest and where the pattern has the clearest management implications.",
             "The annual water yield analysis has been prepared, validated, and submitted under governed execution. I'll update you when the result is ready.",
             "Preparing governed annual water yield analysis",
             "Annual water yield analysis prepared, validated, and submitted for governed execution.",
             "Subwatershed contribution patterns summarized",
-            "A governed result is ready. The strongest annual water yield contribution is concentrated in a subset of Gura subwatersheds, especially the upper catchments where precipitation input is stronger and land-cover conditions support higher runoff and supply generation. These subwatersheds matter most because they contribute disproportionately to downstream water availability relative to the rest of the study area. From a management perspective, this suggests prioritizing protection and monitoring in the high-yield catchments, while using the lower-yield subwatersheds to flag areas where land-use pressure or vegetation change could reduce future supply stability.",
+            "A governed result is ready. The strongest annual water yield contribution is concentrated in a subset of Gura subwatersheds, especially the upper catchments where precipitation input is stronger and land-cover conditions support higher runoff and supply generation. These subwatersheds matter most because they contribute disproportionately to downstream water availability relative to the rest of the study area. From a management perspective, " + WATER_YIELD_GURA_PROFILE.managementInterpretationSeed(),
             "The result is ready. Annual water yield outputs are available for the watershed and subwatersheds.",
-            "Highest water-yield contribution is concentrated in a subset of Gura subwatersheds with stronger downstream supply significance.",
+            WATER_YIELD_GURA_PROFILE.shortResultSummarySeed(),
             "If you want, I can continue by comparing subwatershed water yield, focusing on one catchment, or summarizing the management implications.",
-            List.of(
-                    "Watershed and subwatershed boundaries",
-                    "Land use and land cover",
-                    "Biophysical coefficients",
-                    "Annual precipitation and reference evapotranspiration"
-            ),
-            "The water yield run plan was compiled from watershed boundaries, land use, biophysical coefficients, precipitation, and reference evapotranspiration inputs.",
+            WATER_YIELD_GURA_PROFILE.planInputRolesSummary(),
+            "The water yield run plan was compiled for the " + WATER_YIELD_GURA_PROFILE.studyAreaName() + " using " + WATER_YIELD_GURA_PROFILE.spatialUnitsSummary().toLowerCase() + " and the required water-yield input roles.",
             "The annual water yield request passed governed validation for the configured watershed and climate inputs.",
             "A governed annual water yield execution package was frozen for the demo walkthrough before submission.",
             "Job and workspace handoff are summarized for the annual water yield demo execution path.",
             "The demo execution path completed and returned annual water yield outputs for the watershed and subwatersheds.",
             "This is a demo-derived execution progress summary, not native runtime heartbeat telemetry.",
-            "Result outputs were summarized into watershed-level and subwatershed-level annual water yield interpretation cues.",
+            "Annual water yield outputs were summarized into watershed-level and subwatershed-level contribution facts for the Gura case.",
             "The demo result bundle and primary water-yield interpretation artifacts were promoted for Session delivery.",
-            List.of(
-                    "Upper Gura catchments contribute the strongest annual water yield signal.",
-                    "Subwatershed contribution is uneven, with a subset carrying disproportionate downstream supply importance.",
-                    "Management attention should prioritize protection in high-yield catchments and monitoring in lower-yield areas under land-use pressure."
-            )
+            WATER_YIELD_GURA_PROFILE.resultHighlightSeeds()
     );
 
     private static final Map<String, DemoLiveSimulationNarrative> BY_TYPE = byType();
@@ -152,6 +148,7 @@ final class DemoLiveSimulationNarratives {
 
     record DemoLiveSimulationNarrative(
             String demoNarrativeType,
+            DemoCaseProfile demoCaseProfile,
             String sceneId,
             String liveSessionId,
             String liveTaskId,
@@ -198,6 +195,11 @@ final class DemoLiveSimulationNarratives {
             root.put("source_user_goal", userGoal);
             root.put("goal_parse_summary", "The request was framed as a " + analysisKind + " focused on " + goalType + ".");
             root.put("problem_framing_summary", understandingText);
+            if (demoCaseProfile != null) {
+                root.put("demo_case_id", demoCaseProfile.demoCaseId());
+                root.put("case_display_name", demoCaseProfile.caseDisplayName());
+                root.put("study_area_name", demoCaseProfile.studyAreaName());
+            }
             return root;
         }
 
@@ -213,8 +215,13 @@ final class DemoLiveSimulationNarratives {
             root.put("manifest_summary", manifestSummary);
             root.put("job_contract_summary", jobContractSummary);
             root.put("execution_progress_summary", executionProgressSummary);
-            ArrayNode inputs = root.putArray("plan_inputs_summary");
+            ArrayNode inputs = root.putArray("plan_input_roles_summary");
             planInputsSummary.forEach(inputs::add);
+            if (demoCaseProfile != null) {
+                root.put("case_display_name", demoCaseProfile.caseDisplayName());
+                root.put("study_area_name", demoCaseProfile.studyAreaName());
+                root.put("spatial_units_summary", demoCaseProfile.spatialUnitsSummary());
+            }
             return root;
         }
 
@@ -225,6 +232,11 @@ final class DemoLiveSimulationNarratives {
             root.put("result_ready_text", resultReadyText);
             root.put("result_extraction_summary", resultExtractionSummary);
             root.put("artifact_promotion_summary", artifactPromotionSummary);
+            if (demoCaseProfile != null) {
+                root.put("case_display_name", demoCaseProfile.caseDisplayName());
+                root.put("study_area_name", demoCaseProfile.studyAreaName());
+                root.put("result_object_summary", shortResultSummary);
+            }
             ArrayNode highlights = root.putArray("highlights");
             resultHighlights.forEach(highlights::add);
             return root;

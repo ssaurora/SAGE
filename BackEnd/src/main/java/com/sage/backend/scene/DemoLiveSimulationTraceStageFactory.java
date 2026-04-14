@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sage.backend.model.AnalysisSession;
 import com.sage.backend.model.SessionMessage;
+import com.sage.backend.scene.DemoCaseProfileFactory.DemoCaseProfile;
 import com.sage.backend.scene.DemoLiveSimulationNarratives.DemoLiveSimulationNarrative;
 import com.sage.backend.scene.dto.DemoLiveSimulationSupportDTO;
 import com.sage.backend.scene.dto.DemoTraceStageDTO;
@@ -59,7 +60,16 @@ final class DemoLiveSimulationTraceStageFactory {
         String executionSummary = nonBlank(field(progress, "execution_progress_summary", objectMapper), narrative.executionProgressSummary());
         String resultExtractionSummary = nonBlank(field(result, "result_extraction_summary", objectMapper), narrative.resultExtractionSummary());
         String artifactPromotionSummary = nonBlank(field(result, "artifact_promotion_summary", objectMapper), narrative.artifactPromotionSummary());
-        List<String> planInputs = stringArray(progress, "plan_inputs_summary", objectMapper, narrative.planInputsSummary());
+        List<String> planInputs = stringArray(progress, "plan_input_roles_summary", objectMapper, narrative.planInputsSummary());
+        DemoCaseProfile demoCaseProfile = narrative.demoCaseProfile();
+        String studyAreaName = demoCaseProfile == null ? null : demoCaseProfile.studyAreaName();
+        String spatialUnitsSummary = demoCaseProfile == null ? null : demoCaseProfile.spatialUnitsSummary();
+        String selectedTemplate = demoCaseProfile == null ? narrative.selectedTemplate() : demoCaseProfile.selectedTemplate();
+        String shortResultSummarySeed = demoCaseProfile == null ? null : demoCaseProfile.shortResultSummarySeed();
+        String planCompiledSummary = buildPlanCompiledSummary(planningSummary, studyAreaName, spatialUnitsSummary, planInputs, selectedTemplate);
+        String resultDeliveredSummary = buildResultDeliveredSummary(studyAreaName, shortResultSummarySeed);
+        List<String> planCompiledOutputs = buildPlanCompiledOutputs(studyAreaName, spatialUnitsSummary, planInputs, selectedTemplate);
+        List<String> resultDeliveredOutputs = buildResultDeliveredOutputs(shortResultSummarySeed);
 
         List<DemoTraceStageDTO> stages = new ArrayList<>();
         stages.add(stage(
@@ -138,16 +148,19 @@ final class DemoLiveSimulationTraceStageFactory {
                 "High-level demo summary stage. The current backend does not expose a native planning runtime trace for this path.",
                 understanding == null ? null : understanding.getCreatedAt().toString(),
                 progress == null ? null : progress.getCreatedAt().toString(),
-                planningSummary,
-                List.of(
-                        "Template and role declaration summarized for demo walkthrough.",
-                        "Context, bindings, args, and execution assumptions summarized rather than traced natively."
+                planCompiledSummary,
+                planCompiledOutputs,
+                payload(
+                        "selected_template", field(understanding, "selected_template", objectMapper),
+                        "study_area_name", studyAreaName,
+                        "spatial_units_summary", spatialUnitsSummary,
+                        "plan_input_roles_summary", planInputs,
+                        "derived_from", List.of("assistant_understanding", "progress_update")
                 ),
-                payload("selected_template", field(understanding, "selected_template", objectMapper), "derived_from", List.of("assistant_understanding", "progress_update")),
                 List.of(
-                        child("template_role_declared", "Template / Role Declared", "planning", planCompiled ? "completed" : "pending", DERIVED_SUMMARY, "A high-level template and role declaration is inferred for the demo walkthrough.", List.of(nonBlank(field(understanding, "selected_template", objectMapper), narrative.selectedTemplate())), payload("selected_template", field(understanding, "selected_template", objectMapper))),
-                        child("context_enrichment_summary", "Context Enrichment Summary", "planning", planCompiled ? "completed" : "pending", DERIVED_SUMMARY, planningSummary, planInputs, payload("analysis_kind", field(understanding, "analysis_kind", objectMapper))),
-                        child("slot_binding_summary", "Slot Binding Summary", "planning", planCompiled ? "completed" : "pending", DERIVED_SUMMARY, "Binding details are summarized as part of the demo planning surface.", List.of("No raw slot-binding object is exposed in this demo path."), payload("support_mode", "demo_walkthrough_summary")),
+                        child("template_role_declared", "Template / Role Declared", "planning", planCompiled ? "completed" : "pending", DERIVED_SUMMARY, "A high-level template and role declaration is inferred for the demo walkthrough.", List.of(nonBlank(field(understanding, "selected_template", objectMapper), selectedTemplate)), payload("selected_template", field(understanding, "selected_template", objectMapper), "case_display_name", demoCaseProfile == null ? null : demoCaseProfile.caseDisplayName())),
+                        child("context_enrichment_summary", "Context Enrichment Summary", "planning", planCompiled ? "completed" : "pending", DERIVED_SUMMARY, planningSummary, buildContextOutputs(studyAreaName, spatialUnitsSummary), payload("analysis_kind", field(understanding, "analysis_kind", objectMapper), "study_area_name", studyAreaName, "spatial_units_summary", spatialUnitsSummary)),
+                        child("slot_binding_summary", "Slot Binding Summary", "planning", planCompiled ? "completed" : "pending", DERIVED_SUMMARY, "Key input roles were mapped into the demo planning surface without exposing raw slot-binding objects.", planInputs, payload("support_mode", "demo_walkthrough_summary", "plan_input_roles_summary", planInputs)),
                         child("args_draft_summary", "Args Draft Summary", "planning", planCompiled ? "completed" : "pending", DERIVED_SUMMARY, "Execution arguments are represented only as a derived planning summary.", List.of("Current demo path does not expose native args drafting trace."), payload("support_mode", "derived_summary")),
                         child("execution_graph_summary", "Execution Graph Summary", "planning", planCompiled ? "completed" : "pending", DERIVED_SUMMARY, "A runnable execution graph is implied for the walkthrough but not surfaced as a native runtime graph trace.", List.of("Demo walkthrough only."), payload("support_mode", "derived_summary")),
                         child("runtime_assertions_summary", "Runtime Assertions Summary", "planning", planCompiled ? "completed" : "pending", DERIVED_SUMMARY, "Runtime assertions are summarized conceptually rather than traced as first-class runtime objects.", List.of("Current backend does not emit native assertion trace for this demo path."), payload("support_mode", "derived_summary"))
@@ -228,14 +241,11 @@ final class DemoLiveSimulationTraceStageFactory {
                 "Projected result delivery stage. Mixed-authority children distinguish derived extraction summary from demo-orchestrated explanation arrival.",
                 result == null ? null : result.getCreatedAt().toString(),
                 result == null ? null : result.getCreatedAt().toString(),
-                "Result delivery bundles extraction summary and explanation arrival without exposing raw execution internals in the main conversation.",
+                resultDeliveredSummary,
+                resultDeliveredOutputs,
+                payload("latest_result_bundle_id", session.getLatestResultBundleId(), "session_status", session.getStatus(), "study_area_name", studyAreaName),
                 List.of(
-                        "Result bundle pointer attached to the live demo session.",
-                        "Primary explanation becomes available in the main conversation."
-                ),
-                payload("latest_result_bundle_id", session.getLatestResultBundleId(), "session_status", session.getStatus()),
-                List.of(
-                        child("result_extraction_summary", "Result Extraction Summary", "capability", resultDelivered ? "completed" : "pending", DERIVED_SUMMARY, resultExtractionSummary, List.of(nonBlank(field(result, "summary", objectMapper), "Result summary derived.")), payload("summary", field(result, "summary", objectMapper))),
+                        child("result_extraction_summary", "Result Extraction Summary", "capability", resultDelivered ? "completed" : "pending", DERIVED_SUMMARY, resultExtractionSummary, List.of(nonBlank(field(result, "result_object_summary", objectMapper), nonBlank(field(result, "summary", objectMapper), "Result summary derived."))), payload("summary", field(result, "summary", objectMapper), "result_object_summary", field(result, "result_object_summary", objectMapper))),
                         child("artifact_promotion_summary", "Artifact Promotion Summary", "capability", resultDelivered ? "completed" : "pending", DERIVED_SUMMARY, artifactPromotionSummary, List.of("Current demo path does not expose a native artifact-promotion trace event."), payload("result_bundle_id", session.getLatestResultBundleId())),
                         child("primary_explanation_arrived", "Primary Explanation Arrived", "cognition", resultDelivered ? "completed" : "pending", DEMO_ORCHESTRATED, "The demo orchestrator releases the primary explanation into the main conversation with the result-ready step.", List.of(nonBlank(field(result, "text", objectMapper), "Primary explanation emitted.")), payload("explanation_source", "demo_result_summary_mapping"))
                 )
@@ -339,5 +349,56 @@ final class DemoLiveSimulationTraceStageFactory {
 
     private static String nonBlank(String primary, String fallback) {
         return primary == null || primary.isBlank() ? fallback : primary;
+    }
+
+    private static String buildPlanCompiledSummary(String planningSummary, String studyAreaName, String spatialUnitsSummary, List<String> planInputs, String selectedTemplate) {
+        if (studyAreaName == null && spatialUnitsSummary == null) {
+            return planningSummary;
+        }
+        return "Study area: " + nonBlank(studyAreaName, "Not specified")
+                + ". Spatial units: " + nonBlank(spatialUnitsSummary, "Not specified")
+                + ". Key inputs: " + String.join(", ", planInputs)
+                + ". Template: " + nonBlank(selectedTemplate, "Not specified") + ".";
+    }
+
+    private static List<String> buildPlanCompiledOutputs(String studyAreaName, String spatialUnitsSummary, List<String> planInputs, String selectedTemplate) {
+        List<String> outputs = new ArrayList<>();
+        if (studyAreaName != null) outputs.add("Study area: " + studyAreaName);
+        if (spatialUnitsSummary != null) outputs.add("Spatial units: " + spatialUnitsSummary);
+        if (!planInputs.isEmpty()) outputs.add("Key inputs: " + String.join(", ", planInputs));
+        if (selectedTemplate != null) outputs.add("Template: " + selectedTemplate);
+        if (outputs.isEmpty()) {
+            outputs.add("Template and walkthrough plan summary available.");
+        }
+        return outputs;
+    }
+
+    private static List<String> buildContextOutputs(String studyAreaName, String spatialUnitsSummary) {
+        List<String> outputs = new ArrayList<>();
+        if (studyAreaName != null) outputs.add("Study area: " + studyAreaName);
+        if (spatialUnitsSummary != null) outputs.add("Spatial units: " + spatialUnitsSummary);
+        if (outputs.isEmpty()) outputs.add("Walkthrough context summary available.");
+        return outputs;
+    }
+
+    private static String buildResultDeliveredSummary(String studyAreaName, String shortResultSummarySeed) {
+        String prefix = studyAreaName == null
+                ? "Result objects and the primary explanation are ready for Session delivery."
+                : "Result objects and the primary explanation are ready for " + studyAreaName + " Session delivery.";
+        if (shortResultSummarySeed == null) {
+            return prefix;
+        }
+        return prefix + " " + shortResultSummarySeed;
+    }
+
+    private static List<String> buildResultDeliveredOutputs(String shortResultSummarySeed) {
+        List<String> outputs = new ArrayList<>();
+        if (shortResultSummarySeed != null) {
+            outputs.add(shortResultSummarySeed);
+        } else {
+            outputs.add("Result bundle pointer attached to the live demo session.");
+        }
+        outputs.add("Primary explanation becomes available in the main conversation.");
+        return outputs;
     }
 }
