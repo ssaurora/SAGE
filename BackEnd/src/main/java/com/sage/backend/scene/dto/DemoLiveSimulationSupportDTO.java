@@ -34,6 +34,9 @@ public class DemoLiveSimulationSupportDTO {
     @JsonProperty("demo_last_step_emitted_at")
     private String demoLastStepEmittedAt;
 
+    @JsonProperty("demo_awaiting_execution_confirmation")
+    private Boolean demoAwaitingExecutionConfirmation;
+
     @JsonProperty("demo_reset_required")
     private Boolean demoResetRequired;
 
@@ -108,6 +111,14 @@ public class DemoLiveSimulationSupportDTO {
 
     public void setDemoLastStepEmittedAt(String demoLastStepEmittedAt) {
         this.demoLastStepEmittedAt = demoLastStepEmittedAt;
+    }
+
+    public Boolean getDemoAwaitingExecutionConfirmation() {
+        return demoAwaitingExecutionConfirmation;
+    }
+
+    public void setDemoAwaitingExecutionConfirmation(Boolean demoAwaitingExecutionConfirmation) {
+        this.demoAwaitingExecutionConfirmation = demoAwaitingExecutionConfirmation;
     }
 
     public Boolean getDemoResetRequired() {

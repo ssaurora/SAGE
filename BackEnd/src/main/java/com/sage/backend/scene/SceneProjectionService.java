@@ -166,6 +166,13 @@ public class SceneProjectionService {
         return loadSessionProjection(userId, requireCurrentSession(sceneProjectionQueryService.loadSceneContext(userId, sceneId)));
     }
 
+    public SessionProjectionDTO confirmDemoLiveSimulationExecution(Long userId, String sceneId) {
+        SceneProjectionContext context = sceneProjectionQueryService.loadSceneContext(userId, sceneId);
+        AnalysisSession currentSession = requireCurrentSession(context);
+        demoSceneSessionSimulationService.confirmDemoLiveSimulationExecution(sceneId, currentSession);
+        return loadSessionProjection(userId, requireCurrentSession(sceneProjectionQueryService.loadSceneContext(userId, sceneId)));
+    }
+
     private SceneSummaryDTO buildSceneSummary(Long userId, SceneProjectionContext context) {
         TaskDetailResponse currentTaskDetail = loadTaskDetail(userId, context.getCurrentTask());
         List<TaskDetailResponse> readyResultTaskDetails = loadReadyResultTaskDetails(userId, context, currentTaskDetail);
@@ -245,6 +252,8 @@ public class SceneProjectionService {
             }
             case "assistant_execution_brief" ->
                     mapped.add(buildSceneMessage(source, "assistant", "conversation", "main_conversation", "execution_brief", "assistant_execution_brief", buildExecutionBriefContent(source), false, null));
+            case "run_submitted_notice" ->
+                    mapped.add(buildSceneMessage(source, "system", "governance_note", "main_conversation", "submitted_notice", "run_submitted_notice", normalizeConversationContent(source), false, null));
             case "progress_update" -> {
                 mapped.add(buildSceneMessage(source, "assistant", "governance_note", "main_conversation", "validate_submit", null, buildPreparedAndSubmittedContent(source), false, null));
                 mapped.add(buildTraceMessage(source, "execution"));

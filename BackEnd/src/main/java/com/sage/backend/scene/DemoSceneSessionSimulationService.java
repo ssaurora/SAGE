@@ -42,6 +42,8 @@ public class DemoSceneSessionSimulationService {
     private static final String DEMO_STEP_USER_GOAL_ACCEPTED = "demo_user_goal_accepted";
     private static final String DEMO_STEP_ASSISTANT_UNDERSTANDING_EMITTED = "demo_assistant_understanding_emitted";
     private static final String DEMO_STEP_ASSISTANT_EXECUTION_BRIEF_EMITTED = "demo_assistant_execution_brief_emitted";
+    private static final String DEMO_STEP_AWAITING_EXECUTION_CONFIRMATION = "demo_awaiting_execution_confirmation";
+    private static final String DEMO_STEP_RUN_SUBMITTED_NOTICE_EMITTED = "demo_run_submitted_notice_emitted";
     private static final String DEMO_STEP_RUN_PREPARING = "demo_run_preparing";
     private static final String DEMO_STEP_RUN_SUBMITTED = "demo_run_submitted";
     private static final String DEMO_STEP_RUN_RUNNING = "demo_run_running";
@@ -101,6 +103,11 @@ public class DemoSceneSessionSimulationService {
             demoLiveSimulationRuns.remove(narrative.liveSessionId(), activeDemoRun);
             activeDemoRun = null;
         }
+        if (activeDemoRun != null && activeDemoRun.awaitingExecutionConfirmation()) {
+            resetDemoLiveSimulationSession(currentSession);
+            activeDemoRun = null;
+            latestSession = requireDemoLiveSimulationSession(narrative.liveSessionId());
+        }
         if (activeDemoRun != null && activeDemoRun.demoRunActive()) {
             throw new ResponseStatusException(CONFLICT, DEMO_RUN_ACTIVE_MESSAGE);
         }
@@ -142,6 +149,34 @@ public class DemoSceneSessionSimulationService {
 
         demoRunState.markDemoStepCompleted(DEMO_STEP_USER_GOAL_ACCEPTED, now);
         scheduleDemoAssistantUnderstanding(narrative, demoRunId, userGoal);
+    }
+
+    public void confirmDemoLiveSimulationExecution(String sceneId, AnalysisSession currentSession) {
+        DemoLiveSimulationNarrative narrative = requireDemoNarrative(sceneId, currentSession);
+        DemoLiveSimulationRunState runState = demoLiveSimulationRuns.get(narrative.liveSessionId());
+        if (runState == null || !runState.awaitingExecutionConfirmation()) {
+            throw new ResponseStatusException(CONFLICT, DEMO_RUN_RESET_REQUIRED_MESSAGE);
+        }
+
+        AnalysisSession latestSession = requireDemoLiveSimulationSession(narrative.liveSessionId());
+        if (SessionStatus.READY_RESULT.name().equals(latestSession.getStatus())) {
+            throw new ResponseStatusException(CONFLICT, DEMO_RUN_COMPLETE_MESSAGE);
+        }
+
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        transactionTemplate.executeWithoutResult(status -> appendMessage(
+                narrative.liveSessionId(),
+                narrative.liveTaskId(),
+                null,
+                "system",
+                "run_submitted_notice",
+                narrative.buildRunSubmittedNoticePayload(objectMapper),
+                buildTaskRef(narrative.liveTaskId()),
+                now
+        ));
+
+        runState.markExecutionConfirmed(now);
+        scheduleDemoRunPreparing(narrative, runState.demoRunId());
     }
 
     public void resetDemoLiveSimulationSession(AnalysisSession currentSession) {
@@ -212,6 +247,7 @@ public class DemoSceneSessionSimulationService {
 
         support.setDemoRunActive(false);
         support.setDemoRunId(null);
+        support.setDemoAwaitingExecutionConfirmation(false);
         support.setDemoResetRequired(SessionStatus.READY_RESULT.name().equals(currentSession.getStatus()));
         support.setDemoStartedAt(null);
         support.setDemoLastStepEmittedAt(null);
@@ -279,7 +315,6 @@ public class DemoSceneSessionSimulationService {
                             buildTaskRef(narrative.liveTaskId()),
                             OffsetDateTime.now(ZoneOffset.UTC)
                     );
-                    scheduleDemoRunPreparing(narrative, demoRunId);
                 }
         );
     }
@@ -440,7 +475,11 @@ public class DemoSceneSessionSimulationService {
 
             stageWriter.run();
             OffsetDateTime emittedAt = OffsetDateTime.now(ZoneOffset.UTC);
-            latestRunState.markDemoStepCompleted(stepId, emittedAt);
+            if (DEMO_STEP_ASSISTANT_EXECUTION_BRIEF_EMITTED.equals(stepId)) {
+                latestRunState.pauseForExecutionConfirmation(emittedAt);
+            } else {
+                latestRunState.markDemoStepCompleted(stepId, emittedAt);
+            }
             if (DEMO_STEP_FOLLOW_UP_INVITATION_EMITTED.equals(stepId)) {
                 latestRunState.finishDemoRun(emittedAt);
             }
@@ -533,6 +572,7 @@ public class DemoSceneSessionSimulationService {
         steps.add(DEMO_STEP_USER_GOAL_ACCEPTED);
         steps.add(DEMO_STEP_ASSISTANT_UNDERSTANDING_EMITTED);
         steps.add(DEMO_STEP_ASSISTANT_EXECUTION_BRIEF_EMITTED);
+        steps.add(DEMO_STEP_RUN_SUBMITTED_NOTICE_EMITTED);
         steps.add(DEMO_STEP_RUN_PREPARING);
         steps.add(DEMO_STEP_RUN_SUBMITTED);
         steps.add(DEMO_STEP_RUN_RUNNING);
@@ -634,6 +674,7 @@ public class DemoSceneSessionSimulationService {
         private final OffsetDateTime demoStartedAt;
         private final Set<String> demoCompletedSteps = new LinkedHashSet<>();
         private volatile boolean demoRunActive;
+        private volatile boolean demoAwaitingExecutionConfirmation;
         private volatile String demoCurrentStep;
         private volatile OffsetDateTime demoLastStepEmittedAt;
         private volatile OffsetDateTime demoNextScheduledStepAt;
@@ -642,6 +683,7 @@ public class DemoSceneSessionSimulationService {
             this.demoRunId = demoRunId;
             this.demoStartedAt = demoStartedAt;
             this.demoRunActive = true;
+            this.demoAwaitingExecutionConfirmation = false;
             this.demoCurrentStep = DEMO_STEP_IDLE;
         }
 
@@ -657,6 +699,14 @@ public class DemoSceneSessionSimulationService {
             return demoRunActive;
         }
 
+        private String demoRunId() {
+            return demoRunId;
+        }
+
+        private boolean awaitingExecutionConfirmation() {
+            return demoAwaitingExecutionConfirmation;
+        }
+
         private synchronized void setDemoNextScheduledStepAt(OffsetDateTime nextScheduledStepAt) {
             this.demoNextScheduledStepAt = nextScheduledStepAt;
         }
@@ -668,18 +718,38 @@ public class DemoSceneSessionSimulationService {
             this.demoNextScheduledStepAt = null;
         }
 
+        private synchronized void pauseForExecutionConfirmation(OffsetDateTime emittedAt) {
+            this.demoCompletedSteps.add(DEMO_STEP_ASSISTANT_EXECUTION_BRIEF_EMITTED);
+            this.demoCurrentStep = DEMO_STEP_AWAITING_EXECUTION_CONFIRMATION;
+            this.demoLastStepEmittedAt = emittedAt;
+            this.demoNextScheduledStepAt = null;
+            this.demoRunActive = false;
+            this.demoAwaitingExecutionConfirmation = true;
+        }
+
+        private synchronized void markExecutionConfirmed(OffsetDateTime emittedAt) {
+            this.demoCompletedSteps.add(DEMO_STEP_RUN_SUBMITTED_NOTICE_EMITTED);
+            this.demoCurrentStep = DEMO_STEP_RUN_SUBMITTED_NOTICE_EMITTED;
+            this.demoLastStepEmittedAt = emittedAt;
+            this.demoNextScheduledStepAt = null;
+            this.demoRunActive = true;
+            this.demoAwaitingExecutionConfirmation = false;
+        }
+
         private synchronized void finishDemoRun(OffsetDateTime completedAt) {
             this.demoCurrentStep = DEMO_STEP_COMPLETED;
             this.demoCompletedSteps.add(DEMO_STEP_COMPLETED);
             this.demoLastStepEmittedAt = completedAt;
             this.demoNextScheduledStepAt = null;
             this.demoRunActive = false;
+            this.demoAwaitingExecutionConfirmation = false;
         }
 
         private synchronized void copyInto(DemoLiveSimulationSupportDTO support) {
             support.setDemoRunActive(demoRunActive);
             support.setDemoRunId(demoRunId);
             support.setDemoCurrentStep(demoCurrentStep);
+            support.setDemoAwaitingExecutionConfirmation(demoAwaitingExecutionConfirmation);
             support.getDemoCompletedSteps().clear();
             support.getDemoCompletedSteps().addAll(demoCompletedSteps);
             support.setDemoStartedAt(demoStartedAt == null ? null : demoStartedAt.toString());

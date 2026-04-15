@@ -40,8 +40,9 @@ final class DemoLiveSimulationNarratives {
                     "Canopy opportunity blocks",
                     "Interpretation-ready cooling priority summary"
             ),
+            "Execution brief confirmed. I've submitted the governed run.",
             "Reviewing the strongest cooling priority patterns and the tradeoff between canopy expansion and park expansion.",
-            "The result is ready. Cooling priority zones have been identified and ranked.",
+            "The governed run has completed successfully. Cooling priority zones are ready for review.",
             "The strongest cooling opportunities cluster in low-canopy neighborhoods with high afternoon heat burden and limited park access. These places matter most because heat burden, missing shade, and limited green relief overlap more strongly there than in the rest of the city. From a management perspective, this suggests prioritizing canopy expansion in the highest-burden residential blocks first, then using park expansion selectively where dense apartment clusters still lack accessible green relief.",
             "If you want, I can continue by comparing tree canopy expansion versus park expansion, narrowing this to one district or corridor, or turning these priority zones into a phased action shortlist.",
             List.of(
@@ -93,8 +94,9 @@ final class DemoLiveSimulationNarratives {
                     "Subwatershed contribution outputs",
                     "Interpretation-ready management summary"
             ),
+            "Execution brief confirmed. I've submitted the governed run.",
             "I'm reviewing the strongest subwatershed contribution patterns and management implications.",
-            "The result is ready. Annual water yield outputs are available for the watershed and subwatersheds.",
+            "The governed run has completed successfully. Annual water yield outputs are ready for the watershed and subwatersheds.",
             "The strongest annual water yield contribution is concentrated in a subset of Gura subwatersheds, especially the upper catchments where precipitation input is stronger and land-cover conditions support higher runoff and supply generation. These subwatersheds matter most because they contribute disproportionately to downstream water availability relative to the rest of the study area. From a management perspective, " + WATER_YIELD_GURA_PROFILE.managementInterpretationSeed(),
             "If you want, I can continue by comparing subwatershed water yield, focusing on one catchment, or summarizing the management implications.",
             WATER_YIELD_GURA_PROFILE.planInputRolesSummary(),
@@ -181,6 +183,7 @@ final class DemoLiveSimulationNarratives {
             String understandingText,
             String executionBriefIntro,
             List<String> expectedOutputsSummary,
+            String runSubmittedNoticeText,
             String reviewingText,
             String resultReadyText,
             String primaryExplanationText,
@@ -253,6 +256,12 @@ final class DemoLiveSimulationNarratives {
                 root.put("demo_case_id", demoCaseProfile.demoCaseId());
                 root.put("case_display_name", demoCaseProfile.caseDisplayName());
             }
+            return root;
+        }
+
+        ObjectNode buildRunSubmittedNoticePayload(ObjectMapper objectMapper) {
+            ObjectNode root = objectMapper.createObjectNode();
+            root.put("text", runSubmittedNoticeText);
             return root;
         }
 
