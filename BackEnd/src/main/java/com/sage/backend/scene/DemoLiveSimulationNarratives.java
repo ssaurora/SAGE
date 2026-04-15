@@ -34,19 +34,23 @@ final class DemoLiveSimulationNarratives {
             "heat mitigation",
             "urban_cooling_v1",
             "I'll identify where added tree canopy and park expansion are most likely to reduce extreme heat exposure across the city, with priority given to places where heat burden and lack of green access overlap.",
-            "The analysis has been prepared, validated, and submitted under governed execution. I'll update you when the result is ready.",
-            "Preparing governed urban cooling analysis",
-            "Analysis prepared, validated, and submitted for governed execution.",
-            "Cooling priority zones ranked",
-            "A governed result is ready. The strongest cooling opportunities cluster in low-canopy neighborhoods with high afternoon heat burden and limited park access.",
+            "Before I run it, here's the execution brief for this analysis.",
+            List.of(
+                    "Cooling priority zone summary",
+                    "Canopy opportunity blocks",
+                    "Interpretation-ready cooling priority summary"
+            ),
+            "Reviewing the strongest cooling priority patterns and the tradeoff between canopy expansion and park expansion.",
             "The result is ready. Cooling priority zones have been identified and ranked.",
-            "Priority zones concentrate in low-canopy neighborhoods with high heat burden and limited park access.",
+            "The strongest cooling opportunities cluster in low-canopy neighborhoods with high afternoon heat burden and limited park access. These places matter most because heat burden, missing shade, and limited green relief overlap more strongly there than in the rest of the city. From a management perspective, this suggests prioritizing canopy expansion in the highest-burden residential blocks first, then using park expansion selectively where dense apartment clusters still lack accessible green relief.",
             "If you want, I can continue by comparing tree canopy expansion versus park expansion, narrowing this to one district or corridor, or turning these priority zones into a phased action shortlist.",
             List.of(
                     "Urban heat exposure surface",
                     "Existing tree canopy coverage",
                     "Park access and green-space availability"
             ),
+            "Citywide heat-mitigation study area",
+            "Cooling priority zones + canopy opportunity blocks",
             "Relevant heat burden, canopy gap, and green-access context were compiled into a walkthrough plan summary for the urban cooling run.",
             "Prepared urban cooling inputs passed the governed validation gate for this demo success path.",
             "Manifest freezing is represented as a control-plane walkthrough summary for the governed urban cooling run.",
@@ -59,7 +63,11 @@ final class DemoLiveSimulationNarratives {
                     "Southwest residential heat islands rank highest for canopy expansion.",
                     "The central transit corridor shows the largest cooling benefit per hectare of added shade.",
                     "Pocket park expansion is recommended around dense apartment clusters with limited green relief."
-            )
+            ),
+            "Validating configured urban cooling inputs and finalizing the governed run package.",
+            "The governed urban cooling run has been submitted.",
+            "Running the governed urban cooling analysis.",
+            "Urban cooling outputs are ready for review and interpretation."
     );
 
     private static final DemoLiveSimulationNarrative WATER_YIELD = new DemoLiveSimulationNarrative(
@@ -79,15 +87,19 @@ final class DemoLiveSimulationNarratives {
             "water supply contribution",
             WATER_YIELD_GURA_PROFILE.selectedTemplate(),
             "I'll analyze annual water yield across the " + WATER_YIELD_GURA_PROFILE.studyAreaName() + " and its subwatersheds to identify where water supply contribution is strongest and where the pattern has the clearest management implications.",
-            "The annual water yield analysis has been prepared, validated, and submitted under governed execution. I'll update you when the result is ready.",
-            "Preparing governed annual water yield analysis",
-            "Annual water yield analysis prepared, validated, and submitted for governed execution.",
-            "Subwatershed contribution patterns summarized",
-            "A governed result is ready. The strongest annual water yield contribution is concentrated in a subset of Gura subwatersheds, especially the upper catchments where precipitation input is stronger and land-cover conditions support higher runoff and supply generation. These subwatersheds matter most because they contribute disproportionately to downstream water availability relative to the rest of the study area. From a management perspective, " + WATER_YIELD_GURA_PROFILE.managementInterpretationSeed(),
+            "Before I run it, here's the execution brief for this analysis.",
+            List.of(
+                    "Watershed summary",
+                    "Subwatershed contribution outputs",
+                    "Interpretation-ready management summary"
+            ),
+            "I'm reviewing the strongest subwatershed contribution patterns and management implications.",
             "The result is ready. Annual water yield outputs are available for the watershed and subwatersheds.",
-            WATER_YIELD_GURA_PROFILE.shortResultSummarySeed(),
+            "The strongest annual water yield contribution is concentrated in a subset of Gura subwatersheds, especially the upper catchments where precipitation input is stronger and land-cover conditions support higher runoff and supply generation. These subwatersheds matter most because they contribute disproportionately to downstream water availability relative to the rest of the study area. From a management perspective, " + WATER_YIELD_GURA_PROFILE.managementInterpretationSeed(),
             "If you want, I can continue by comparing subwatershed water yield, focusing on one catchment, or summarizing the management implications.",
             WATER_YIELD_GURA_PROFILE.planInputRolesSummary(),
+            WATER_YIELD_GURA_PROFILE.studyAreaName(),
+            "Watershed + subwatersheds",
             "The water yield run plan was compiled for the " + WATER_YIELD_GURA_PROFILE.studyAreaName() + " using " + WATER_YIELD_GURA_PROFILE.spatialUnitsSummary().toLowerCase() + " and the required water-yield input roles.",
             "The annual water yield request passed governed validation for the configured watershed and climate inputs.",
             "A governed annual water yield execution package was frozen for the demo walkthrough before submission.",
@@ -96,7 +108,11 @@ final class DemoLiveSimulationNarratives {
             "This is a demo-derived execution progress summary, not native runtime heartbeat telemetry.",
             "Annual water yield outputs were summarized into watershed-level and subwatershed-level contribution facts for the Gura case.",
             "The demo result bundle and primary water-yield interpretation artifacts were promoted for Session delivery.",
-            WATER_YIELD_GURA_PROFILE.resultHighlightSeeds()
+            WATER_YIELD_GURA_PROFILE.resultHighlightSeeds(),
+            "Validating configured water-yield inputs and finalizing the governed run package.",
+            "The governed annual water yield run has been submitted.",
+            "Running the governed annual water yield analysis.",
+            "Annual water yield outputs are ready for review and interpretation."
     );
 
     private static final Map<String, DemoLiveSimulationNarrative> BY_TYPE = byType();
@@ -163,15 +179,15 @@ final class DemoLiveSimulationNarratives {
             String goalType,
             String selectedTemplate,
             String understandingText,
-            String preparedSubmittedText,
-            String currentSystemAction,
-            String validationNote,
-            String estimatedNextMilestone,
-            String primaryExplanationText,
+            String executionBriefIntro,
+            List<String> expectedOutputsSummary,
+            String reviewingText,
             String resultReadyText,
-            String shortResultSummary,
+            String primaryExplanationText,
             String followUpInvitationText,
             List<String> planInputsSummary,
+            String studyAreaSummary,
+            String spatialUnitsSummary,
             String planningSummary,
             String validationSummary,
             String manifestSummary,
@@ -180,7 +196,11 @@ final class DemoLiveSimulationNarratives {
             String executionProgressSummary,
             String resultExtractionSummary,
             String artifactPromotionSummary,
-            List<String> resultHighlights
+            List<String> resultHighlights,
+            String runPreparingDetail,
+            String runSubmittedDetail,
+            String runRunningDetail,
+            String runCompletedDetail
     ) {
 
         ObjectNode buildAssistantUnderstandingPayload(ObjectMapper objectMapper, String userGoal) {
@@ -203,42 +223,73 @@ final class DemoLiveSimulationNarratives {
             return root;
         }
 
-        ObjectNode buildProgressUpdatePayload(ObjectMapper objectMapper) {
+        ObjectNode buildExecutionBriefPayload(ObjectMapper objectMapper) {
             ObjectNode root = objectMapper.createObjectNode();
-            root.put("text", preparedSubmittedText);
-            root.put("current_phase_label", "RUNNING");
-            root.put("current_system_action", currentSystemAction);
-            root.put("latest_progress_note", validationNote);
-            root.put("estimated_next_milestone", estimatedNextMilestone);
+            root.put("text", executionBriefIntro);
+            root.put("analysis_type", analysisKind);
+            root.put("study_area", studyAreaSummary);
+            root.put("spatial_units", spatialUnitsSummary);
+
+            ArrayNode keyInputs = root.putArray("key_inputs");
+            planInputsSummary.forEach(keyInputs::add);
+
+            ArrayNode expectedOutputs = root.putArray("expected_outputs");
+            expectedOutputsSummary.forEach(expectedOutputs::add);
+
+            ObjectNode brief = root.putObject("brief");
+            brief.put("analysis_type", analysisKind);
+            brief.put("study_area", studyAreaSummary);
+            brief.put("spatial_units", spatialUnitsSummary);
+            ArrayNode briefInputs = brief.putArray("key_inputs");
+            planInputsSummary.forEach(briefInputs::add);
+            ArrayNode briefOutputs = brief.putArray("expected_outputs");
+            expectedOutputsSummary.forEach(briefOutputs::add);
+
             root.put("planning_summary", planningSummary);
-            root.put("validation_summary", validationSummary);
-            root.put("manifest_summary", manifestSummary);
-            root.put("job_contract_summary", jobContractSummary);
-            root.put("execution_progress_summary", executionProgressSummary);
-            ArrayNode inputs = root.putArray("plan_input_roles_summary");
-            planInputsSummary.forEach(inputs::add);
+            root.put("selected_template", selectedTemplate);
+            root.put("capability_key", capabilityKey);
+            root.put("result_object_summary", shortResultSummary());
             if (demoCaseProfile != null) {
+                root.put("demo_case_id", demoCaseProfile.demoCaseId());
                 root.put("case_display_name", demoCaseProfile.caseDisplayName());
-                root.put("study_area_name", demoCaseProfile.studyAreaName());
-                root.put("spatial_units_summary", demoCaseProfile.spatialUnitsSummary());
             }
             return root;
         }
 
-        ObjectNode buildResultSummaryPayload(ObjectMapper objectMapper) {
+        ObjectNode buildResultReadyPayload(ObjectMapper objectMapper) {
             ObjectNode root = objectMapper.createObjectNode();
-            root.put("text", "A governed result is ready. " + primaryExplanationText);
-            root.put("summary", shortResultSummary);
+            root.put("text", resultReadyText);
+            root.put("summary", shortResultSummary());
             root.put("result_ready_text", resultReadyText);
-            root.put("result_extraction_summary", resultExtractionSummary);
-            root.put("artifact_promotion_summary", artifactPromotionSummary);
+            root.put("result_object_summary", shortResultSummary());
+            ArrayNode highlights = root.putArray("highlights");
+            resultHighlights.forEach(highlights::add);
             if (demoCaseProfile != null) {
                 root.put("case_display_name", demoCaseProfile.caseDisplayName());
                 root.put("study_area_name", demoCaseProfile.studyAreaName());
-                root.put("result_object_summary", shortResultSummary);
             }
+            return root;
+        }
+
+        ObjectNode buildAssistantReviewingPayload(ObjectMapper objectMapper) {
+            ObjectNode root = objectMapper.createObjectNode();
+            root.put("text", reviewingText);
+            return root;
+        }
+
+        ObjectNode buildFinalExplanationPayload(ObjectMapper objectMapper) {
+            ObjectNode root = objectMapper.createObjectNode();
+            root.put("text", primaryExplanationText);
+            root.put("summary", shortResultSummary());
+            root.put("result_extraction_summary", resultExtractionSummary);
+            root.put("artifact_promotion_summary", artifactPromotionSummary);
+            root.put("result_object_summary", shortResultSummary());
             ArrayNode highlights = root.putArray("highlights");
             resultHighlights.forEach(highlights::add);
+            if (demoCaseProfile != null) {
+                root.put("case_display_name", demoCaseProfile.caseDisplayName());
+                root.put("study_area_name", demoCaseProfile.studyAreaName());
+            }
             return root;
         }
 
@@ -246,6 +297,10 @@ final class DemoLiveSimulationNarratives {
             ObjectNode root = objectMapper.createObjectNode();
             root.put("text", followUpInvitationText);
             return root;
+        }
+
+        private String shortResultSummary() {
+            return demoCaseProfile == null ? resultReadyText : demoCaseProfile.shortResultSummarySeed();
         }
     }
 }

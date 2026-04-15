@@ -236,39 +236,47 @@ public class SceneProjectionService {
         String rawType = safe(source.getMessageType());
         switch (rawType) {
             case "user_goal" ->
-                    mapped.add(buildSceneMessage(source, normalizeSceneMessageRole(source.getRole()), "conversation", "main_conversation", "goal_parse", normalizeConversationContent(source), false, null));
+                    mapped.add(buildSceneMessage(source, normalizeSceneMessageRole(source.getRole()), "conversation", "main_conversation", "goal_parse", "user_request", normalizeConversationContent(source), false, null));
             case "user_reply", "user_clarification_answer" ->
-                    mapped.add(buildSceneMessage(source, "user", "conversation", "main_conversation", "follow_up", normalizeConversationContent(source), false, null));
+                    mapped.add(buildSceneMessage(source, "user", "conversation", "main_conversation", "follow_up", null, normalizeConversationContent(source), false, null));
             case "assistant_understanding" -> {
-                mapped.add(buildSceneMessage(source, "assistant", "understanding", "main_conversation", "goal_parse_skill_route", buildUnderstandingContent(source), false, null));
+                mapped.add(buildSceneMessage(source, "assistant", "understanding", "main_conversation", "goal_parse_skill_route", "assistant_understanding", buildUnderstandingContent(source), false, null));
                 mapped.add(buildTraceMessage(source, "goal_parse_skill_route"));
             }
+            case "assistant_execution_brief" ->
+                    mapped.add(buildSceneMessage(source, "assistant", "conversation", "main_conversation", "execution_brief", "assistant_execution_brief", buildExecutionBriefContent(source), false, null));
             case "progress_update" -> {
-                mapped.add(buildSceneMessage(source, "assistant", "governance_note", "main_conversation", "validate_submit", buildPreparedAndSubmittedContent(source), false, null));
+                mapped.add(buildSceneMessage(source, "assistant", "governance_note", "main_conversation", "validate_submit", null, buildPreparedAndSubmittedContent(source), false, null));
                 mapped.add(buildTraceMessage(source, "execution"));
             }
+            case "result_ready" ->
+                    mapped.add(buildSceneMessage(source, "system", "result_notice", "main_conversation", "result_ready", "result_ready", buildResultReadyContent(source), false, null));
+            case "assistant_reviewing" ->
+                    mapped.add(buildSceneMessage(source, "assistant", "conversation", "main_conversation", "reviewing_results", "assistant_reviewing", buildReviewingContent(source), false, null));
+            case "assistant_final_explanation" ->
+                    mapped.add(buildSceneMessage(source, "assistant", "result_notice", "main_conversation", "skill_grounded_explanation", "assistant_final_explanation", buildExplanationContent(source), true, null));
             case "result_summary" -> {
-                mapped.add(buildSceneMessage(source, "system", "result_notice", "main_conversation", "result_ready", buildResultReadyContent(source), false, null));
-                mapped.add(buildSceneMessage(source, "assistant", "result_notice", "main_conversation", "skill_grounded_explanation", buildExplanationContent(source), true, null));
+                mapped.add(buildSceneMessage(source, "system", "result_notice", "main_conversation", "result_ready", "result_ready", buildResultReadyContent(source), false, null));
+                mapped.add(buildSceneMessage(source, "assistant", "result_notice", "main_conversation", "skill_grounded_explanation", "assistant_final_explanation", buildExplanationContent(source), true, null));
                 mapped.add(buildTraceMessage(source, "result_extract_summarize"));
             }
             case "next_step_guidance" ->
-                    mapped.add(buildSceneMessage(source, "assistant", "conversation", "main_conversation", "final_response", buildFollowUpInvitationContent(source), false, null));
+                    mapped.add(buildSceneMessage(source, "assistant", "conversation", "main_conversation", "final_response", "assistant_follow_up", buildFollowUpInvitationContent(source), false, null));
             case "waiting_notice", "clarification_request", "missing_input_request" -> {
-                mapped.add(buildSceneMessage(source, "assistant", "waiting_notice", "main_conversation", "waiting_user", normalizeWaitingContent(source), false, null));
+                mapped.add(buildSceneMessage(source, "assistant", "waiting_notice", "main_conversation", "waiting_user", null, normalizeWaitingContent(source), false, null));
                 mapped.add(buildTraceMessage(source, "waiting_user"));
             }
             case "resume_notice", "upload_ack" -> {
-                mapped.add(buildSceneMessage(source, "assistant", "governance_note", "main_conversation", "validate_submit", normalizeGovernanceContent(source), false, null));
+                mapped.add(buildSceneMessage(source, "assistant", "governance_note", "main_conversation", "validate_submit", null, normalizeGovernanceContent(source), false, null));
                 mapped.add(buildTraceMessage(source, "validate_submit"));
             }
             case "failure_explanation" -> {
-                mapped.add(buildSceneMessage(source, "assistant", "governance_note", "main_conversation", "skill_grounded_explanation", normalizeFailureContent(source), false, null));
+                mapped.add(buildSceneMessage(source, "assistant", "governance_note", "main_conversation", "skill_grounded_explanation", null, normalizeFailureContent(source), false, null));
                 mapped.add(buildTraceMessage(source, "skill_grounded_explanation"));
             }
             case "system_note" -> mapped.add(buildTraceMessage(source, "execution"));
             default ->
-                    mapped.add(buildSceneMessage(source, normalizeSceneMessageRole(source.getRole()), "conversation", "main_conversation", null, normalizeConversationContent(source), false, null));
+                    mapped.add(buildSceneMessage(source, normalizeSceneMessageRole(source.getRole()), "conversation", "main_conversation", null, null, normalizeConversationContent(source), false, null));
         }
         return mapped;
     }
@@ -279,6 +287,7 @@ public class SceneProjectionService {
             String messageType,
             String surface,
             String stage,
+            String beatId,
             Map<String, Object> content,
             boolean primaryExplanation,
             Map<String, Object> developerTrace
@@ -290,6 +299,7 @@ public class SceneProjectionService {
         dto.setMessageType(messageType);
         dto.setSurface(surface);
         dto.setStage(stage);
+        dto.setBeatId(beatId);
         dto.setContent(content);
         dto.setCreatedAt(source.getCreatedAt());
         dto.setRelatedTaskId(source.getTaskId());
@@ -312,6 +322,7 @@ public class SceneProjectionService {
                 "governance_note",
                 "developer_trace",
                 stage,
+                null,
                 content,
                 false,
                 buildDeveloperTracePayload(source, stage)
@@ -352,9 +363,31 @@ public class SceneProjectionService {
         return content;
     }
 
+    private Map<String, Object> buildExecutionBriefContent(SessionMessageDto source) {
+        Map<String, Object> content = copyContent(source);
+        if (!hasText(asString(content.get("text")))) {
+            content.put("text", "Before I run it, here's the execution brief for this analysis.");
+        }
+        return content;
+    }
+
     private Map<String, Object> buildResultReadyContent(SessionMessageDto source) {
         Map<String, Object> content = new java.util.LinkedHashMap<>();
         content.put("text", deriveResultReadyText(source));
+        if (source.getContent() != null && hasText(asString(source.getContent().get("summary")))) {
+            content.put("summary", asString(source.getContent().get("summary")));
+        }
+        if (source.getContent() != null && hasText(asString(source.getContent().get("result_object_summary")))) {
+            content.put("result_object_summary", asString(source.getContent().get("result_object_summary")));
+        }
+        return content;
+    }
+
+    private Map<String, Object> buildReviewingContent(SessionMessageDto source) {
+        Map<String, Object> content = copyContent(source);
+        if (!hasText(asString(content.get("text")))) {
+            content.put("text", "I'm reviewing the key findings and management implications.");
+        }
         return content;
     }
 
@@ -478,7 +511,8 @@ public class SceneProjectionService {
             }
             if (Objects.equals(clientRequestId, asString(candidate.getContent().get("client_request_id")))) {
                 String stage = "user_goal".equals(safe(candidate.getMessageType())) ? "goal_parse" : "follow_up";
-                return buildSceneMessage(candidate, "user", "conversation", "main_conversation", stage, normalizeConversationContent(candidate), false, null);
+                String beatId = "user_goal".equals(safe(candidate.getMessageType())) ? "user_request" : null;
+                return buildSceneMessage(candidate, "user", "conversation", "main_conversation", stage, beatId, normalizeConversationContent(candidate), false, null);
             }
         }
         return null;

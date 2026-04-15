@@ -37,6 +37,9 @@ public class DemoLiveSimulationSupportDTO {
     @JsonProperty("demo_reset_required")
     private Boolean demoResetRequired;
 
+    @JsonProperty("run_surface_projection")
+    private RunSurfaceProjectionDTO runSurfaceProjection;
+
     private final List<DemoTraceStageDTO> stages = new ArrayList<>();
 
     public String getDemoNarrativeType() {
@@ -113,6 +116,14 @@ public class DemoLiveSimulationSupportDTO {
 
     public void setDemoResetRequired(Boolean demoResetRequired) {
         this.demoResetRequired = demoResetRequired;
+    }
+
+    public RunSurfaceProjectionDTO getRunSurfaceProjection() {
+        return runSurfaceProjection;
+    }
+
+    public void setRunSurfaceProjection(RunSurfaceProjectionDTO runSurfaceProjection) {
+        this.runSurfaceProjection = runSurfaceProjection;
     }
 
     public List<DemoTraceStageDTO> getStages() {

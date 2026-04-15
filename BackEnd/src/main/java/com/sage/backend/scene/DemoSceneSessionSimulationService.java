@@ -14,6 +14,7 @@ import com.sage.backend.scene.DemoLiveSimulationNarratives.DemoLiveSimulationNar
 import com.sage.backend.scene.dto.DemoLiveSimulationSupportDTO;
 import com.sage.backend.scene.dto.DeveloperTraceSupportDataDTO;
 import com.sage.backend.scene.dto.PostSceneSessionMessageRequest;
+import com.sage.backend.scene.dto.RunSurfaceProjectionDTO;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -40,16 +41,26 @@ public class DemoSceneSessionSimulationService {
     private static final String DEMO_STEP_IDLE = "demo_idle";
     private static final String DEMO_STEP_USER_GOAL_ACCEPTED = "demo_user_goal_accepted";
     private static final String DEMO_STEP_ASSISTANT_UNDERSTANDING_EMITTED = "demo_assistant_understanding_emitted";
-    private static final String DEMO_STEP_PREPARED_VALIDATED_SUBMITTED_EMITTED = "demo_prepared_validated_submitted_emitted";
+    private static final String DEMO_STEP_ASSISTANT_EXECUTION_BRIEF_EMITTED = "demo_assistant_execution_brief_emitted";
+    private static final String DEMO_STEP_RUN_PREPARING = "demo_run_preparing";
+    private static final String DEMO_STEP_RUN_SUBMITTED = "demo_run_submitted";
+    private static final String DEMO_STEP_RUN_RUNNING = "demo_run_running";
     private static final String DEMO_STEP_RESULT_READY_EMITTED = "demo_result_ready_emitted";
+    private static final String DEMO_STEP_ASSISTANT_REVIEWING_EMITTED = "demo_assistant_reviewing_emitted";
+    private static final String DEMO_STEP_ASSISTANT_FINAL_EXPLANATION_EMITTED = "demo_assistant_final_explanation_emitted";
     private static final String DEMO_STEP_FOLLOW_UP_INVITATION_EMITTED = "demo_follow_up_invitation_emitted";
     private static final String DEMO_STEP_COMPLETED = "demo_completed";
     private static final String DEMO_STEP_RUN_STATE_UNAVAILABLE = "demo_run_state_unavailable";
 
     private static final long DEMO_ASSISTANT_UNDERSTANDING_DELAY_MS = 1100L;
-    private static final long DEMO_PREPARED_VALIDATED_SUBMITTED_DELAY_MS = 1800L;
-    private static final long DEMO_RESULT_READY_DELAY_MS = 3300L;
-    private static final long DEMO_FOLLOW_UP_INVITATION_DELAY_MS = 1400L;
+    private static final long DEMO_ASSISTANT_EXECUTION_BRIEF_DELAY_MS = 1000L;
+    private static final long DEMO_RUN_PREPARING_DELAY_MS = 800L;
+    private static final long DEMO_RUN_SUBMITTED_DELAY_MS = 900L;
+    private static final long DEMO_RUN_RUNNING_DELAY_MS = 1200L;
+    private static final long DEMO_RESULT_READY_DELAY_MS = 2600L;
+    private static final long DEMO_ASSISTANT_REVIEWING_DELAY_MS = 900L;
+    private static final long DEMO_ASSISTANT_FINAL_EXPLANATION_DELAY_MS = 1000L;
+    private static final long DEMO_FOLLOW_UP_INVITATION_DELAY_MS = 1100L;
 
     private static final String DEMO_RUN_ACTIVE_MESSAGE =
             "DEMO_LIVE_SIMULATION_ACTIVE: SAGE is already working on this demo analysis. Wait for the current run to finish before replaying.";
@@ -193,7 +204,8 @@ public class DemoSceneSessionSimulationService {
         if (demoRunState != null) {
             demoRunState.copyInto(support);
             support.setDemoNarrativeType(narrative.demoNarrativeType());
-            support.setDemoResetRequired(SessionStatus.READY_RESULT.name().equals(currentSession.getStatus()));
+            support.setDemoResetRequired(!demoRunState.demoRunActive() && SessionStatus.READY_RESULT.name().equals(currentSession.getStatus()));
+            support.setRunSurfaceProjection(buildRunSurfaceProjection(currentSession, narrative, support));
             support.getStages().addAll(DemoLiveSimulationTraceStageFactory.build(currentSession, demoMessages, support, objectMapper, narrative));
             return support;
         }
@@ -208,18 +220,22 @@ public class DemoSceneSessionSimulationService {
         if (SessionStatus.READY_RESULT.name().equals(currentSession.getStatus())) {
             support.setDemoCurrentStep(DEMO_STEP_COMPLETED);
             support.getDemoCompletedSteps().addAll(allDemoCompletedSteps());
+            support.setRunSurfaceProjection(buildRunSurfaceProjection(currentSession, narrative, support));
             support.getStages().addAll(DemoLiveSimulationTraceStageFactory.build(currentSession, demoMessages, support, objectMapper, narrative));
             return support;
         }
 
         if (demoMessages.isEmpty()) {
             support.setDemoCurrentStep(DEMO_STEP_IDLE);
+            support.setRunSurfaceProjection(buildRunSurfaceProjection(currentSession, narrative, support));
             support.getStages().addAll(DemoLiveSimulationTraceStageFactory.build(currentSession, demoMessages, support, objectMapper, narrative));
             return support;
         }
 
         support.setDemoCurrentStep(DEMO_STEP_RUN_STATE_UNAVAILABLE);
         support.getDemoCompletedSteps().add(DEMO_STEP_USER_GOAL_ACCEPTED);
+        support.setDemoResetRequired(true);
+        support.setRunSurfaceProjection(buildRunSurfaceProjection(currentSession, narrative, support));
         support.getStages().addAll(DemoLiveSimulationTraceStageFactory.build(currentSession, demoMessages, support, objectMapper, narrative));
         return support;
     }
@@ -241,30 +257,60 @@ public class DemoSceneSessionSimulationService {
                             buildTaskRef(narrative.liveTaskId()),
                             OffsetDateTime.now(ZoneOffset.UTC)
                     );
-                    scheduleDemoPreparedValidatedSubmitted(narrative, demoRunId);
+                    scheduleDemoAssistantExecutionBrief(narrative, demoRunId);
                 }
         );
     }
 
-    private void scheduleDemoPreparedValidatedSubmitted(DemoLiveSimulationNarrative narrative, String demoRunId) {
+    private void scheduleDemoAssistantExecutionBrief(DemoLiveSimulationNarrative narrative, String demoRunId) {
         scheduleDemoStep(
                 narrative.liveSessionId(),
                 demoRunId,
-                DEMO_STEP_PREPARED_VALIDATED_SUBMITTED_EMITTED,
-                DEMO_PREPARED_VALIDATED_SUBMITTED_DELAY_MS,
+                DEMO_STEP_ASSISTANT_EXECUTION_BRIEF_EMITTED,
+                DEMO_ASSISTANT_EXECUTION_BRIEF_DELAY_MS,
                 () -> {
                     appendMessage(
                             narrative.liveSessionId(),
                             narrative.liveTaskId(),
                             null,
                             "assistant",
-                            "progress_update",
-                            narrative.buildProgressUpdatePayload(objectMapper),
+                            "assistant_execution_brief",
+                            narrative.buildExecutionBriefPayload(objectMapper),
                             buildTaskRef(narrative.liveTaskId()),
                             OffsetDateTime.now(ZoneOffset.UTC)
                     );
-                    scheduleDemoResultReady(narrative, demoRunId);
+                    scheduleDemoRunPreparing(narrative, demoRunId);
                 }
+        );
+    }
+
+    private void scheduleDemoRunPreparing(DemoLiveSimulationNarrative narrative, String demoRunId) {
+        scheduleDemoStep(
+                narrative.liveSessionId(),
+                demoRunId,
+                DEMO_STEP_RUN_PREPARING,
+                DEMO_RUN_PREPARING_DELAY_MS,
+                () -> scheduleDemoRunSubmitted(narrative, demoRunId)
+        );
+    }
+
+    private void scheduleDemoRunSubmitted(DemoLiveSimulationNarrative narrative, String demoRunId) {
+        scheduleDemoStep(
+                narrative.liveSessionId(),
+                demoRunId,
+                DEMO_STEP_RUN_SUBMITTED,
+                DEMO_RUN_SUBMITTED_DELAY_MS,
+                () -> scheduleDemoRunRunning(narrative, demoRunId)
+        );
+    }
+
+    private void scheduleDemoRunRunning(DemoLiveSimulationNarrative narrative, String demoRunId) {
+        scheduleDemoStep(
+                narrative.liveSessionId(),
+                demoRunId,
+                DEMO_STEP_RUN_RUNNING,
+                DEMO_RUN_RUNNING_DELAY_MS,
+                () -> scheduleDemoResultReady(narrative, demoRunId)
         );
     }
 
@@ -280,9 +326,9 @@ public class DemoSceneSessionSimulationService {
                             narrative.liveSessionId(),
                             narrative.replayTaskId(),
                             narrative.replayResultBundleId(),
-                            "assistant",
-                            "result_summary",
-                            narrative.buildResultSummaryPayload(objectMapper),
+                            "system",
+                            "result_ready",
+                            narrative.buildResultReadyPayload(objectMapper),
                             buildResultRef(narrative.replayTaskId(), narrative.replayResultBundleId()),
                             now
                     );
@@ -300,6 +346,50 @@ public class DemoSceneSessionSimulationService {
                                     nonBlank(refreshedSession.getUserGoal(), narrative.defaultUserGoal()),
                                     narrative.replayResultBundleId()
                             ))
+                    );
+                    scheduleDemoAssistantReviewing(narrative, demoRunId);
+                }
+        );
+    }
+
+    private void scheduleDemoAssistantReviewing(DemoLiveSimulationNarrative narrative, String demoRunId) {
+        scheduleDemoStep(
+                narrative.liveSessionId(),
+                demoRunId,
+                DEMO_STEP_ASSISTANT_REVIEWING_EMITTED,
+                DEMO_ASSISTANT_REVIEWING_DELAY_MS,
+                () -> {
+                    appendMessage(
+                            narrative.liveSessionId(),
+                            narrative.replayTaskId(),
+                            narrative.replayResultBundleId(),
+                            "assistant",
+                            "assistant_reviewing",
+                            narrative.buildAssistantReviewingPayload(objectMapper),
+                            buildResultRef(narrative.replayTaskId(), narrative.replayResultBundleId()),
+                            OffsetDateTime.now(ZoneOffset.UTC)
+                    );
+                    scheduleDemoAssistantFinalExplanation(narrative, demoRunId);
+                }
+        );
+    }
+
+    private void scheduleDemoAssistantFinalExplanation(DemoLiveSimulationNarrative narrative, String demoRunId) {
+        scheduleDemoStep(
+                narrative.liveSessionId(),
+                demoRunId,
+                DEMO_STEP_ASSISTANT_FINAL_EXPLANATION_EMITTED,
+                DEMO_ASSISTANT_FINAL_EXPLANATION_DELAY_MS,
+                () -> {
+                    appendMessage(
+                            narrative.liveSessionId(),
+                            narrative.replayTaskId(),
+                            narrative.replayResultBundleId(),
+                            "assistant",
+                            "assistant_final_explanation",
+                            narrative.buildFinalExplanationPayload(objectMapper),
+                            buildResultRef(narrative.replayTaskId(), narrative.replayResultBundleId()),
+                            OffsetDateTime.now(ZoneOffset.UTC)
                     );
                     scheduleDemoFollowUpInvitation(narrative, demoRunId);
                 }
@@ -442,11 +532,79 @@ public class DemoSceneSessionSimulationService {
         List<String> steps = new ArrayList<>();
         steps.add(DEMO_STEP_USER_GOAL_ACCEPTED);
         steps.add(DEMO_STEP_ASSISTANT_UNDERSTANDING_EMITTED);
-        steps.add(DEMO_STEP_PREPARED_VALIDATED_SUBMITTED_EMITTED);
+        steps.add(DEMO_STEP_ASSISTANT_EXECUTION_BRIEF_EMITTED);
+        steps.add(DEMO_STEP_RUN_PREPARING);
+        steps.add(DEMO_STEP_RUN_SUBMITTED);
+        steps.add(DEMO_STEP_RUN_RUNNING);
         steps.add(DEMO_STEP_RESULT_READY_EMITTED);
+        steps.add(DEMO_STEP_ASSISTANT_REVIEWING_EMITTED);
+        steps.add(DEMO_STEP_ASSISTANT_FINAL_EXPLANATION_EMITTED);
         steps.add(DEMO_STEP_FOLLOW_UP_INVITATION_EMITTED);
         steps.add(DEMO_STEP_COMPLETED);
         return steps;
+    }
+
+    private RunSurfaceProjectionDTO buildRunSurfaceProjection(
+            AnalysisSession currentSession,
+            DemoLiveSimulationNarrative narrative,
+            DemoLiveSimulationSupportDTO support
+    ) {
+        RunSurfaceProjectionDTO projection = new RunSurfaceProjectionDTO();
+        String currentStep = support.getDemoCurrentStep();
+        String phase = resolveRunSurfacePhase(currentStep);
+        boolean visible = phase != null;
+
+        projection.setVisible(visible);
+        projection.setPhase(phase);
+        projection.setCompleted("completed".equals(phase));
+        projection.setAuthorityNote("demo_orchestrated_run_surface");
+
+        if (!visible || phase == null) {
+            projection.setLabel(null);
+            projection.setDetail(null);
+            return projection;
+        }
+
+        switch (phase) {
+            case "preparing" -> {
+                projection.setLabel("Preparing");
+                projection.setDetail(narrative.runPreparingDetail());
+            }
+            case "submitted" -> {
+                projection.setLabel("Submitted");
+                projection.setDetail(narrative.runSubmittedDetail());
+            }
+            case "running" -> {
+                projection.setLabel("Running");
+                projection.setDetail(narrative.runRunningDetail());
+            }
+            case "completed" -> {
+                projection.setLabel("Completed");
+                projection.setDetail(narrative.runCompletedDetail());
+            }
+            default -> {
+                projection.setLabel(null);
+                projection.setDetail(null);
+            }
+        }
+        return projection;
+    }
+
+    private String resolveRunSurfacePhase(String currentStep) {
+        if (currentStep == null) {
+            return null;
+        }
+        return switch (currentStep) {
+            case DEMO_STEP_RUN_PREPARING -> "preparing";
+            case DEMO_STEP_RUN_SUBMITTED -> "submitted";
+            case DEMO_STEP_RUN_RUNNING -> "running";
+            case DEMO_STEP_RESULT_READY_EMITTED,
+                    DEMO_STEP_ASSISTANT_REVIEWING_EMITTED,
+                    DEMO_STEP_ASSISTANT_FINAL_EXPLANATION_EMITTED,
+                    DEMO_STEP_FOLLOW_UP_INVITATION_EMITTED,
+                    DEMO_STEP_COMPLETED -> "completed";
+            default -> null;
+        };
     }
 
     private String normalizeUserGoal(String content, DemoLiveSimulationNarrative narrative) {

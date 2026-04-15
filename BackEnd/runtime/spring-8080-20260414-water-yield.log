@@ -35,3 +35,14 @@ This generated password is for development use only. Your security configuration
 2026-04-14T21:57:18.569+08:00  INFO 46332 --- [nio-8080-exec-1] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring DispatcherServlet 'dispatcherServlet'
 2026-04-14T21:57:18.569+08:00  INFO 46332 --- [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Initializing Servlet 'dispatcherServlet'
 2026-04-14T21:57:18.572+08:00  INFO 46332 --- [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Completed initialization in 3 ms
+2026-04-14T23:01:04.495+08:00  WARN 46332 --- [l-1 housekeeper] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Thread starvation or clock leap detected (housekeeper delta=13m5s21ms564?s800ns).
+2026-04-15T03:05:09.073+08:00  WARN 46332 --- [l-1 housekeeper] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Thread starvation or clock leap detected (housekeeper delta=2h49m3s383ms340?s500ns).
+2026-04-15T07:58:25.327+08:00  WARN 46332 --- [l-1 housekeeper] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Thread starvation or clock leap detected (housekeeper delta=4h53m16s260ms294?s700ns).
+2026-04-15T08:08:01.684+08:00  WARN 46332 --- [l-1 housekeeper] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Thread starvation or clock leap detected (housekeeper delta=1m6s212ms308?s300ns).
+[ERROR] Failed to execute goal org.springframework.boot:spring-boot-maven-plugin:3.4.4:run (default-cli) on project backend: Process terminated with exit code: -1 -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoExecutionException

@@ -20,6 +20,9 @@ public class SessionMessageDTO {
 
     private String stage;
 
+    @JsonProperty("beat_id")
+    private String beatId;
+
     private Map<String, Object> content;
 
     @JsonProperty("created_at")
@@ -95,6 +98,14 @@ public class SessionMessageDTO {
 
     public void setStage(String stage) {
         this.stage = stage;
+    }
+
+    public String getBeatId() {
+        return beatId;
+    }
+
+    public void setBeatId(String beatId) {
+        this.beatId = beatId;
     }
 
     public Map<String, Object> getContent() {
