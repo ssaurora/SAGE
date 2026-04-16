@@ -13,10 +13,59 @@ def parse_iso_datetime(value: str):
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
-def seed_annual_water_yield_resources(session: Session, manifest_path: str | None):
-    if session.query(DataResourceRecord).count() > 0:
-        return
+def upsert_resource(session: Session, payload: DataResourceRecord):
+    existing = session.get(DataResourceRecord, payload.id)
+    if existing:
+        for field in (
+            "name",
+            "kind",
+            "format",
+            "storage_uri",
+            "size_bytes",
+            "status",
+            "preview_status",
+            "publish_status",
+            "raster_publish_status",
+            "crs",
+            "bbox",
+            "resolution",
+            "band_count",
+            "width",
+            "height",
+            "dtype",
+            "nodata_value",
+            "preview_url",
+            "publish_url",
+            "cog_uri",
+            "tilejson_url",
+            "tiles_url",
+            "titiler_asset_url",
+            "description",
+            "source_repository",
+            "source_path",
+            "uploaded_at",
+            "updated_at",
+            "last_used_at",
+            "usage_count",
+            "bound_scene_count",
+        ):
+            setattr(existing, field, getattr(payload, field))
+        existing.bindings.clear()
+        for binding in payload.bindings:
+            existing.bindings.append(
+                ResourceBindingRecord(
+                    scene_id=binding.scene_id,
+                    scene_name=binding.scene_name,
+                    role=binding.role,
+                    bound_at=binding.bound_at,
+                )
+            )
+        return existing
+    session.add(payload)
+    return payload
 
+
+def seed_annual_water_yield_resources(session: Session, manifest_path: str | None):
     if not manifest_path:
         return
 
@@ -38,6 +87,7 @@ def seed_annual_water_yield_resources(session: Session, manifest_path: str | Non
             status="ready",
             preview_status="ready" if raster.get("previewAvailable") else "none",
             publish_status="published" if raster.get("publishState") == "published" else "draft",
+            raster_publish_status="published" if raster.get("cogPath") else "draft",
             crs=raster.get("crs"),
             bbox=raster.get("bbox"),
             resolution=None,
@@ -47,6 +97,10 @@ def seed_annual_water_yield_resources(session: Session, manifest_path: str | Non
             dtype=raster.get("dtype"),
             preview_url=raster.get("previewPath"),
             publish_url=raster.get("coveragePath"),
+            cog_uri=raster.get("cogUri") or raster.get("cogPath"),
+            tilejson_url=raster.get("tileJsonUrl"),
+            tiles_url=raster.get("tilesUrl"),
+            titiler_asset_url=raster.get("titilerAssetUrl") or raster.get("cogPath"),
             description=raster.get("description"),
             source_repository=raster.get("sourceRepository"),
             source_path=raster.get("sourcePath"),
@@ -64,7 +118,7 @@ def seed_annual_water_yield_resources(session: Session, manifest_path: str | Non
                 bound_at=published_at,
             )
         )
-        session.add(resource)
+        upsert_resource(session, resource)
 
     for output in manifest.get("outputs", []):
         generated_at = parse_iso_datetime(output["generatedAt"])
@@ -78,6 +132,7 @@ def seed_annual_water_yield_resources(session: Session, manifest_path: str | Non
             status="ready" if output.get("resultAvailable") else "processing",
             preview_status="ready" if output.get("previewPath") else "none",
             publish_status="published" if output.get("context", {}).get("publishState") == "published" else "draft",
+            raster_publish_status="draft",
             crs="EPSG:4326",
             preview_url=output.get("previewPath"),
             publish_url=output.get("previewWebPath"),
@@ -98,6 +153,6 @@ def seed_annual_water_yield_resources(session: Session, manifest_path: str | Non
                 bound_at=generated_at,
             )
         )
-        session.add(resource)
+        upsert_resource(session, resource)
 
     session.commit()

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import quote
 from uuid import uuid4
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, StreamingResponse
-from .database import Base, SessionLocal, engine
+from .database import Base, SessionLocal, engine, ensure_schema_extensions
 from .models import DataResourceRecord, ResourceBindingRecord
 from .schemas import BindResourceRequest, DataResource, DataResourceBinding, DataResourceListResponse
 from .seed import seed_annual_water_yield_resources
@@ -27,10 +28,28 @@ def build_preview_endpoint(resource_id: str):
     return f"{settings.public_api_base.rstrip('/')}/resources/{resource_id}/preview"
 
 
+def build_titiler_urls(asset_url: str):
+    encoded = quote(asset_url, safe="")
+    base = settings.titiler_public_base.rstrip("/")
+    matrix_set = settings.titiler_tile_matrix_set
+    return {
+        "tilejson": f"{base}/cog/{matrix_set}/tilejson.json?url={encoded}",
+        "tiles": f"{base}/cog/tiles/{matrix_set}" + "/{z}/{x}/{y}.png?url=" + encoded,
+    }
+
+
 def to_schema(resource: DataResourceRecord):
     preview_url = resource.preview_url
     if preview_url and not preview_url.startswith("/"):
         preview_url = build_preview_endpoint(resource.id)
+
+    tilejson_url = resource.tilejson_url
+    tiles_url = resource.tiles_url
+    titiler_asset_url = resource.titiler_asset_url or resource.cog_uri
+    if titiler_asset_url and (not tilejson_url or not tiles_url):
+        titiler_urls = build_titiler_urls(titiler_asset_url)
+        tilejson_url = tilejson_url or titiler_urls["tilejson"]
+        tiles_url = tiles_url or titiler_urls["tiles"]
 
     return DataResource(
         id=resource.id,
@@ -53,6 +72,11 @@ def to_schema(resource: DataResourceRecord):
         nodataValue=resource.nodata_value,
         previewUrl=preview_url,
         publishUrl=resource.publish_url,
+        cogUri=resource.cog_uri,
+        tileJsonUrl=tilejson_url,
+        tilesUrl=tiles_url,
+        titilerAssetUrl=titiler_asset_url,
+        rasterPublishStatus=resource.raster_publish_status,
         description=resource.description,
         sourceRepository=resource.source_repository,
         sourcePath=resource.source_path,
@@ -76,6 +100,7 @@ def to_schema(resource: DataResourceRecord):
 @app.on_event("startup")
 def startup():
     Base.metadata.create_all(bind=engine)
+    ensure_schema_extensions()
     ensure_bucket()
     with SessionLocal() as session:
         seed_annual_water_yield_resources(session, settings.seed_manifest_path)
@@ -124,6 +149,7 @@ async def upload_resource(file: UploadFile = File(...)):
             status="uploaded",
             preview_status="none",
             publish_status="draft",
+            raster_publish_status="uploaded",
             source_repository="User upload",
             source_path=file.filename,
         )

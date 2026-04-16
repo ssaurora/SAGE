@@ -5,12 +5,23 @@ from minio import Minio
 from .settings import settings
 
 
+def _normalized_minio_endpoint() -> tuple[str, bool]:
+    endpoint = settings.minio_endpoint.strip()
+    secure = endpoint.startswith("https://")
+    if endpoint.startswith("http://"):
+        endpoint = endpoint.removeprefix("http://")
+    elif endpoint.startswith("https://"):
+        endpoint = endpoint.removeprefix("https://")
+    return endpoint, secure
+
+
 def get_storage_client():
+    endpoint, secure = _normalized_minio_endpoint()
     return Minio(
-        settings.minio_endpoint,
+        endpoint,
         access_key=settings.minio_access_key,
         secret_key=settings.minio_secret_key,
-        secure=False,
+        secure=secure,
     )
 
 
@@ -39,4 +50,3 @@ def get_bytes(object_name: str) -> bytes:
     finally:
         response.close()
         response.release_conn()
-

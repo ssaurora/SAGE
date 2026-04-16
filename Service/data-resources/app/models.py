@@ -35,6 +35,11 @@ class DataResourceRecord(Base):
     nodata_value: Mapped[str | None] = mapped_column(String(64), nullable=True)
     preview_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     publish_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cog_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tilejson_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tiles_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    titiler_asset_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raster_publish_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_repository: Mapped[str | None] = mapped_column(String(255), nullable=True)
     source_path: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -61,4 +66,3 @@ class ResourceBindingRecord(Base):
     bound_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     resource: Mapped[DataResourceRecord] = relationship(back_populates="bindings")
-

@@ -31,6 +31,11 @@ class DataResource(BaseModel):
     nodataValue: str | None = None
     previewUrl: str | None = None
     publishUrl: str | None = None
+    cogUri: str | None = None
+    tileJsonUrl: str | None = None
+    tilesUrl: str | None = None
+    titilerAssetUrl: str | None = None
+    rasterPublishStatus: str | None = None
     description: str | None = None
     sourceRepository: str | None = None
     sourcePath: str | None = None
@@ -50,4 +55,3 @@ class BindResourceRequest(BaseModel):
     sceneId: str
     sceneName: str
     role: str | None = None
-

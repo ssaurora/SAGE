@@ -1,0 +1,9 @@
+fastapi==0.115.12
+uvicorn==0.34.0
+pydantic==2.11.4
+pydantic-settings==2.8.1
+rasterio==1.4.3
+rio-tiler==7.9.5
+morecantile==5.4.2
+titiler.core==0.19.3
+pillow==11.1.0

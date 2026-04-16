@@ -1,74 +1,81 @@
 services:
-  data-resources-postgis:
-    image: postgis/postgis:17-3.5
-    container_name: sage-data-resources-postgis
+  postgis:
+    image: ${DATA_RESOURCES_POSTGIS_IMAGE:-postgis/postgis:17-3.5}
+    container_name: ${DATA_RESOURCES_POSTGIS_CONTAINER:-sage-resource-postgis}
     environment:
-      POSTGRES_DB: sage_resources
-      POSTGRES_USER: sage
-      POSTGRES_PASSWORD: sage
+      POSTGRES_DB: ${DATA_RESOURCES_POSTGIS_DB:-sage_resources}
+      POSTGRES_USER: ${DATA_RESOURCES_POSTGIS_USER:-sage}
+      POSTGRES_PASSWORD: ${DATA_RESOURCES_POSTGIS_PASSWORD:-sage}
     ports:
-      - "5434:5432"
+      - "${DATA_RESOURCES_POSTGIS_PORT:-5434}:5432"
     volumes:
       - data-resources-postgis:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U sage -d sage_resources"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${DATA_RESOURCES_POSTGIS_USER:-sage} -d ${DATA_RESOURCES_POSTGIS_DB:-sage_resources}",
+        ]
       interval: 5s
       timeout: 5s
       retries: 20
 
-  data-resources-minio:
-    image: minio/minio:latest
-    container_name: sage-data-resources-minio
+  minio:
+    image: ${DATA_RESOURCES_MINIO_IMAGE:-minio/minio:latest}
+    container_name: ${DATA_RESOURCES_MINIO_CONTAINER:-sage-resource-minio}
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: sage
-      MINIO_ROOT_PASSWORD: sage-resource-secret
+      MINIO_ROOT_USER: ${DATA_RESOURCES_MINIO_ROOT_USER:-sage}
+      MINIO_ROOT_PASSWORD: ${DATA_RESOURCES_MINIO_ROOT_PASSWORD:-sage-resource-secret}
     ports:
-      - "9100:9000"
-      - "9101:9001"
+      - "${DATA_RESOURCES_MINIO_PORT:-9100}:9000"
+      - "${DATA_RESOURCES_MINIO_CONSOLE_PORT:-9101}:9001"
     volumes:
       - data-resources-minio:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      test: ["CMD-SHELL", "test -f /data/.minio.sys/format.json"]
       interval: 5s
       timeout: 5s
       retries: 20
 
-  data-resources-minio-init:
-    image: minio/mc:latest
-    container_name: sage-data-resources-minio-init
+  minio-init:
+    image: ${DATA_RESOURCES_MINIO_CLIENT_IMAGE:-minio/mc:latest}
+    container_name: ${DATA_RESOURCES_MINIO_INIT_CONTAINER:-sage-resource-minio-init}
     depends_on:
-      data-resources-minio:
+      minio:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-      mc alias set local http://data-resources-minio:9000 sage sage-resource-secret &&
-      mc mb --ignore-existing local/sage-data-resources
+      mc alias set local http://minio:9000 ${DATA_RESOURCES_MINIO_ROOT_USER:-sage} ${DATA_RESOURCES_MINIO_ROOT_PASSWORD:-sage-resource-secret} &&
+      mc mb --ignore-existing local/${DATA_RESOURCES_MINIO_BUCKET:-sage-data-resources}
       "
 
-  data-resources-api:
+  resource-api:
     build:
       context: ./Service/data-resources
-    container_name: sage-data-resources-api
+    container_name: ${DATA_RESOURCES_API_CONTAINER:-sage-resource-api}
     environment:
-      DATA_RESOURCES_DATABASE_URL: postgresql+psycopg://sage:sage@data-resources-postgis:5432/sage_resources
-      DATA_RESOURCES_MINIO_ENDPOINT: data-resources-minio:9000
-      DATA_RESOURCES_MINIO_ACCESS_KEY: sage
-      DATA_RESOURCES_MINIO_SECRET_KEY: sage-resource-secret
-      DATA_RESOURCES_MINIO_BUCKET: sage-data-resources
-      DATA_RESOURCES_PUBLIC_API_BASE: http://localhost:8100
-      DATA_RESOURCES_SEED_MANIFEST_PATH: /seed-assets/annual-water-yield/manifest.json
-      DATA_RESOURCES_CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173
+      DATA_RESOURCES_DATABASE_URL: postgresql+psycopg://${DATA_RESOURCES_POSTGIS_USER:-sage}:${DATA_RESOURCES_POSTGIS_PASSWORD:-sage}@postgis:5432/${DATA_RESOURCES_POSTGIS_DB:-sage_resources}
+      DATA_RESOURCES_MINIO_ENDPOINT: ${DATA_RESOURCES_MINIO_ENDPOINT:-minio:9000}
+      DATA_RESOURCES_MINIO_ACCESS_KEY: ${DATA_RESOURCES_MINIO_ROOT_USER:-sage}
+      DATA_RESOURCES_MINIO_SECRET_KEY: ${DATA_RESOURCES_MINIO_ROOT_PASSWORD:-sage-resource-secret}
+      DATA_RESOURCES_MINIO_BUCKET: ${DATA_RESOURCES_MINIO_BUCKET:-sage-data-resources}
+      DATA_RESOURCES_PUBLIC_API_BASE: ${DATA_RESOURCES_PUBLIC_API_BASE:-http://localhost:8100}
+      DATA_RESOURCES_TITILER_PUBLIC_BASE: ${DATA_RESOURCES_TITILER_PUBLIC_BASE:-http://localhost:8102}
+      DATA_RESOURCES_SEED_MANIFEST_PATH: ${DATA_RESOURCES_SEED_MANIFEST_PATH:-/seed-assets/annual-water-yield/manifest.json}
+      DATA_RESOURCES_COG_PREFIX: ${DATA_RESOURCES_COG_PREFIX:-cogs}
+      DATA_RESOURCES_TITILER_TILE_MATRIX_SET: ${DATA_RESOURCES_TITILER_TILE_MATRIX_SET:-WebMercatorQuad}
+      DATA_RESOURCES_CORS_ORIGINS: ${DATA_RESOURCES_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173}
     ports:
-      - "8100:8000"
+      - "${DATA_RESOURCES_API_PORT:-8100}:8000"
     volumes:
       - ../sage-web/public/gis-assets/annual-water-yield:/seed-assets/annual-water-yield:ro
     depends_on:
-      data-resources-postgis:
+      postgis:
         condition: service_healthy
-      data-resources-minio:
+      minio:
         condition: service_healthy
-      data-resources-minio-init:
+      minio-init:
         condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]
@@ -76,27 +83,54 @@ services:
       timeout: 5s
       retries: 20
 
-  data-resources-worker:
+  resource-worker:
     build:
       context: ./Service/data-resources
-    container_name: sage-data-resources-worker
+    container_name: ${DATA_RESOURCES_WORKER_CONTAINER:-sage-resource-worker}
     command: ["python", "-m", "app.worker"]
     environment:
-      DATA_RESOURCES_DATABASE_URL: postgresql+psycopg://sage:sage@data-resources-postgis:5432/sage_resources
-      DATA_RESOURCES_MINIO_ENDPOINT: data-resources-minio:9000
-      DATA_RESOURCES_MINIO_ACCESS_KEY: sage
-      DATA_RESOURCES_MINIO_SECRET_KEY: sage-resource-secret
-      DATA_RESOURCES_MINIO_BUCKET: sage-data-resources
-      DATA_RESOURCES_PUBLIC_API_BASE: http://localhost:8100
-      DATA_RESOURCES_POLL_INTERVAL_SECONDS: 5
-      DATA_RESOURCES_CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173
+      DATA_RESOURCES_DATABASE_URL: postgresql+psycopg://${DATA_RESOURCES_POSTGIS_USER:-sage}:${DATA_RESOURCES_POSTGIS_PASSWORD:-sage}@postgis:5432/${DATA_RESOURCES_POSTGIS_DB:-sage_resources}
+      DATA_RESOURCES_MINIO_ENDPOINT: ${DATA_RESOURCES_MINIO_ENDPOINT:-minio:9000}
+      DATA_RESOURCES_MINIO_ACCESS_KEY: ${DATA_RESOURCES_MINIO_ROOT_USER:-sage}
+      DATA_RESOURCES_MINIO_SECRET_KEY: ${DATA_RESOURCES_MINIO_ROOT_PASSWORD:-sage-resource-secret}
+      DATA_RESOURCES_MINIO_BUCKET: ${DATA_RESOURCES_MINIO_BUCKET:-sage-data-resources}
+      DATA_RESOURCES_PUBLIC_API_BASE: ${DATA_RESOURCES_PUBLIC_API_BASE:-http://localhost:8100}
+      DATA_RESOURCES_TITILER_PUBLIC_BASE: ${DATA_RESOURCES_TITILER_PUBLIC_BASE:-http://localhost:8102}
+      DATA_RESOURCES_POLL_INTERVAL_SECONDS: ${DATA_RESOURCES_POLL_INTERVAL_SECONDS:-5}
+      DATA_RESOURCES_COG_PREFIX: ${DATA_RESOURCES_COG_PREFIX:-cogs}
+      DATA_RESOURCES_TITILER_TILE_MATRIX_SET: ${DATA_RESOURCES_TITILER_TILE_MATRIX_SET:-WebMercatorQuad}
+      DATA_RESOURCES_CORS_ORIGINS: ${DATA_RESOURCES_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173}
     depends_on:
-      data-resources-postgis:
+      postgis:
         condition: service_healthy
-      data-resources-minio:
+      minio:
         condition: service_healthy
-      data-resources-minio-init:
+      minio-init:
         condition: service_completed_successfully
+
+  titiler:
+    build:
+      context: ./Service/titiler
+    container_name: ${DATA_RESOURCES_TITILER_CONTAINER:-sage-resource-titiler}
+    environment:
+      TITILER_PUBLIC_BASE_URL: ${TITILER_PUBLIC_BASE_URL:-http://localhost:8102}
+      TITILER_TILE_MATRIX_SET: ${TITILER_TILE_MATRIX_SET:-WebMercatorQuad}
+      TITILER_CORS_ORIGINS: ${DATA_RESOURCES_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173}
+      TITILER_MINIO_ENDPOINT: ${TITILER_MINIO_ENDPOINT:-http://minio:9000}
+      TITILER_MINIO_ACCESS_KEY: ${TITILER_MINIO_ACCESS_KEY:-sage}
+      TITILER_MINIO_SECRET_KEY: ${TITILER_MINIO_SECRET_KEY:-sage-resource-secret}
+    ports:
+      - "${DATA_RESOURCES_TITILER_PORT:-8102}:8000"
+    volumes:
+      - ../sage-web/public/gis-assets:/published-assets:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
 volumes:
   data-resources-postgis:
