@@ -1,0 +1,101 @@
+services:
+  data-resources-postgis:
+    image: postgis/postgis:17-3.5
+    container_name: sage-data-resources-postgis
+    environment:
+      POSTGRES_DB: sage_resources
+      POSTGRES_USER: sage
+      POSTGRES_PASSWORD: sage
+    ports:
+      - "5434:5432"
+    volumes:
+      - data-resources-postgis:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sage -d sage_resources"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  data-resources-minio:
+    image: minio/minio:latest
+    container_name: sage-data-resources-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: sage
+      MINIO_ROOT_PASSWORD: sage-resource-secret
+    ports:
+      - "9100:9000"
+      - "9101:9001"
+    volumes:
+      - data-resources-minio:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  data-resources-minio-init:
+    image: minio/mc:latest
+    container_name: sage-data-resources-minio-init
+    depends_on:
+      data-resources-minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://data-resources-minio:9000 sage sage-resource-secret &&
+      mc mb --ignore-existing local/sage-data-resources
+      "
+
+  data-resources-api:
+    build:
+      context: ./Service/data-resources
+    container_name: sage-data-resources-api
+    environment:
+      DATA_RESOURCES_DATABASE_URL: postgresql+psycopg://sage:sage@data-resources-postgis:5432/sage_resources
+      DATA_RESOURCES_MINIO_ENDPOINT: data-resources-minio:9000
+      DATA_RESOURCES_MINIO_ACCESS_KEY: sage
+      DATA_RESOURCES_MINIO_SECRET_KEY: sage-resource-secret
+      DATA_RESOURCES_MINIO_BUCKET: sage-data-resources
+      DATA_RESOURCES_PUBLIC_API_BASE: http://localhost:8100
+      DATA_RESOURCES_SEED_MANIFEST_PATH: /seed-assets/annual-water-yield/manifest.json
+    ports:
+      - "8100:8000"
+    volumes:
+      - ../sage-web/public/gis-assets/annual-water-yield:/seed-assets/annual-water-yield:ro
+    depends_on:
+      data-resources-postgis:
+        condition: service_healthy
+      data-resources-minio:
+        condition: service_healthy
+      data-resources-minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  data-resources-worker:
+    build:
+      context: ./Service/data-resources
+    container_name: sage-data-resources-worker
+    command: ["python", "-m", "app.worker"]
+    environment:
+      DATA_RESOURCES_DATABASE_URL: postgresql+psycopg://sage:sage@data-resources-postgis:5432/sage_resources
+      DATA_RESOURCES_MINIO_ENDPOINT: data-resources-minio:9000
+      DATA_RESOURCES_MINIO_ACCESS_KEY: sage
+      DATA_RESOURCES_MINIO_SECRET_KEY: sage-resource-secret
+      DATA_RESOURCES_MINIO_BUCKET: sage-data-resources
+      DATA_RESOURCES_PUBLIC_API_BASE: http://localhost:8100
+      DATA_RESOURCES_POLL_INTERVAL_SECONDS: 5
+    depends_on:
+      data-resources-postgis:
+        condition: service_healthy
+      data-resources-minio:
+        condition: service_healthy
+      data-resources-minio-init:
+        condition: service_completed_successfully
+
+volumes:
+  data-resources-postgis:
+  data-resources-minio:
