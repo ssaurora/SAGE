@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     public_api_base: str = Field(default="http://localhost:8100", alias="DATA_RESOURCES_PUBLIC_API_BASE")
     seed_manifest_path: str | None = Field(default=None, alias="DATA_RESOURCES_SEED_MANIFEST_PATH")
     poll_interval_seconds: int = Field(default=5, alias="DATA_RESOURCES_POLL_INTERVAL_SECONDS")
+    cors_origins: str = Field(
+        default="http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173",
+        alias="DATA_RESOURCES_CORS_ORIGINS",
+    )
 
     class Config:
         populate_by_name = True
@@ -18,3 +22,6 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
+
+def get_cors_origins() -> list[str]:
+    return [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]

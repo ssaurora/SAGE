@@ -9,14 +9,14 @@ from .database import Base, SessionLocal, engine
 from .models import DataResourceRecord, ResourceBindingRecord
 from .schemas import BindResourceRequest, DataResource, DataResourceBinding, DataResourceListResponse
 from .seed import seed_annual_water_yield_resources
-from .settings import settings
+from .settings import get_cors_origins, settings
 from .storage import ensure_bucket, get_bytes, put_bytes
 
 app = FastAPI(title="SAGE Data Resources API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=get_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

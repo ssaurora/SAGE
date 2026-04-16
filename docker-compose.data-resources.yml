@@ -58,6 +58,7 @@ services:
       DATA_RESOURCES_MINIO_BUCKET: sage-data-resources
       DATA_RESOURCES_PUBLIC_API_BASE: http://localhost:8100
       DATA_RESOURCES_SEED_MANIFEST_PATH: /seed-assets/annual-water-yield/manifest.json
+      DATA_RESOURCES_CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173
     ports:
       - "8100:8000"
     volumes:
@@ -88,6 +89,7 @@ services:
       DATA_RESOURCES_MINIO_BUCKET: sage-data-resources
       DATA_RESOURCES_PUBLIC_API_BASE: http://localhost:8100
       DATA_RESOURCES_POLL_INTERVAL_SECONDS: 5
+      DATA_RESOURCES_CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173
     depends_on:
       data-resources-postgis:
         condition: service_healthy
