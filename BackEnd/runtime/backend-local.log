@@ -1,0 +1,97 @@
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] --------------------------< com.sage:backend >--------------------------
+[INFO] Building sage-backend 0.0.1-SNAPSHOT
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] >>> spring-boot-maven-plugin:3.4.4:run (default-cli) > test-compile @ backend >>>
+[INFO] 
+[INFO] --- maven-resources-plugin:3.3.1:resources (default-resources) @ backend ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] Copying 22 resources from src\main\resources to target\classes
+[INFO] 
+[INFO] --- maven-compiler-plugin:3.13.0:compile (default-compile) @ backend ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- maven-resources-plugin:3.3.1:testResources (default-testResources) @ backend ---
+[INFO] skip non existing resourceDirectory E:\Github\SAGE-ALL\SAGE\BackEnd\src\test\resources
+[INFO] 
+[INFO] --- maven-compiler-plugin:3.13.0:testCompile (default-testCompile) @ backend ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] <<< spring-boot-maven-plugin:3.4.4:run (default-cli) < test-compile @ backend <<<
+[INFO] 
+[INFO] 
+[INFO] --- spring-boot-maven-plugin:3.4.4:run (default-cli) @ backend ---
+[INFO] Attaching agents: []
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v3.4.4)
+
+2026-04-17T14:35:26.252+08:00  INFO 34968 --- [           main] c.sage.backend.SageBackendApplication    : Starting SageBackendApplication using Java 17.0.12 with PID 34968 (E:\Github\SAGE-ALL\SAGE\BackEnd\target\classes started by t in E:\Github\SAGE-ALL\SAGE\BackEnd)
+2026-04-17T14:35:26.258+08:00  INFO 34968 --- [           main] c.sage.backend.SageBackendApplication    : No active profile set, falling back to 1 default profile: "default"
+2026-04-17T14:35:28.552+08:00  INFO 34968 --- [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 8080 (http)
+2026-04-17T14:35:28.569+08:00  INFO 34968 --- [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-04-17T14:35:28.570+08:00  INFO 34968 --- [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/10.1.39]
+2026-04-17T14:35:28.652+08:00  INFO 34968 --- [           main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+2026-04-17T14:35:28.655+08:00  INFO 34968 --- [           main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 2300 ms
+2026-04-17T14:35:29.155+08:00  INFO 34968 --- [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-04-17T14:35:29.435+08:00  INFO 34968 --- [           main] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection org.postgresql.jdbc.PgConnection@2b9aeedb
+2026-04-17T14:35:29.440+08:00  INFO 34968 --- [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2026-04-17T14:35:29.484+08:00  INFO 34968 --- [           main] org.flywaydb.core.FlywayExecutor         : Database: jdbc:postgresql://localhost:5432/sage (PostgreSQL 18.2)
+2026-04-17T14:35:29.503+08:00  WARN 34968 --- [           main] o.f.c.internal.database.base.Database    : Flyway upgrade recommended: PostgreSQL 18.2 is newer than this version of Flyway and support has not been tested. The latest supported version of PostgreSQL is 17.
+2026-04-17T14:35:29.842+08:00  INFO 34968 --- [           main] o.f.c.i.s.JdbcTableSchemaHistory         : Schema history table "public"."flyway_schema_history" does not exist yet
+2026-04-17T14:35:29.848+08:00  INFO 34968 --- [           main] o.f.core.internal.command.DbValidate     : Successfully validated 22 migrations (execution time 00:00.325s)
+2026-04-17T14:35:29.884+08:00  INFO 34968 --- [           main] o.f.c.i.s.JdbcTableSchemaHistory         : Creating Schema History table "public"."flyway_schema_history" ...
+2026-04-17T14:35:30.028+08:00  INFO 34968 --- [           main] o.f.core.internal.command.DbMigrate      : Current version of schema "public": << Empty Schema >>
+2026-04-17T14:35:30.044+08:00  INFO 34968 --- [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "1 - user and auth"
+2026-04-17T14:35:30.099+08:00  INFO 34968 --- [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "2 - task core tables"
+2026-04-17T14:35:30.142+08:00  INFO 34968 --- [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "3 - week2 input chain"
+2026-04-17T14:35:30.149+08:00  INFO 34968 --- [           main] o.f.c.i.s.DefaultSqlScriptExecutor       : DB: 关系 "task_state" 的 约束"chk_task_state_input_chain_status" 不存在
+2026-04-17T14:35:30.163+08:00  INFO 34968 --- [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "4 - week3 execution chain"
+2026-04-17T14:35:30.174+08:00  INFO 34968 --- [           main] o.f.c.i.s.DefaultSqlScriptExecutor       : DB: 关系 "task_state" 的 约束"uq_task_state_job_id" 不存在
+2026-04-17T14:35:30.194+08:00  INFO 34968 --- [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "5 - week4 result and cancel"
+2026-04-17T14:35:30.216+08:00  INFO 34968 --- [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "6 - week5 repair loop"
+2026-04-17T14:35:30.222+08:00  INFO 34968 --- [           main] o.f.c.i.s.DefaultSqlScriptExecutor       : DB: 关系 "job_record" 的 约束"uq_job_record_task_attempt" 不存在
+2026-04-17T14:35:30.267+08:00  INFO 34968 --- [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "7 - phase0 analysis manifest"
+2026-04-17T14:35:30.285+08:00  INFO 34968 --- [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "8 - phase0 goal route"
+2026-04-17T14:35:30.301+08:00  INFO 34968 --- [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "9 - week6 stability and traceability"
+2026-04-17T14:35:30.372+08:00  INFO 34968 --- [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "10 - phase2b governance baseline"
+2026-04-17T14:35:30.386+08:00  INFO 34968 --- [           main] o.f.c.i.s.DefaultSqlScriptExecutor       : DB: 关系 "analysis_manifest" 的 约束"chk_analysis_manifest_freeze_status" 不存在
+2026-04-17T14:35:30.399+08:00  INFO 34968 --- [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "11 - phase3 real case provider seed"
+2026-04-17T14:35:30.411+08:00  INFO 34968 --- [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "12 - phase3a cognition verdict"
+2026-04-17T14:35:30.421+08:00  INFO 34968 --- [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "13 - phase3b manifest catalog summary"
+2026-04-17T14:35:30.429+08:00  INFO 34968 --- [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "14 - phase3c task catalog snapshot"
+2026-04-17T14:35:30.449+08:00  INFO 34968 --- [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "15 - phase3c manifest contract summary"
+2026-04-17T14:35:30.463+08:00  INFO 34968 --- [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "16 - session collaboration layer"
+2026-04-17T14:35:30.559+08:00  INFO 34968 --- [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "17 - demo scene projection seed"
+2026-04-17T14:35:30.621+08:00  INFO 34968 --- [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "18 - demo session message seed"
+2026-04-17T14:35:30.638+08:00  INFO 34968 --- [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "19 - urban cooling live session seed"
+2026-04-17T14:35:30.652+08:00  INFO 34968 --- [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "20 - water yield live session seed"
+2026-04-17T14:35:30.662+08:00  INFO 34968 --- [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "21 - session message type water yield beats"
+2026-04-17T14:35:30.672+08:00  INFO 34968 --- [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "22 - session message type run submitted notice"
+2026-04-17T14:35:30.690+08:00  INFO 34968 --- [           main] o.f.core.internal.command.DbMigrate      : Successfully applied 22 migrations to schema "public", now at version v22 (execution time 00:00.414s)
+2026-04-17T14:35:31.597+08:00  WARN 34968 --- [           main] .s.s.UserDetailsServiceAutoConfiguration : 
+
+Using generated security password: 66d78dc6-d186-4abe-bc84-1b305ae2c7c5
+
+This generated password is for development use only. Your security configuration must be updated before running your application in production.
+
+2026-04-17T14:35:31.609+08:00  INFO 34968 --- [           main] r$InitializeUserDetailsManagerConfigurer : Global AuthenticationManager configured with UserDetailsService bean with name inMemoryUserDetailsManager
+2026-04-17T14:35:32.025+08:00  INFO 34968 --- [           main] o.s.b.a.e.web.EndpointLinksResolver      : Exposing 2 endpoints beneath base path '/actuator'
+2026-04-17T14:35:32.436+08:00  INFO 34968 --- [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port 8080 (http) with context path '/'
+2026-04-17T14:35:32.461+08:00  INFO 34968 --- [           main] c.sage.backend.SageBackendApplication    : Started SageBackendApplication in 6.876 seconds (process running for 7.309)
+2026-04-17T14:36:40.023+08:00  INFO 34968 --- [nio-8080-exec-1] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-04-17T14:36:40.024+08:00  INFO 34968 --- [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Initializing Servlet 'dispatcherServlet'
+2026-04-17T14:36:40.027+08:00  INFO 34968 --- [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Completed initialization in 3 ms
+2026-04-17T16:13:07.441+08:00  WARN 34968 --- [l-1 housekeeper] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Thread starvation or clock leap detected (housekeeper delta=30m44s583ms675?s200ns).
+2026-04-17T16:49:36.018+08:00  WARN 34968 --- [l-1 housekeeper] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Thread starvation or clock leap detected (housekeeper delta=14m49s743ms64?s200ns).
+2026-04-17T17:04:57.068+08:00  WARN 34968 --- [l-1 housekeeper] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Thread starvation or clock leap detected (housekeeper delta=15m27s795ms698?s900ns).
+2026-04-18T12:42:36.019+08:00  WARN 34968 --- [l-1 housekeeper] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Thread starvation or clock leap detected (housekeeper delta=18h36m4s425ms115?s800ns).
+2026-04-18T16:50:10.422+08:00  WARN 34968 --- [l-1 housekeeper] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Thread starvation or clock leap detected (housekeeper delta=4h5m32s965ms151?s800ns).
