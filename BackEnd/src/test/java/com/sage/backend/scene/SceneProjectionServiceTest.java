@@ -239,6 +239,7 @@ class SceneProjectionServiceTest {
         private final SceneProjectionQueryService queryService = mock(SceneProjectionQueryService.class);
         private final SessionService sessionService = mock(SessionService.class);
         private final TaskService taskService = mock(TaskService.class);
-        private final SceneProjectionService service = new SceneProjectionService(queryService, sessionService, taskService);
+        private final DemoSceneSessionSimulationService demoSceneSessionSimulationService = mock(DemoSceneSessionSimulationService.class);
+        private final SceneProjectionService service = new SceneProjectionService(queryService, sessionService, taskService, demoSceneSessionSimulationService);
     }
 }
